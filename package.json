@@ -1,0 +1,31 @@
+{
+  "name": "mjolnir",
+  "version": "1.0.0",
+  "description": "Nostr NIP-46 signing device",
+  "main": "dist/app.js",
+  "type": "module",
+  "scripts": {
+    "build": "tsx scripts/build.ts",
+    "dev": "tsx scripts/dev.ts"
+  },
+  "keywords": [
+    "nostr",
+    "pwa"
+  ],
+  "author": "Christopher Scott",
+  "license": "MIT",
+  "dependencies": {
+    "nostr-tools": "^2.3.5",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  },
+  "devDependencies": {
+    "@types/react": "^18.2.55",
+    "@types/react-dom": "^18.2.19",
+    "concurrently": "^8.2.2",
+    "esbuild": "^0.25.4",
+    "serve": "^14.2.1",
+    "tsx": "^4.7.0",
+    "typescript": "^5.3.3"
+  }
+}
