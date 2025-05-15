@@ -1,5 +1,5 @@
 {
-  "name": "mjolnir",
+  "name": "igloo-pwa",
   "version": "1.0.0",
   "description": "Nostr NIP-46 signing device",
   "main": "dist/app.js",
@@ -21,6 +21,7 @@
     "react-dom": "^18.2.0"
   },
   "devDependencies": {
+    "@types/node": "^22.15.18",
     "@types/react": "^18.3.21",
     "@types/react-dom": "^18.2.19",
     "concurrently": "^8.2.2",

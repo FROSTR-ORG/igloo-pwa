@@ -1,5 +1,5 @@
-// import { LogStore }     from '@/stores/logs.js'
-import { MESSAGE_TYPE } from '@/const.js'
+// import { LogStore }     from '../stores/logs.js'
+import { MESSAGE_TYPE } from '../const.js'
 
 import {
   useEffect,
@@ -7,7 +7,9 @@ import {
   useRef
 } from 'react'
 
-import type { LogEntry } from '@/types/console.js'
+import type { LogEntry } from '../types/console.js'
+
+import '../styles/Console.css'
 
 export default function Console() {
   // State for logs
@@ -50,7 +52,7 @@ export default function Console() {
   }
 
   return (
-    <div className="container">
+    <div className="console-container">
       <h2 className="section-header">Event Console</h2>
       <p className="description">Monitor events from your bifrost node.</p>
       
@@ -62,11 +64,11 @@ export default function Console() {
           <div className="console-empty">No events logged yet</div>
         ) : (
           logs.map((log, idx) => (
-            <div key={idx} className={`console-entry console-${log.type}`}>
+            <div key={idx} className={`console-entry`}>
               <span className="console-timestamp">
                 {new Date(log.timestamp).toLocaleTimeString()}
               </span>
-              <span className="console-message">{log.message}</span>
+              <span className={`console-message console-${log.type}`}>{log.message}</span>
             </div>
           ))
         )}
@@ -74,7 +76,7 @@ export default function Console() {
       
       <div className="console-controls">
         <button className="button" onClick={clear_handler}>Clear Console</button>
-        <button className="button button-reset" onClick={reset_handler}>Reset Node</button>
+        <button className="button button-danger" onClick={reset_handler}>Reset Node</button>
       </div>
     </div>
   );

@@ -1,7 +1,7 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 
-import App from './App.jsx'
+import App from './App.js'
 import './styles/global.css'
 
 // Register service worker

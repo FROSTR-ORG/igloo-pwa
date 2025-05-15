@@ -1,5 +1,6 @@
 import fs           from 'fs'
 import * as esbuild from 'esbuild'
+import path         from 'path'
 
 type Loader = 'js' | 'jsx' | 'ts' | 'tsx' | 'css' | 'json' | 'text' | 'base64' | 'dataurl' | 'file' | 'binary'
 
@@ -12,6 +13,8 @@ interface BuildOptions {
   outfile?     : string
   format?      : 'esm' | 'iife'
   loader?      : { [ext: string]: Loader }
+  alias?       : { [pkg: string]: string }
+  resolveExtensions?: string[]
 }
 
 async function build(): Promise<void> {
@@ -26,6 +29,10 @@ async function build(): Promise<void> {
     minify    : !watch,
     sourcemap : watch,
     target    : ['chrome58', 'firefox57', 'safari11', 'edge18'],
+    alias     : {
+      '@': path.resolve('src')
+    },
+    resolveExtensions: ['.tsx', '.ts', '.jsx', '.js', '.css', '.json']
   }
 
   // Build app
@@ -36,7 +43,12 @@ async function build(): Promise<void> {
     format      : 'esm',
     loader      : {
       '.tsx' : 'tsx',
-      '.ts  ': 'ts',
+      '.ts'  : 'ts',
+      '.css' : 'css',
+      '.png' : 'file',
+      '.jpg' : 'file',
+      '.svg' : 'file',
+      '.gif' : 'file',
     },
   }
 
@@ -52,9 +64,38 @@ async function build(): Promise<void> {
     },
   }
 
+  // Additional plugins for CSS processing
+  const cssPlugin = {
+    name: 'css',
+    setup(build) {
+      build.onResolve({ filter: /\.css$/ }, args => {
+        // Handle CSS imports
+        const filePath = path.resolve(args.resolveDir, args.path)
+        return { path: filePath, namespace: 'css-ns' }
+      })
+
+      build.onLoad({ filter: /.*/, namespace: 'css-ns' }, async (args) => {
+        // Load and inject CSS
+        const css = await fs.promises.readFile(args.path, 'utf8')
+        const escaped = css.replace(/`/g, '\\`').replace(/\$/g, '\\$')
+        const contents = `
+          const style = document.createElement('style')
+          style.type = 'text/css'
+          style.appendChild(document.createTextNode(\`${escaped}\`))
+          document.head.appendChild(style)
+        `
+        return { contents, loader: 'js' }
+      })
+    }
+  }
+
   if (watch) {
     // Use context API for watch mode
-    const appContext = await esbuild.context(appBuildOptions)
+    const appContext = await esbuild.context({
+      ...appBuildOptions,
+      plugins: [cssPlugin]
+    })
+    
     const swContext  = await esbuild.context(swBuildOptions)
     
     await Promise.all([
@@ -66,7 +107,10 @@ async function build(): Promise<void> {
   } else {
     // One-time build
     await Promise.all([
-      esbuild.build(appBuildOptions),
+      esbuild.build({
+        ...appBuildOptions,
+        plugins: [cssPlugin]
+      }),
       esbuild.build(swBuildOptions)
     ])
     
