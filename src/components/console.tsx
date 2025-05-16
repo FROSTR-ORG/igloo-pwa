@@ -9,7 +9,7 @@ import {
 
 import type { LogEntry } from '../types/console.js'
 
-import '../styles/Console.css'
+import '../styles/console.css'
 
 export default function Console() {
   // State for logs
