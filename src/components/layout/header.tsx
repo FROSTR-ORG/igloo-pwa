@@ -1,22 +1,22 @@
 export function Header () {
   return (
     <div className="page-header">
-      {/* <img
-        src="assets/nip46-icon.png" 
-        alt="NIP-46 Logo" 
-        className="nip46-logo"
-      /> */}
+      <img
+        src="/icons/logo.png" 
+        alt="Frost Logo" 
+        className="frost-logo"
+      />
       <div className="title-container">
-        <h1>NIP-46 Web Demo</h1>
+        <h1>FROSTR Web</h1>
       </div>
-      <p>NIP-46 Web Demo</p>
-      {/* <a 
-        href="" 
+      <p>Enterprise security for the individual.</p>
+      <a 
+        href="https://frostr.org" 
         target="_blank" 
         rel="noopener noreferrer"
       >
-        
-      </a> */}
+        https://frostr.org
+      </a>
       <div className="alpha-pill alpha-pill-standalone">alpha edition</div>
     </div>
   )

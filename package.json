@@ -6,7 +6,9 @@
   "type": "module",
   "scripts": {
     "build": "tsx scripts/build.ts",
-    "dev": "tsx scripts/dev.ts"
+    "dev": "tsx scripts/dev.ts",
+    "keygen": "tsx scripts/keygen.ts",
+    "relay": "tsx scripts/relay.ts"
   },
   "keywords": [
     "nostr",

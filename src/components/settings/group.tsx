@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useBifrostStore }     from '@/hooks/useBifrostStore.js'
 import { QRScanner }           from '@/components/util/scanner.js'
 
 import {
@@ -7,8 +8,6 @@ import {
 } from '@frostr/bifrost/encoder'
 
 import type { GroupPackage } from '@frostr/bifrost'
-
-import { useBifrostStore } from '@/hooks/useBifrostStore.js'
 
 export function GroupConfig() {
   const store = useBifrostStore()
@@ -23,7 +22,7 @@ export function GroupConfig() {
   /**
    * Handle the update of the store.
    */
-  const update_group = (input : string) => {
+  const update = (input : string) => {
     // If an error exists, do not update the group.
     if (error !== null) return
     // If the input is empty,
@@ -112,7 +111,7 @@ export function GroupConfig() {
             </button>
             <button
               className={`button action-button ${saved ? 'saved-button' : ''}`} 
-              onClick={() => update_group(input)}
+              onClick={() => update(input)}
               disabled={!is_group_changed(input, store.data.group) || error !== null}
             >
               {saved ? 'Saved' : 'Save'}

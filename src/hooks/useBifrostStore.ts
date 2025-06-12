@@ -5,6 +5,8 @@ import type { BifrostStore } from '@/types/index.js'
 
 import SYMBOLS from '@/symbols.json' assert { type: 'json' }
 
+const ACTIONS = SYMBOLS.STORE.BIFROST
+
 const DEFAULT_STORE : BifrostStore = {
   group  : null,
   peers  : [],
@@ -17,15 +19,15 @@ export function useBifrostStore () {
   const [ data, setStore ]     = useState<BifrostStore>(DEFAULT_STORE)
 
   const reset = () => {
-    request({ topic : SYMBOLS.STORE.BIFROST.RESET })
+    request({ topic : ACTIONS.RESET })
   }
 
   const update = (data : Partial<BifrostStore>) => {
-    request({ topic : SYMBOLS.STORE.BIFROST.UPDATE, params : data })
+    request({ topic : ACTIONS.UPDATE, params : data })
   }
 
   useEffect(() => {
-    const unsub = subscribe<BifrostStore> (SYMBOLS.STORE.BIFROST.EVENT, (message) => {
+    const unsub = subscribe<BifrostStore> (ACTIONS.EVENT, (message) => {
       setStore(message.payload)
     })
 
