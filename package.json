@@ -15,8 +15,11 @@
   "author": "Christopher Scott",
   "license": "MIT",
   "dependencies": {
-    "@frostr/bifrost": "^1.0.0",
+    "@cmdcode/buff": "^2.2.5",
+    "@cmdcode/nostr-connect": "^0.0.1",
+    "@frostr/bifrost": "^1.0.7",
     "nostr-tools": "^2.3.5",
+    "qr-scanner": "^1.4.2",
     "react": "^18.2.0",
     "react-dom": "^18.2.0"
   },

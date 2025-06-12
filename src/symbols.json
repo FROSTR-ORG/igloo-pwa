@@ -1,0 +1,37 @@
+{
+  "CLIENT": {
+    "BIFROST" : {
+      "PING"   : "client.bifrost.ping",
+      "UNLOCK" : "client.bifrost.unlock",
+      "RESET"  : "client.bifrost.reset",
+      "STATUS" : "client.bifrost.status"
+    },
+    "SESSION": {
+      "CANCEL"   : "client.session.cancel",
+      "EVENT"    : "client.session.event",
+      "REGISTER" : "client.session.register",
+      "REVOKE"   : "client.session.revoke",
+      "UPDATE"   : "client.session.update"
+    }
+  },
+  "LOG": {
+    "EVENT" : "log.event",
+    "CLEAR" : "log.clear"
+  },
+  "REQUEST": {
+    "EVENT" : "request.event",
+    "REPLY" : "request.reply"
+  },
+  "STORE": {
+    "BIFROST" : {
+      "EVENT"  : "store.bifrost.event",
+      "RESET"  : "store.bifrost.reset",
+      "UPDATE" : "store.bifrost.update"
+    },
+    "SESSION": {
+      "EVENT"  : "store.session.event",
+      "RESET"  : "store.session.reset",
+      "UPDATE" : "store.session.update"
+    }
+  }
+}

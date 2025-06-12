@@ -1,8 +1,14 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
+import { App }        from '@/components/app.js'
 
-import App from './App.js'
 import './styles/global.css'
+import './styles/layout.css'
+import './styles/node.css'
+import './styles/console.css'
+import './styles/sessions.css'
+import './styles/settings.css'
+import './styles/scanner.css'
 
 // Register service worker
 if ('serviceWorker' in navigator) {

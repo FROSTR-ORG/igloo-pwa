@@ -6,7 +6,7 @@ let db : IDBDatabase | null = null
 
 const SUB_MAP = new Map<string, Set<StoreCallback>>()
 
-export namespace Database {
+export namespace DBController {
   export const open = openDB
   export const save = saveDB
   export const load = loadDB

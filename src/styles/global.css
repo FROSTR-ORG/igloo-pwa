@@ -1,8 +1,20 @@
-/* global.css - Master Stylesheet for Frostr Chrome Extension */
-/* Generated: March 06, 2025 */
+/* global.css - Master Stylesheet NIP-46 Web Demo */
+
+/* ========================================================================= */
+/* CSS Custom Properties - Variables */
+
+:root {
+  --text-secondary: #a3aed6;
+}
 
 /* ========================================================================= */
 /* Base Styles - Foundation of the Design System */
+
+#root {
+  max-width: 100vw;
+  /* margin: 0 auto; /* Removed to prevent overall centering of the root container */
+}
+
 body {
   margin: 0;
   padding: 0;
@@ -52,6 +64,7 @@ h1, h2, h3, h4, h5, h6 { color: #d8d8d8; margin-top: 0; }
 
 .pill { display: inline-block; background: rgba(74, 144, 226, 0.2); color: #4a90e2; border-radius: 30px; padding: 3px 10px; font-size: 12px; margin-left: 6px; vertical-align: middle; }
 .alpha-pill { background: rgba(227, 92, 92, 0.2); color: #e84545; border-radius: 12px; padding: 3px 10px; font-size: 10px; margin-left: 8px; }
+.alpha-pill-standalone { margin-left: 0; }
 
 .frost-logo { width: 80px; height: 80px; margin-bottom: 1rem; transition: all 0.3s ease; filter: drop-shadow(0 0 5px rgba(74, 144, 226, 0.3)); }
 .frost-logo:hover { filter: drop-shadow(0 0 8px rgba(74, 144, 226, 0.6)); transform: scale(1.05); }
@@ -69,7 +82,7 @@ pre.code-display {
   border: 1px solid rgba(100, 140, 210, 0.3);
 }
 
-.error-text { color: #e74c3c; }
+.error-text { color: #e74c3c; } /* Base error text color, component-specific overrides in respective files */
 .toast-text { color: #5ce24a; }
 
 .input-group { display: flex; align-items: center; margin-bottom: 15px; }
@@ -150,9 +163,6 @@ input[type="checkbox"] { margin-right: 10px; width: 16px; height: 16px; accent-c
 .m-2 { margin: 1rem; }
 .m-3 { margin: 1.5rem; }
 .w-100 { width: 100%; }
-.w-75 { width: 75%; }
-.w-50 { width: 50%; }
-.w-25 { width: 25%; }
 
 .status-ok { color: #00b894; }
 .status-warning { color: #fdcb6e; }
@@ -169,96 +179,25 @@ input[type="checkbox"] { margin-right: 10px; width: 16px; height: 16px; accent-c
 .divider { height: 1px; background: rgba(255, 255, 255, 0.1); margin: 15px 0; }
 .fade { opacity: 0.7; }
 
-.alert { padding: 10px 15px; border-radius: 4px; margin-bottom: 15px; }
-.alert-info { background: rgba(52, 152, 219, 0.2); border: 1px solid rgba(52, 152, 219, 0.3); }
-.alert-warning { background: rgba(243, 156, 18, 0.2); border: 1px solid rgba(243, 156, 18, 0.3); }
-.alert-error { background: rgba(231, 76, 60, 0.2); border: 1px solid rgba(231, 76, 60, 0.3); }
-.alert-success { background: rgba(46, 204, 113, 0.2); border: 1px solid rgba(46, 204, 113, 0.3); }
-
 /* Icon and Navigation Alignment Fix */
-/* Remove the problematic code first */
-
-/* Add a targeted icon alignment fix that works with the existing structure */
-.tab-button,
 .button {
   display: inline-flex;
   align-items: center;
   gap: 6px;
 }
 
-/* Ensure SVG icons align properly with text */
-.tab-button svg,
 .button svg {
   flex-shrink: 0;
   position: relative;
   top: 0;
 }
 
-/* Fix alignment in tabs navigation */
-.tabs-navigation {
-  display: flex;
-  align-items: center;
-}
-
-/* Ensure tabs have proper alignment */
-.tab-button {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-}
-
-/* Make sure button text is properly aligned */
-.button span,
-.tab-button span {
+.button span {
   display: inline-block;
   vertical-align: middle;
 }
 
-/* Responsive Navigation for Options page */
-@media (max-width: 720px) {
-  /* Make tabs stack vertically (icon above text) */
-  .tabs-navigation {
-    width: 100%;
-    justify-content: center;
-  }
-  
-  .tab-button {
-    flex-direction: column;
-    padding: 8px 12px;
-    gap: 4px;
-    text-align: center;
-    align-items: center;
-    justify-content: center;
-  }
-  
-  .tab-button svg {
-    margin: 0 auto 4px;
-    display: block;
-  }
-  
-  .tab-button span {
-    font-size: 12px;
-    text-align: center;
-    display: block;
-    width: 100%;
-  }
-  
-  /* Center the tabs in the navigation bar */
-  .tabs-nav-wrapper {
-    display: flex;
-    justify-content: center;
-  }
-  
-  /* Add more room for the stacked text */
-  .tabs-container {
-    padding-bottom: 10px;
-  }
-  
-  /* Ensure the content adjusts properly */
-  .tab-content {
-    padding-top: 10px;
-  }
-}
+/* Tab button styles are defined in layout.css */
 
 /* Table styles - Global enhancements for all tables */
 table {
@@ -316,6 +255,16 @@ tr:hover:not(thead tr) {
     min-width: 100%;
     table-layout: fixed;
   }
+}
+
+/* Pubkey cell styles - used across components */
+.pubkey-cell {
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: monospace;
+  font-size: 12px;
 }
 
 /* Text overflow handling for all tables */
@@ -458,4 +407,83 @@ td.checkbox-cell {
   .utxo-section table td:first-child {
     width: 50%;
   }
+}
+
+th, td {
+  padding: 6px 8px;
+}
+
+.refresh-cell {
+  padding-left: 4px !important;
+  padding-right: 4px !important;
+  text-align: center;
+}
+
+/* Peers Table Specific Styles */
+.peers-table {
+  table-layout: fixed;
+  width: 100%;
+}
+
+.peers-table th,
+.peers-table td {
+  padding: 2px 4px;
+}
+
+/* First column - Peer address */
+.peers-table th:nth-child(1),
+.peers-table td:nth-child(1) {
+  width: 220px;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Second column - Status */
+.peers-table th:nth-child(2),
+.peers-table td:nth-child(2) {
+  width: 30px;
+  max-width: 60px;
+  text-align: center;
+}
+
+/* Third column - Refresh button */
+.peers-table th:nth-child(3),
+.peers-table td:nth-child(3),
+.peers-table .refresh-cell {
+  width: 30px;
+  max-width: 44px;
+  padding: 2px;
+  text-align: center;
+}
+
+.status-indicator {
+  display: inline-block;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 0.9em;
+  font-weight: 500;
+  text-transform: capitalize;
+  margin: 0;
+}
+
+.status-indicator.online {
+  background: #00b894;
+  color: #fff;
+}
+
+.status-indicator.offline {
+  background: #e74c3c;
+  color: #fff;
+}
+
+.status-indicator.stopped {
+  background: #666;
+  color: #fff;
+}
+
+.status-indicator.locked {
+  background: #fdcb6e;
+  color: #000;
 }
