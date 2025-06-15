@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react'
-import { useBifrostStore }     from '@/hooks/useBifrostStore.js'
+import { useSettings }         from '@/hooks/useSettings.js'
 
-import type { GroupPackage, PeerConfig } from '@frostr/bifrost'
+import type { PeerConfig } from '@frostr/bifrost'
 
 export function PeerConfig() {
-  const store = useBifrostStore()
+  const store = useSettings()
 
   const [ peers, setPeers ]     = useState<PeerConfig[]>([])
   const [ changes, setChanges ] = useState<boolean>(false)
@@ -38,28 +38,16 @@ export function PeerConfig() {
     setPeers(store.data.peers)
   }, [ store.data.peers ])
 
-  // useEffect(() => {
-  //   const { share, group, peers } = store.data
-  //   if (share && group && peers.length === 0) {
-  //     const new_peers = init_peer_permissions(group, share.idx)
-  //     setPeers(new_peers)
-  //     store.update({ peers : new_peers })
-  //   } else if (!share || !group) {
-  //     setPeers([])
-  //     store.update({ peers : [] })
-  //   }
-  // }, [ store.data.share, store.data.group ])
-
   return (
     <div className="container">
       <h2 className="section-header">Peer Connections</h2>
       <p className="description">Configure how you communicate with other peers in your signing group. "Request" will send signature requests to that peer, and "Respond" will co-sign requests from that peer.</p>
 
-      {peers === null &&
+      {peers.length === 0 &&
         <p className="description">You must configure your node's credentials first.</p>
       }
       
-      {peers !== null &&
+      {peers.length > 0 &&
         <div>
           <table>
             <thead>
@@ -116,19 +104,4 @@ export function PeerConfig() {
       }
     </div>
   )
-}
-
-/**
- * Initialize the peer permissions.
- */
-function init_peer_permissions (
-  group    : GroupPackage,
-  self_idx : number
-) : PeerConfig[] {
-  return group.commits
-    .filter((commit) => commit.idx !== self_idx)
-    .map(commit => ({
-      pubkey : commit.pubkey.slice(2),
-      policy : { send : false, recv : true }
-    }))
 }

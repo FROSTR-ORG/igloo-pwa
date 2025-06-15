@@ -14,7 +14,7 @@ const SIGN_METHODS : Record<string, string> = {
   nip44_decrypt : 'nip44_decrypt'
 }
 
-export class BifrostSigner implements SignerDeviceAPI {
+export class BifrostSignDevice implements SignerDeviceAPI {
   private _node : BifrostNode
 
   constructor (node : BifrostNode) {

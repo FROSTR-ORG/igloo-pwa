@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useBifrostStore }     from '@/hooks/useBifrostStore.js'
+import { useSettings }     from '@/hooks/useSettings.js'
 import { QRScanner }           from '@/components/util/scanner.js'
 
 import {
@@ -10,7 +10,7 @@ import {
 import type { GroupPackage } from '@frostr/bifrost'
 
 export function GroupConfig() {
-  const store = useBifrostStore()
+  const store = useSettings()
 
   const [ input, setInput ] = useState<string>('')
   const [ error, setError ] = useState<string | null>(null)

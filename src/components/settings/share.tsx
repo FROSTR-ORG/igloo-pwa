@@ -1,60 +1,89 @@
 import { useEffect, useState } from 'react'
 import { QRScanner }           from '@/components/util/scanner.js'
-import { useBifrostStore }     from '@/hooks/useBifrostStore.js'
+import { useSettings }         from '@/hooks/useSettings.js'
+import { decode_share }        from '@/lib/encoder.js'
 
-import {
-  decode_share_pkg,
-  encode_share_pkg
-} from '@frostr/bifrost/encoder'
-
-import type { SharePackage } from '@frostr/bifrost'
+import { decrypt_secret, encrypt_secret } from '@/lib/crypto.js'
+import { get_pubkey } from '@frostr/bifrost/util'
 
 export function ShareConfig() {
-  const store = useBifrostStore()
+  const store = useSettings()
+  const share = store.data.share
 
   const [ input, setInput ] = useState<string>('')
   const [ error, setError ] = useState<string | null>(null)
   const [ show, setShow   ] = useState<boolean>(false)
   const [ saved, setSaved ] = useState<boolean>(false)
+
+  const [ password,   setPassword   ] = useState<string>('')
   const [ isScanning, setIsScanning ] = useState<boolean>(false)
+
+  const decrypt = () => {
+    const decrypted = decrypt_secret(input, password)
+    if (!decrypted) {
+      setError('failed to decrypt secret share')
+      return
+    }
+    if (!is_share_string(decrypted)) {
+      setError('decrypted secret share is invalid')
+      return
+    }
+    setInput(decrypted)
+  }
 
   /**
    * Handle the update of the store.
    */
-  const update_share = () => {
+  const update = () => {
     // If an error exists, do not update the group.
     if (error !== null) return
     // If the input is empty,
     if (input === '') {
-      store.update({ share : null })
-    } else {
-      try {
-        // Parse the input into a group package.
-        const share = decode_share_pkg(input)
-
-        // If the credentials package is invalid, return.
-        if (share === null) return
-        // Update the credentials in the store.
-        store.update({ share })
-      } catch (err) {
-        console.log(err)
-        setError('failed to decode package data')
-      }
+      // Update the store and return.
+      store.update({ pubkey : null, share : null })
+      return
+    }
+    // If the input has invalid characters,
+    if (!is_share_string(input)) {
+      // Set an error and return.
+      setError('invalid share string')
+      return
+    }
+    // If the password is empty,
+    if (password.length < 8) {
+      // Set an error and return.
+      setError('password must be at least 8 characters')
+      return
+    }
+    // Parse the input into a group package.
+    const share = decode_share(input)
+    // If the credentials package is invalid,
+    if (share == null) {
+      // Set an error and return.
+      setError('failed to decode secret share')
+      return
+    }
+    // Get the public key from the secret key.
+    const pubkey = get_pubkey(share.seckey, 'ecdsa')
+    // Update the credentials in the store.
+    const encrypted = encrypt_secret(input, password)
+    // If encryption fails,
+    if (!encrypted) {
+      // Set an error and return.
+      setError('failed to encrypt secret share')
+      return
     }
     // Set the saved state, and reset it after a short delay.
+    store.update({ pubkey, share : encrypted })
     setSaved(true)
     setTimeout(() => setSaved(false), 1500)
   }
 
   useEffect(() => {
-    try {
-      if (store.data.share !== null) {
-        setInput(get_share_str(store.data.share))
-      } else {
-        setInput('')
-      }
-    } catch {
+    if (store.data.share === null) {
       setInput('')
+    } else {
+      setInput(store.data.share)
     }
   }, [ store.data.share ])
 
@@ -62,27 +91,11 @@ export function ShareConfig() {
    * Handle the validation of the input when it changes.
    */
   useEffect(() => {
-    // If the input is empty, clear the error.
-    if (input === '') {
+    // Once the input changes, clear any errors from submission.
+    if (error !== null) {
       setError(null)
-    } else if (!input.startsWith('bfshare')) {
-      // If the input does not start with "bfshare", set an error.
-      setError('input must start with "bfshare"')
-    } else if (!is_share_string(input)) {
-      // If the input contains invalid characters, set an error.
-      setError('input contains invalid characters')
-    } else {
-      // Parse the input into a credential package.
-      const pkg = get_share_pkg(input)
-      // If the credential package is valid, clear the error.
-      if (pkg !== null) {
-        setError(null)
-      } else {
-        // If the credential package is invalid, set an error.
-        setError('failed to decode package data')
-      }
     }
-  }, [ input ])
+  }, [ input, password ])
 
   return (
     <div className="container">
@@ -96,12 +109,25 @@ export function ShareConfig() {
             onChange={e => setInput(e.target.value.trim())}
             placeholder="bfshare..."
           />
+          <input
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder="enter a password to encrypt your share"
+            className="nsec-input flex-input"
+          />
           <div className="input-actions">
             <button 
               className="button"
               onClick={() => setShow(!show)}
             >
               {show ? 'hide' : 'show'}
+            </button>
+            <button 
+              className="button"
+              onClick={() => decrypt()}
+            >
+              decrypt
             </button>
             <button
               className="button"
@@ -111,10 +137,10 @@ export function ShareConfig() {
             </button>
             <button
               className={`button action-button ${saved ? 'saved-button' : ''}`} 
-              onClick={update_share}
-              disabled={!is_share_changed(input, store.data.share) || error !== null}
+              onClick={update}
+              disabled={input === share || error !== null}
             >
-              {saved ? 'Saved' : 'Save'}
+              {saved ? 'saved' : 'save'}
             </button>
           </div>
         </div>
@@ -133,7 +159,7 @@ export function ShareConfig() {
         
         {input !== '' && error === null && show && (
           <pre className="code-display">
-            {get_share_json(input) ?? 'invalid share package'}
+            {get_share_json(input) ?? 'share package is encrypted or invalid'}
           </pre>
         )}
         <div className="notification-container">
@@ -152,54 +178,12 @@ function is_share_string(input : string) {
 }
 
 /**
- * Check if the input has changed and is valid.
- */
-function is_share_changed (
-  input : string,
-  share : SharePackage | null
-) {
-  if (share === null) {
-    return input !== ''
-  } else {
-    // Encode the existing share to a string.
-    const share_str = get_share_str(share)
-    // Determine if the share input has changed and is valid.
-    return input !== share_str
-  }
-}
-
-/**
- * Get the share string from the package.
- */
-function get_share_str (share : SharePackage) {
-  try {
-    return (share !== null)
-      ? encode_share_pkg(share)
-      : ''
-  } catch {
-    return ''
-  }
-}
-
-/**
- * Get the share package from the input.
- */
-function get_share_pkg (input : string) {
-  try {
-    return (input !== '')
-      ? decode_share_pkg(input)
-      : null
-  } catch {
-    return null
-  }
-}
-
-/**
  * Get the share JSON from the input.
  */
 function get_share_json(input : string) {
   try {
-    const share = decode_share_pkg(input)
+    const share = decode_share(input)
+    if (share === null) return null
     return JSON.stringify(share, null, 2)
   } catch (err) {
     return null

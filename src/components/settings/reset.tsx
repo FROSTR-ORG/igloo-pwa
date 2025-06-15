@@ -1,7 +1,7 @@
-import { useBifrostStore } from '@/hooks/useBifrostStore.js'
+import { useSettings } from '@/hooks/useSettings.js'
 
 export function ResetStore() {
-  const store = useBifrostStore()
+  const store = useSettings()
 
   // Update the peer policies in the store.
   const reset = () => {

@@ -1,33 +1,19 @@
-import { useState }       from 'react'
-import { nip19 }          from 'nostr-tools'
-import { useBifrostNode } from '@/hooks/useBifrostNode.js'
-
-function truncateNpub(npub: string) {
-  if (npub.length <= 27) return npub
-  return npub.slice(0, 12) + '...' + npub.slice(-12)
-}
-
-function truncateHex(hex: string) {
-  if (hex.length <= 27) return hex
-  return hex.slice(0, 12) + '...' + hex.slice(-12)
-}
+import { useState }  from 'react'
+import { nip19 }     from 'nostr-tools'
+import { useClient } from '@/hooks/useClient.js'
 
 export function NodeInfo () {
-  const node = useBifrostNode()
+  const client = useClient()
+  const pubkey = client.data.pubkey
+  const status = client.data.status
 
   const [ password, setPassword ]       = useState('')
   const [ error, setError ]             = useState<string | null>(null)
   const [ showHex, setShowHex ]         = useState(false)
   const [ copySuccess, setCopySuccess ] = useState(false)
 
-  const npub = node.info?.pubkey
-    ? nip19.npubEncode(node.info.pubkey)
-    : 'unknown'
-
-  const hex = node.info?.pubkey || 'unknown'
-
   const handleCopy = async () => {
-    const valueToCopy = showHex ? hex : npub
+    const valueToCopy = get_npub(pubkey, showHex)
     try {
       await navigator.clipboard.writeText(valueToCopy)
       setCopySuccess(true)
@@ -43,17 +29,18 @@ export function NodeInfo () {
       setError('Password is required')
       return
     }
-    try {
-      node.unlock(password)
+    const res = await client.unlock(password)
+    if (!res.ok) {
+      setError(res.error)
+      return
+    } else {
       setError(null)
       setPassword('')
-    } catch (err) {
-      setError('Invalid password')
     }
   }
 
   // If client is locked, show locked state
-  if (node.info?.status === 'locked') {
+  if (status === 'locked') {
     return (
       <div className="dashboard-container">
         <h2 className="section-header">Node Info</h2>
@@ -89,33 +76,50 @@ export function NodeInfo () {
       <h2 className="section-header">Node Info</h2>
       <div className="node-inline-row locked">
         <span className="node-label">Status</span>
-        <span className={`status-pill ${node.info?.status}`}>{node.info?.status}</span>
+        <span className={`status-pill ${status}`}>{status}</span>
       </div>
       <div className="node-inline-row">
         <span className="node-label">Pubkey</span>
-        <div className="pubkey-container">
-          <span 
-            className="node-npub" 
-            onClick={() => setShowHex(!showHex)}
-            title={`Click to show ${showHex ? 'npub' : 'hex'} format`}
-          >
-            {showHex ? truncateHex(hex) : truncateNpub(npub)}
-          </span>
-          <button
-            onClick={handleCopy}
-            className={`button button-small copy-button ${copySuccess ? 'copied' : ''}`}
-            title="Copy to clipboard"
-          >
-            {copySuccess ? '✓' : '📋'}
-          </button>
-        </div>
+        { pubkey === null && <pre>no pubkey set</pre>}
+        {pubkey !== null &&
+          <div className="pubkey-container">
+            <span 
+              className="node-npub" 
+              onClick={() => setShowHex(!showHex)}
+              title={`Click to show ${showHex ? 'npub' : 'hex'} format`}
+            >
+              { truncate(get_npub(pubkey, showHex))}
+            </span>
+            <button
+              onClick={handleCopy}
+              className={`button button-small copy-button ${copySuccess ? 'copied' : ''}`}
+              title="Copy to clipboard"
+            >
+              {copySuccess ? '✓' : '📋'}
+            </button>
+          </div>
+        }
       </div>
       <button 
         className="button"
-        onClick={() => node.reset()}
+        onClick={() => client.reset()}
       >
         Reset Node
       </button>
     </div>
   )
+}
+
+function get_npub (
+  pubkey  : string | null,
+  showHex : boolean
+) {
+  if (pubkey === null) return ''
+  if (showHex)         return pubkey
+  return nip19.npubEncode(pubkey)
+}
+
+function truncate (str: string) {
+  if (str.length <= 27) return str
+  return str.slice(0, 12) + '...' + str.slice(-12)
 }

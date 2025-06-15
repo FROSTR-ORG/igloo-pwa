@@ -1,8 +1,7 @@
-import { useState } from 'react'
-import { Console }  from '@/components/dash/console.js'
-import { NodeInfo } from '@/components/dash/node.js'
-import { Sessions } from '@/components/sessions/sessions.js'
-import { Settings } from '@/components/settings/index.js'
+import { useState }  from 'react'
+import { Dashboard } from '@/components/dash/index.js'
+import { Sessions }  from '@/components/sessions/index.js'
+import { Settings }  from '@/components/settings/index.js'
 
 import type { ReactElement } from 'react'
 
@@ -45,8 +44,7 @@ export function Tabs(): ReactElement {
       <div className="tab-content">
         {activeTab === 'dashboard' && (
           <div className="tab-panel">
-            <NodeInfo />
-            <Console />
+            <Dashboard />
           </div>
         )}
 

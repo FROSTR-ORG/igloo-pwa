@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react'
-import { useBifrostStore }     from '@/hooks/useBifrostStore.js'
+import { useSettings }         from '@/hooks/useSettings.js'
 
 import type { RelayPolicy } from '@/types/index.js'
 
 export function RelayConfig() {
-  const store = useBifrostStore()
+  const store = useSettings()
 
-  const [ relays, setRelays ]   = useState<RelayPolicy[]>(store.data.relays)
+  const [ relays, setRelays ]   = useState<RelayPolicy[]>(store.data.relays ?? [])
   const [ relayUrl, setUrl ]    = useState('')
   const [ changes, setChanges ] = useState<boolean>(false)
   const [ error, setError ]     = useState<string | null>(null)
@@ -64,7 +64,7 @@ export function RelayConfig() {
   }, [ relayUrl ])
 
   useEffect(() => {
-    setRelays(store.data.relays)
+    setRelays(store.data.relays ?? [])
   }, [ store.data.relays ])
   
   return (

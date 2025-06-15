@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react'
-import { useMessageBus }       from '@/hooks/useMessageBus.js'
+import { useMessage }          from '@/hooks/useMessage.js'
 
 import type { LogEntry } from '@/types/index.js'
 
 import SYMBOLS from '@/symbols.json' assert { type: 'json' }
 
 export function useLogger () {
-  const { request, subscribe } = useMessageBus()
+  const { request, subscribe } = useMessage()
   const [ entries, setLogs ]   = useState<LogEntry[]>([])
 
   const clear = () => {

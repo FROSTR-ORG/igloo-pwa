@@ -1,18 +1,11 @@
 {
   "CLIENT": {
-    "BIFROST" : {
-      "PING"   : "client.bifrost.ping",
-      "UNLOCK" : "client.bifrost.unlock",
-      "RESET"  : "client.bifrost.reset",
-      "STATUS" : "client.bifrost.status"
-    },
-    "SESSION": {
-      "CANCEL"   : "client.session.cancel",
-      "EVENT"    : "client.session.event",
-      "REGISTER" : "client.session.register",
-      "REVOKE"   : "client.session.revoke",
-      "UPDATE"   : "client.session.update"
-    }
+    "ECHO"   : "client.echo",
+    "EVENT"  : "client.event",
+    "FETCH"  : "client.fetch",
+    "PING"   : "client.ping",
+    "RESET"  : "client.reset",
+    "UNLOCK" : "client.unlock"
   },
   "LOG": {
     "EVENT" : "log.event",
@@ -22,16 +15,27 @@
     "EVENT" : "request.event",
     "REPLY" : "request.reply"
   },
+  "SESSION": {
+    "CANCEL"   : "session.cancel",
+    "EVENT"    : "session.event",
+    "FETCH"    : "session.fetch",
+    "CONNECT"  : "session.connect",
+    "RESET"    : "session.reset",
+    "REVOKE"   : "session.revoke",
+    "UPDATE"   : "session.update"
+  },
   "STORE": {
-    "BIFROST" : {
-      "EVENT"  : "store.bifrost.event",
-      "RESET"  : "store.bifrost.reset",
-      "UPDATE" : "store.bifrost.update"
-    },
-    "SESSION": {
-      "EVENT"  : "store.session.event",
-      "RESET"  : "store.session.reset",
-      "UPDATE" : "store.session.update"
-    }
+    "EVENT"  : "store.event",
+    "FETCH"  : "store.fetch",
+    "RESET"  : "store.reset",
+    "UPDATE" : "store.update"
+  },
+  "TOPICS": {
+    "CLIENT" : "client",
+    "LOG"    : "log",
+    "PEER"   : "peer",
+    "REQUEST": "request",
+    "SESSION": "session",
+    "STORE"  : "store"
   }
 }

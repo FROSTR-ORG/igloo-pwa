@@ -1,12 +1,11 @@
-export type MessageType = 'request' | 'response' | 'event'
+export type MessageType = 'request' | 'accept' | 'reject' | 'event'
 
 export type MessageEnvelope = RequestMessage | ResponseMessage | EventMessage
-export type MessageHandler<T = unknown>  = (message: EventMessage<T>) => void | Promise<void>
 export type ResponseMessage<T = unknown> = AcceptMessage<T> | RejectMessage
+export type MessageHandler <T = unknown> = (message: EventMessage<T>) => void | Promise<void>
 
-export type RequestTemplate  = Omit<RequestMessage, 'id' | 'type'>
-export type ResponseTemplate = Omit<ResponseMessage, 'type'>
-export type EventTemplate    = Omit<EventMessage, 'id' | 'type'>
+export type RequestTemplate = Omit<RequestMessage, 'id' | 'type'>
+export type EventTemplate   = Omit<EventMessage, 'id' | 'type'>
 
 export interface SubscriptionFilter {
   id?    : string
@@ -20,31 +19,30 @@ export interface PendingResponse<T = unknown> {
   timeoutId : number
 }
 
-export interface BaseMessage {
-  id : string
-}
-
-export interface RequestMessage extends BaseMessage {
-  params? : unknown
-  topic   : string
-  type    : 'request'
-}
-
-export interface AcceptMessage<T = unknown> extends BaseMessage {
-  ok     : true
-  result : T
-  type   : 'response'
-}
-
-export interface RejectMessage extends BaseMessage {
-  ok    : false
-  error : string
-  type  : 'response'
-}
-
-export interface EventMessage<T = unknown> extends BaseMessage {
+export interface EventMessage<T = unknown> {
+  id      : string
   payload : T
   topic   : string
   type    : 'event'
 }
- 
+
+export interface RequestMessage<T = unknown> {
+  id      : string
+  params? : T
+  topic   : string
+  type    : 'request'
+}
+
+export interface AcceptMessage<T = unknown> {
+  id     : string
+  ok     : true
+  result : T
+  type   : 'accept'
+}
+
+export interface RejectMessage {
+  id    : string
+  ok    : false
+  error : string
+  type  : 'reject'
+}

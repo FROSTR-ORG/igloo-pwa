@@ -1,19 +1,13 @@
 import { useState, useEffect } from 'react'
 import { ConnectToken }        from '@cmdcode/nostr-connect'
-import { useSessionClient }    from '@/hooks/useSessionClient.js'
+import { useSession }          from '@/hooks/useSession.js'
 import { PermissionsDropdown } from '@/components/sessions/permissions.js'
 
 import type { PermissionMap } from '@cmdcode/nostr-connect'
 import type { SessionStore }  from '@/types/index.js'
 
-const DEFAULT_STORE : SessionStore = {
-  active  : [],
-  pending : [],
-  relays  : []
-}
-
 export function Sessions() {
-  const client = useSessionClient()
+  const client = useSession()
 
   const [ connectStr, setConnectStr ] = useState('')
   const [ error, setError           ] = useState<string | null>(null)
@@ -22,11 +16,11 @@ export function Sessions() {
   const [ newKind, setNewKind       ] = useState<Record<string, string>>({})
   const [ copied, setCopied         ] = useState<string | null>(null)
 
-  const register = async () => {
+  const connect = async () => {
     try {
       setError(null)
       const token = ConnectToken.decode(connectStr)
-      client.register(token)
+      client.connect(token)
       setConnectStr('')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to activate session')
@@ -48,7 +42,7 @@ export function Sessions() {
     } else {
       newExpanded.add(pubkey)
       // Initialize editing state with current permissions
-      const session = [ ...client.store.active ].find(s => s.pubkey === pubkey)
+      const session = [ ...client.data.active ].find(s => s.pubkey === pubkey)
       if (session) {
         setEditing(prev => ({
           ...prev,
@@ -72,7 +66,7 @@ export function Sessions() {
 
   const handleUpdateSession = async (pubkey: string) => {
     try {
-      const session = [ ...client.store.active ].find(s => s.pubkey === pubkey)
+      const session = [ ...client.data.active ].find(s => s.pubkey === pubkey)
       if (!session) return
 
       const updatedSession = {
@@ -109,8 +103,8 @@ export function Sessions() {
 
   // Combine active and pending sessions
   const allSessions = [
-    ...client.store.active.map(s  => ({ ...s, status: 'active'  as const  })),
-    ...client.store.pending.map(s => ({ ...s, status: 'pending' as const }))
+    ...client.data.active.map(s  => ({ ...s, status: 'active'  as const  })),
+    ...client.data.pending.map(s => ({ ...s, status: 'pending' as const }))
   ]
 
   return (
@@ -221,7 +215,7 @@ export function Sessions() {
             className="session-input"
           />
           <button
-            onClick={register}
+            onClick={connect}
             className="session-btn-primary"
           >
             Connect

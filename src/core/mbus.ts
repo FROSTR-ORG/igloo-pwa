@@ -18,12 +18,10 @@ import type {
 declare const self: ServiceWorkerGlobalScope
 
 export namespace MessageBus {
-  export const send    = send_event_message
-  export const request = send_request_message
-  export const respond = {
-    accept : send_accept_message,
-    reject : send_reject_message
-  }
+  export const send      = send_event_message
+  export const request   = send_request_message
+  export const respond   = send_response_message
+  export const reject    = send_reject_message
   export const subscribe = subscribe_to_filter
 }
 
@@ -32,18 +30,18 @@ function send_event_message (template : EventTemplate) {
   send_message({ ...template, id : generate_id(), type : 'event' })
 }
 
-function send_accept_message <T = unknown> (
+function send_response_message <T = unknown> (
   id     : string, 
   result : T
 ) {
-  send_message({ id, ok : true, result, type : 'response' })
+  send_message({ id, ok : true, result, type : 'accept' })
 }
 
 function send_reject_message (
   id    : string,
   error : string
 ) {
-  send_message({ id, ok : false, error, type : 'response' })
+  send_message({ id, ok : false, error, type : 'reject' })
 }
 
 async function send_request_message (template: RequestTemplate) {
@@ -100,11 +98,14 @@ async function subscribe_to_filter (
 async function send_message (message : MessageEnvelope) {
   // Log the message.
   console.log('[ sw/bus ] sending message:', JSON.stringify(message, null, 2))
-  // Get all clients.
+  
+  // First, dispatch the message internally to service worker subscriptions
+  const event = new MessageEvent('message', { data: message })
+  self.dispatchEvent(event)
+  
+  // Then, broadcast to all clients
   const clients = await self.clients.matchAll()
-  // Broadcast the message to all clients.
   for (const client of clients) {
-    // Post the message to the client.
     client.postMessage(message)
   }
 }

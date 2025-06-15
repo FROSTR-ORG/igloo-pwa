@@ -5,6 +5,7 @@ import { Assert }      from '@/util/assert.js'
 
 import {
   generate_id,
+  is_response_message,
   parse_message
 } from '@/lib/message.js'
 
@@ -16,7 +17,7 @@ import type {
   EventMessage
 } from '@/types/index.js'
 
-export function useMessageBus() {
+export function useMessage() {
   const [ isReady, setIsReady ] = useState(false)
 
   const subscribeRef = useRef(new Map<string, Set<MessageHandler>>())
@@ -28,22 +29,18 @@ export function useMessageBus() {
     // If the message has no id or is not in the pending map, return.
     if (!id || !pendingRef.current.has(id)) return
     // Unpack the pending response.
-    const { resolve, reject, timeoutId } = pendingRef.current.get(id)!
+    const { resolve, timeoutId } = pendingRef.current.get(id)!
     // Delete the pending response.
     pendingRef.current.delete(id)
     // Clear the timeout.
     clearTimeout(timeoutId)
-    // If the message is an error, reject the promise.
-    if (message.ok) {
-      resolve(message)
-    } else {
-      reject(message.error || 'unknown error')
-    }
+    // Resolve the message.
+    resolve(message)
   }, [])
 
   const notify_subscribers = useCallback(<T = unknown> (message: EventMessage<T>) : void => {
-    // Get the listeners for the message type.
-    const subscribers = subscribeRef.current.get(message.type)
+    // Get the listeners for the message topic (not type!).
+    const subscribers = subscribeRef.current.get(message.topic)
     // If there are no listeners, return.
     if (!subscribers) return
     // Notify the listeners.
@@ -54,7 +51,7 @@ export function useMessageBus() {
     // Unpack the message.
     const message = parse_message(event.data)
     // If the message is invalid,
-    if (message && message.type === 'response') {
+    if (message && is_response_message(message)) {
       // Handle the response.
       handle_response(message)
     } else if (message && message.type === 'event') {
