@@ -1,6 +1,9 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { App }        from '@/components/app.js'
+import * as CONST     from '@/const.js'
+
+import { create_request_message } from '@/lib/message.js'
 
 import './styles/global.css'
 import './styles/layout.css'
@@ -14,12 +17,34 @@ import './styles/scanner.css'
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', async () => {
     try {
-      const registration = await navigator.serviceWorker.register('/sw.js', {
-        scope: '/'
+      // Configure the service worker options.
+      const options = { scope: '/' }
+      // Register the service worker.
+      const worker  = await navigator.serviceWorker.register('/sw.js', options)
+      // If the worker is not active, throw an error.
+      if (!worker.active) throw new Error('[ app ] worker returned null')
+      // Create the initialization message.
+      const msg = create_request_message({ topic: 'init' })
+      // Send initialization message to service worker.
+      worker.active.postMessage(msg)
+      // Also handle service worker updates
+      worker.addEventListener('updatefound', () => {
+        // Get the updated worker.
+        const updated = worker.installing
+        // If the updated worker is not found, throw an error.
+        if (!updated) throw new Error('[ app ] worker returned null')
+        // Listen for state changes.
+        updated.addEventListener('statechange', () => {
+          // If the updated worker is activated,
+          if (updated.state === 'activated') {
+            // Send initialization message.
+            updated.postMessage(msg)
+          }
+        })
       })
-      console.log('[ app ] service worker registered with scope:', registration.scope)
+      console.log('[ app ] worker registered with scope:', worker.scope)
     } catch (error) {
-      console.error('[ app ] service worker registration failed:', error)
+      console.error('[ app ] worker registration failed:', error)
     }
   })
 }

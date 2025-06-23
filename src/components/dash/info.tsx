@@ -1,11 +1,13 @@
-import { useState }  from 'react'
-import { nip19 }     from 'nostr-tools'
-import { useClient } from '@/hooks/useClient.js'
+import { useState }       from 'react'
+import { nip19 }          from 'nostr-tools'
+import { useBifrostNode } from '@/hooks/useNode.js'
+import { useEnclave }     from '@/hooks/useEnclave.js'
 
 export function NodeInfo () {
-  const client = useClient()
-  const pubkey = client.data.pubkey
-  const status = client.data.status
+  const client  = useBifrostNode()
+  const enclave = useEnclave()
+  const pubkey  = client.data.pubkey
+  const status  = client.data.status
 
   const [ password, setPassword ]       = useState('')
   const [ error, setError ]             = useState<string | null>(null)
@@ -29,7 +31,7 @@ export function NodeInfo () {
       setError('Password is required')
       return
     }
-    const res = await client.unlock(password)
+    const res = await enclave.unlock(password)
     if (!res.ok) {
       setError(res.error)
       return
@@ -38,6 +40,15 @@ export function NodeInfo () {
       setPassword('')
     }
   }
+
+  // useEffect(() => {
+  //   (async () => {
+  //     // Wait for 500ms.
+  //     await sleep(500)
+  //     // Fetch data from the store.
+  //     bus.request({ topic: fetch_key })
+  //   })()
+  // }, [ bus ])
 
   // If client is locked, show locked state
   if (status === 'locked') {

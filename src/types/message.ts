@@ -7,10 +7,11 @@ export type MessageHandler <T = unknown> = (message: EventMessage<T>) => void | 
 export type RequestTemplate = Omit<RequestMessage, 'id' | 'type'>
 export type EventTemplate   = Omit<EventMessage, 'id' | 'type'>
 
-export interface SubscriptionFilter {
-  id?    : string
-  topic? : string
-  type?  : MessageType
+export interface MessageFilter {
+  domain? : string
+  id?     : string
+  topic?  : string
+  type?   : string | MessageType
 }
 
 export interface PendingResponse<T = unknown> {

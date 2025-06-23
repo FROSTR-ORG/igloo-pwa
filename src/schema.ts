@@ -1,7 +1,16 @@
-import { BaseSchema } from '@/util/index.js'
+import { StoreController } from '@/services/store.js'
+import { BaseSchema }      from '@/util/index.js'
 
-import { Schema as BifrostSchema } from '@frostr/bifrost'
-import { Schema as SessionSchema } from '@cmdcode/nostr-connect'
+import {
+  BifrostNode,
+  Schema as BifrostSchema
+} from '@frostr/bifrost'
+
+import {
+  Schema as ConnectSchema,
+  NostrClient,
+  SessionManager
+} from '@cmdcode/nostr-connect'
 
 const z = BaseSchema.zod
 
@@ -41,7 +50,7 @@ export const message_envelope = z.discriminatedUnion('type', [
 ])
 
 export const peer_data   = BifrostSchema.peer.data
-export const peer_status = z.enum([ 'online', 'offline', 'locked' ])
+export const node_status = z.enum([ 'online', 'offline', 'locked', 'connecting', 'loading' ])
 
 export const peer_config = BifrostSchema.peer.config.extend({
   pubkey : BaseSchema.hex33,
@@ -53,20 +62,34 @@ export const relay_policy = z.object({
   write : z.boolean(),
 })
 
-const client_session = SessionSchema.client.session
+export const app_cache = z.object({
+  sessions : z.array(z.any())
+})
 
-export const client_state = z.object({
+export const app_state = z.object({
   peers    : z.array(peer_data),
   pubkey   : BaseSchema.hex32.nullable(),
   requests : z.array(z.string()),
-  status   : peer_status,
+  status   : node_status,
 })
 
-export const client_store = z.object({
+export const app_settings = z.object({
   group    : BifrostSchema.pkg.group.nullable(),
   peers    : z.array(peer_config),
   pubkey   : BaseSchema.hex33.nullable(),
   relays   : z.array(relay_policy),
-  sessions : z.array(client_session),
   share    : z.string().nullable(),
+})
+
+export const global_state = z.object({
+  cache    : z.instanceof(StoreController),
+  db       : z.instanceof(IDBDatabase),
+  logs     : z.array(z.any()),
+  node     : z.instanceof(BifrostNode).nullable(),
+  private  : BifrostSchema.pkg.share.nullable(),
+  rpc      : z.instanceof(NostrClient).nullable(),
+  session  : z.instanceof(SessionManager).nullable(),
+  settings : z.instanceof(StoreController),
+  state    : app_state,
+  subs     : z.map(z.string(), z.array(z.function())),
 })

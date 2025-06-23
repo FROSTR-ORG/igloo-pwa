@@ -1,27 +1,37 @@
-import { SessionToken } from '@cmdcode/nostr-connect'
+import type { GroupPackage, PeerConfig, SharePackage } from '@frostr/bifrost'
 
-import {
-  GroupPackage,
-  PeerConfig
-} from '@frostr/bifrost'
+import type { SessionToken } from '@cmdcode/nostr-connect'
+import type { RelayPolicy }  from './app.js'
 
-export interface ClientStore {
+export type StoreData          = Record<string, any>
+export type StoreMiddleware<T> = (current : T, updated : T) => Promise<T> | T
+
+export interface StoreTopics {
+  EVENT  : string
+  FETCH  : string
+  UPDATE : string
+  RESET  : string
+}
+
+export interface StoreConfig <T extends StoreData> {
+  defaults   : T
+  store_key  : string
+  topics     : StoreTopics
+  validator? : (data : unknown) => asserts data is T
+}
+
+export interface ApplicationCache {
+  sessions : SessionToken[]
+}
+
+export interface ApplicationSettings {
   group    : GroupPackage | null
   peers    : PeerConfig[]
   pubkey   : string | null
   relays   : RelayPolicy[]
-  sessions : SessionToken[]
   share    : string | null
 }
 
-export interface PeerPolicy {
-  pubkey : string
-  send   : boolean
-  recv   : boolean
-}
-
-export interface RelayPolicy {
-  url   : string
-  read  : boolean
-  write : boolean
+export interface PrivateStore {
+  share : SharePackage | null
 }

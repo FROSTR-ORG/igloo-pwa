@@ -1,5 +1,7 @@
-import { BUS_TIMEOUT } from '@/const.js'
-import { parse_error } from '@/util/index.js'
+import { EventEmitter }     from '@/class/emitter.js'
+import { BUS_TIMEOUT }      from '@/const.js'
+import { GlobalController } from '@/core/global.js'
+import { parse_error }      from '@/util/index.js'
 
 import {
   filter_message,
@@ -9,103 +11,86 @@ import {
 
 import type {
   EventTemplate,
-  RequestTemplate,
   MessageEnvelope,
-  SubscriptionFilter
+  MessageFilter,
+  EventMessage,
+  RejectMessage,
+  AcceptMessage,
+  GlobalInitScope
 } from '@/types/index.js'
 
-// Declare the service worker global scope
-declare const self: ServiceWorkerGlobalScope
-
-export namespace MessageBus {
-  export const send      = send_event_message
-  export const request   = send_request_message
-  export const respond   = send_response_message
-  export const reject    = send_reject_message
-  export const subscribe = subscribe_to_filter
-}
-
-function send_event_message (template : EventTemplate) {
-  // Send the event.
-  send_message({ ...template, id : generate_id(), type : 'event' })
-}
-
-function send_response_message <T = unknown> (
-  id     : string, 
-  result : T
-) {
-  send_message({ id, ok : true, result, type : 'accept' })
-}
-
-function send_reject_message (
-  id    : string,
-  error : string
-) {
-  send_message({ id, ok : false, error, type : 'reject' })
-}
-
-async function send_request_message (template: RequestTemplate) {
-  // Create the message.
-  const msg = { ...template, id : generate_id(), type : 'request' }
-  // Return the promise.
-  return new Promise(async (resolve, reject) => {
-    // Declare the timeout and unsubscribe function.
-    let timeout: NodeJS.Timeout, unsub: (() => void) | undefined
-    // Cleanup function for timeout and subscription.
-    const cleanup = () => {
-      if (timeout) clearTimeout(timeout)
-      if (unsub) unsub()
-    }
-    // Try to set up the resolver, timeout, and subscription.
-    try {
-      // Set up the resolver that will clean up and resolve
-      const resolver = (message: MessageEnvelope) => {
-        cleanup()
-        resolve(message)
-      }
-      // Set up timeout that will clean up and reject
-      timeout = setTimeout(() => {
-        cleanup()
-        reject('timeout')
-      }, BUS_TIMEOUT)
-      // Subscribe to the filter (await to get the actual unsubscribe function)
-      unsub = await subscribe_to_filter({ id : msg.id }, resolver)
-    } catch (error) {
-      // If setup fails, clean up and reject
-      cleanup()
-      console.error('[ sw/bus ] error with response handler:', error)
-      reject(parse_error(error))
-    }
-  })
-}
-
-async function subscribe_to_filter (
-  filter   : SubscriptionFilter,
+interface MessageSubscription {
   callback : (message: MessageEnvelope) => void
-) {
-  const handler = (event: ExtendableMessageEvent) => {
-    const message = parse_message(event.data)
-    if (message && filter_message(filter, message)) {
-      callback(message)
-    }
-  }
-  self.addEventListener('message', handler)
-  return () => {
-    self.removeEventListener('message', handler)
-  }
+  filter?  : MessageFilter
 }
 
-async function send_message (message : MessageEnvelope) {
-  // Log the message.
-  console.log('[ sw/bus ] sending message:', JSON.stringify(message, null, 2))
-  
-  // First, dispatch the message internally to service worker subscriptions
-  const event = new MessageEvent('message', { data: message })
-  self.dispatchEvent(event)
-  
-  // Then, broadcast to all clients
-  const clients = await self.clients.matchAll()
-  for (const client of clients) {
-    client.postMessage(message)
+export class MessageBus {
+  private readonly _scope : GlobalInitScope
+  private readonly _subs : Set<MessageSubscription> = new Set()
+
+  constructor (scope : GlobalInitScope) {
+    this._scope = scope
+    this._scope.addEventListener('message', this._handler.bind(this))
+  }
+
+  _handler (event : ExtendableMessageEvent) {
+    // Parse the message.
+    const message = parse_message(event.data)
+    // If the message is not valid, return.
+    if (!message) return
+    // For each subscription,
+    for (const sub of this._subs) {
+      // If the message does not match the filter, skip.
+      if (sub.filter && !filter_message(sub.filter, message)) continue
+      // Call the callback.
+      sub.callback(message)
+    }
+  }
+
+  async _send (message : MessageEnvelope) {
+    // Craft the message event.
+    const event = new MessageEvent('message', { data: message })
+    // Dispatch the message internally to service worker subscriptions.
+    this._scope.dispatchEvent(event)
+    // Collect all clients.
+    const clients = await this._scope.clients.matchAll()
+    // For each client, post the message.
+    for (const client of clients) {
+      client.postMessage(message)
+    }
+    // Log the message.
+    console.log('[ bus ] sent message:', message)
+  }
+
+  reject (id : string, error : string) {
+    // Create the message.
+    const message = { id, ok : false, error, type : 'reject' }
+    // Send the message.
+    this._send(message as RejectMessage)
+  }
+
+  respond (id : string, result : unknown) {
+    // Create the message.
+    const message = { id, ok : true, result, type : 'accept' }
+    // Send the message.
+    this._send(message as AcceptMessage)
+  }
+
+  send (template : EventTemplate) {
+    // Create the message.
+    const message = { ...template, id : generate_id(), type : 'event' }
+    // Send the message.
+    this._send(message as EventMessage)
+  }
+
+  subscribe (callback : (message: MessageEnvelope) => void, filter? : MessageFilter) {
+    // Create the subscription.
+    const sub : MessageSubscription = { callback, filter }
+    // Add the subscription.
+    this._subs.add(sub)
+    // Return the unsubscribe function.
+    return () => {
+      this._subs.delete(sub)
+    }
   }
 }

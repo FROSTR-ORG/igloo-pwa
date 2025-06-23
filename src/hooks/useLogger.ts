@@ -1,25 +1,24 @@
-import { useEffect, useState } from 'react'
-import { useMessage }          from '@/hooks/useMessage.js'
+import { useMessageBus, useMessageQuery } from '@/hooks/useMessage.js'
+
+import * as CONST from '@/const.js'
 
 import type { LogEntry } from '@/types/index.js'
 
-import SYMBOLS from '@/symbols.json' assert { type: 'json' }
+const LOG_TOPIC = CONST.SYMBOLS.TOPIC.LOG
 
 export function useLogger () {
-  const { request, subscribe } = useMessage()
-  const [ entries, setLogs ]   = useState<LogEntry[]>([])
-
+  // Define the message bus and query client.
+  const bus = useMessageBus()
+  // Define the query method for fetching data.
+  const {
+    data = [],
+    isLoading,
+    error
+  } = useMessageQuery<LogEntry[]>(LOG_TOPIC.FETCH, LOG_TOPIC.EVENT)
+  // Define the clear method.
   const clear = () => {
-    request({ topic : SYMBOLS.LOG.CLEAR })
+    bus.request({ topic : LOG_TOPIC.CLEAR })
   }
-
-  useEffect(() => {
-    const unsub = subscribe<LogEntry[]> (SYMBOLS.LOG.EVENT, (message) => {
-      setLogs(message.payload)
-    })
-
-    return () => unsub()
-  }, [ subscribe ])
-
-  return { entries, clear }
+  // Return the data API and action methods.
+  return { data, isLoading, error, clear }
 }

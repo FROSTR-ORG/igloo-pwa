@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { useQuery, useQueryClient }                 from '@tanstack/react-query'
 
 import { BUS_TIMEOUT } from '@/const.js'
 import { Assert }      from '@/util/assert.js'
@@ -17,7 +18,9 @@ import type {
   EventMessage
 } from '@/types/index.js'
 
-export function useMessage() {
+const SW = navigator.serviceWorker
+
+export function useMessageBus() {
   const [ isReady, setIsReady ] = useState(false)
 
   const subscribeRef = useRef(new Map<string, Set<MessageHandler>>())
@@ -34,6 +37,8 @@ export function useMessage() {
     pendingRef.current.delete(id)
     // Clear the timeout.
     clearTimeout(timeoutId)
+    // Log the message.
+    console.log('[ useMessage ] received response:', message)
     // Resolve the message.
     resolve(message)
   }, [])
@@ -59,13 +64,13 @@ export function useMessage() {
       notify_subscribers(message)
     } else {
       // Log the invalid message and return.
-      console.error('[ service/bus ] received invalid message', message)
+      console.error('[ useMessage ] received invalid message', message)
     }
   }, [ handle_response, notify_subscribers ])
 
   const connect = useCallback(async (): Promise<void> => {
     // If the service worker controller is available,
-    if (navigator.serviceWorker.controller) {
+    if (SW.controller) {
       // Set the ready state to true.
       setIsReady(true)
       // Return a resolved promise.
@@ -74,7 +79,7 @@ export function useMessage() {
     // If the service worker controller is not available,
     return new Promise((resolve) => {
       // Add a listener for the controllerchange event.
-      navigator.serviceWorker.addEventListener('controllerchange', () => {
+      SW.addEventListener('controllerchange', () => {
         // Set the ready state to true.
         setIsReady(true)
         // Resolve the promise.
@@ -112,16 +117,14 @@ export function useMessage() {
   ) : Promise<ResponseMessage> => {
     // Connect to the service worker.
     await connect()
-    // Get the service worker controller.
-    const controller = navigator.serviceWorker.controller
     // If the controller is not available, throw an error.
-    Assert.exists(controller, 'No service worker controller available')
+    Assert.exists(SW.controller, 'No service worker controller available')
     // Generate a new id.
     const id = generate_id()
     // Pack the message with the id.
     const message : RequestMessage = { ...template, id, type: 'request' }
     // Log the message.
-    console.log('[ app/bus ] sending message:', JSON.stringify(message, null, 2))
+    console.log('[ useMessage ] sending request:', message)
     // Return a promise that resolves with the response message.
     return new Promise<ResponseMessage>((resolve, reject) => {
       // Set a timeout to reject the promise if the response is not received.
@@ -131,25 +134,27 @@ export function useMessage() {
           // Delete the pending response.
           pendingRef.current.delete(id)
           // Reject the promise.
-          reject(new Error('Response timeout'))
+          reject(() => {
+            console.error('[ useMessage ] response timeout for request:', id)
+          })
         }
       }, BUS_TIMEOUT)
       // Set the pending response.
       pendingRef.current.set(id, { resolve: resolve as any, reject, timeoutId })
       // Post the message to the service worker.
-      controller.postMessage(message)
+      SW.controller!.postMessage(message)
     })
   }, [ connect ])
 
   useEffect(() => {
     // If the navigator is available and the service worker is available,
-    if (typeof navigator !== 'undefined' && navigator.serviceWorker) {
+    if (typeof navigator !== 'undefined' && SW) {
       // Add a listener for the message event.
-      navigator.serviceWorker.addEventListener('message', handle_message)
+      SW.addEventListener('message', handle_message)
       // Return a function to remove the listener.
       return () => {
         // Remove the listener for the message event.
-        navigator.serviceWorker.removeEventListener('message', handle_message)
+        SW.removeEventListener('message', handle_message)
       }
     }
   }, [ handle_message ])
@@ -169,4 +174,39 @@ export function useMessage() {
   }, [])
 
   return { isReady, connect, subscribe, request }
+}
+
+export function useMessageQuery <T = unknown> (
+  fetch_key  : string,
+  update_key : string
+) {
+  // Define the message bus and query client.
+  const bus          = useMessageBus()
+  const query_client = useQueryClient()
+  // Define the message handler for updating the cache.
+  const handler = useCallback((message: any) => {
+    // Update the cache with the payload from the message.
+    query_client.setQueryData([ fetch_key ], message.payload)
+  }, [ query_client ])
+
+  // On mount, create a subscription service for cache updates.
+  useEffect(() => {
+    return bus.subscribe<T>(update_key, handler)
+  }, [ bus.subscribe, handler ])
+
+  // Define the query method for fetching data.
+  return useQuery<T>({
+    queryFn  : async () => {
+      // Fetch data from the store.
+      const res = await bus.request({ topic: fetch_key })
+      // If successful, return the result.
+      if (res.ok) return res.result as T
+      // Else, throw an error.
+      throw new Error(res.error || 'failed to fetch store data')
+    },
+    queryKey  : [ fetch_key ], // Use fetch action as key.
+    staleTime : 5 * 60 * 1000, // Fresh for 5 minutes
+    retry     : 3,
+    refetchOnMount : true
+  })
 }

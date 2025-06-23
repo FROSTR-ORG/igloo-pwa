@@ -13,14 +13,14 @@ import * as utils from './util.js'
 
 /**
  * Encrypts content using the NIP-44 encryption scheme.
- * @param plaintext The content to encrypt
  * @param secret The encryption key in hex format
+ * @param plaintext The content to encrypt
  * @param nonce The nonce for the encryption (default is a random 32-byte array)
  * @returns The encrypted content in base64url format with the nonce and MAC  
  */
 export function nip44_encrypt (
-  plaintext : string, 
   secret    : string,
+  plaintext : string, 
   nonce     : Uint8Array = randomBytes(32)): string {
   const convo_key  = utils.get_conversation_key(secret)
   const ctx        = utils.get_message_keys(convo_key, nonce)
@@ -32,13 +32,13 @@ export function nip44_encrypt (
 
 /**
  * Decrypts encrypted content using the provided secret.
- * @param payload Encrypted content in base64url format
  * @param secret  Decryption key in hex format
+ * @param payload Encrypted content in base64url format
  * @returns       Decrypted content as string
  */
 export function nip44_decrypt (
-  payload : string, 
-  secret  : string
+  secret  : string,
+  payload : string
 ): string {
   const { nonce, ciphertext, mac } = utils.decode_payload(payload)
   const convo_key      = utils.get_conversation_key(secret)

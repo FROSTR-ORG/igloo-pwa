@@ -1,4 +1,4 @@
-import { getEventHash } from 'nostr-tools'
+import { get_event_id } from '@cmdcode/nostr-p2p/lib'
 import { BifrostNode }  from '@frostr/bifrost'
 import * as cipher      from '@/crypto/cipher.js'
 import { now }          from '@/util/helpers.js'
@@ -21,25 +21,29 @@ export class BifrostSignDevice implements SignerDeviceAPI {
     this._node = node
   }
 
-  async get_methods () {
-    return SIGN_METHODS
+  get_methods () : string[] {
+    return Object.values(SIGN_METHODS)
   }
 
-  async get_pubkey () {
-    return this._node.group.group_pk
+  get_pubkey () {
+    return this._node.group.group_pk.slice(2)
   }
 
   async sign_event (event : EventTemplate) : Promise<SignedEvent> {
     const { content, kind, tags } = event
     const created_at = now()
-    const pubkey = this._node.group.group_pk
+    const pubkey = this._node.group.group_pk.slice(2)
     const tmpl   = { content, created_at, kind, pubkey, tags }
-    const id     = getEventHash(tmpl)
-    const res    = await this._node.req.sign(id, tmpl)
+    const id     = get_event_id(tmpl)
+    const res    = await this._node.req.sign(id)
     if (!res.ok) throw new Error(res.err)
-    const sig    = res.data.at(0)?.at(0)
+    const payload = res.data.at(0)
+    if (payload?.at(0) !== id)               throw new Error('event id mismatch')
+    if (payload?.at(1)?.slice(2) !== pubkey) throw new Error('event pubkey mismatch')
+    const sig = payload.at(2)
     if (!sig) throw new Error('signature missing from response')
-    return { ...tmpl, id, sig }
+    const signed = { ...tmpl, id, sig }
+    return signed
   }
 
   async nip04_encrypt (pubkey : string, plaintext : string) : Promise<string> {

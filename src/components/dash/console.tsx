@@ -23,7 +23,7 @@ export function Console () {
 
       <div className="console-header-controls">
         <h2 className="section-header">
-          Event Log <span className="event-count">({logger.entries.length} events)</span>
+          Event Log <span className="event-count">({logger.data.length} events)</span>
         </h2>
         <button className="button clear-button" onClick={clear_logs} title="Clear logs">
           <TrashIcon />
@@ -33,10 +33,10 @@ export function Console () {
       <p className="description">Monitor events from your node.</p>
       
       <div className="console-output">
-        {logger.entries.length === 0 ? (
+        {logger.data.length === 0 ? (
           <div className="console-empty">No events logged yet</div>
         ) : (
-          logger.entries.map((log, idx) => (
+          logger.data.map((log, idx) => (
             <div key={idx} className={`console-entry ${log.payload ? 'expandable' : ''}`}>
               <div className="entry-header" onClick={() => log.payload && toggle_expand(idx)}>
                 <div className="entry-prefix">
@@ -46,7 +46,7 @@ export function Console () {
                     </span>
                   )}
                   <span className="console-timestamp">
-                    {new Date(log.timestamp).toLocaleTimeString()}
+                    {new Date(log.stamp).toLocaleTimeString()}
                   </span>
                   {log.type && <span className={`console-badge console-type-${log.type.toLowerCase()}`}>{log.type}</span>}
                 </div>

@@ -1,8 +1,8 @@
 import { RefreshIcon } from '@/components/util/icons.js'
-import { useClient }   from '@/hooks/useClient'
+import { useBifrostNode }   from '@/hooks/useNode'
 
 export function PeerInfo() {
-  const node  = useClient()
+  const node  = useBifrostNode()
   const peers = node.data.peers
 
   return (

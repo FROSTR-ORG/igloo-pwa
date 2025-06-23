@@ -1,41 +1,54 @@
 {
-  "CLIENT": {
-    "ECHO"   : "client.echo",
-    "EVENT"  : "client.event",
-    "FETCH"  : "client.fetch",
-    "PING"   : "client.ping",
-    "RESET"  : "client.reset",
-    "UNLOCK" : "client.unlock"
-  },
-  "LOG": {
-    "EVENT" : "log.event",
-    "CLEAR" : "log.clear"
-  },
-  "REQUEST": {
-    "EVENT" : "request.event",
-    "REPLY" : "request.reply"
-  },
-  "SESSION": {
-    "CANCEL"   : "session.cancel",
-    "EVENT"    : "session.event",
-    "FETCH"    : "session.fetch",
-    "CONNECT"  : "session.connect",
-    "RESET"    : "session.reset",
-    "REVOKE"   : "session.revoke",
-    "UPDATE"   : "session.update"
-  },
-  "STORE": {
-    "EVENT"  : "store.event",
-    "FETCH"  : "store.fetch",
-    "RESET"  : "store.reset",
-    "UPDATE" : "store.update"
-  },
-  "TOPICS": {
-    "CLIENT" : "client",
+  "DOMAIN": {
+    "APP"    : "app",
+    "ENCLAVE": "enclave",
+    "GLOBAL" : "global",
     "LOG"    : "log",
-    "PEER"   : "peer",
-    "REQUEST": "request",
+    "NODE"   : "node",
+    "RPC"    : "rpc",
     "SESSION": "session",
     "STORE"  : "store"
+  },
+  "STORE": {
+    "CACHE"    : "cache",
+    "SETTINGS" : "settings"
+  },
+  "TOPIC": {
+    "APP": {
+      "FETCH" : "app.action.fetch",
+      "EVENT" : "app.event.update"
+    },
+    "ENCLAVE": {
+      "EVENT" : "enclave.event.status",
+      "FETCH" : "enclave.action.fetch",
+      "LOCK"  : "enclave.action.lock",
+      "UNLOCK": "enclave.action.unlock"
+    },
+    "LOG": {
+      "EVENT" : "log.event.state",
+      "FETCH" : "log.action.fetch",
+      "CLEAR" : "log.action.clear"
+    },
+    "NODE": {
+      "ECHO"  : "node.action.echo",
+      "EVENT" : "node.event.state",
+      "FETCH" : "node.action.fetch",
+      "PING"  : "node.action.ping",
+      "RESET" : "node.action.reset"
+    },
+    "SESSION": {
+      "EVENT"    : "session.event.state",
+      "CONNECT"  : "session.action.connect",
+      "RESET"    : "session.action.reset",
+      "REVOKE"   : "session.action.revoke",
+      "UPDATE"   : "session.action.update",
+      "FETCH"    : "session.action.fetch"
+    },
+    "STORE": {
+      "EVENT" :  "store.event.state",
+      "FETCH" :  "store.action.fetch",
+      "RESET" :  "store.action.reset",
+      "UPDATE" : "store.action.update"
+    }
   }
 }

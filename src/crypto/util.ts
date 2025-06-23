@@ -1,7 +1,7 @@
 import { Buff }        from '@cmdcode/buff'
 import { base64 }      from '@scure/base'
 import { hmac }        from '@noble/hashes/hmac'
-import { sha256 }      from '@noble/hashes/sha256'
+import { sha256 }      from '@noble/hashes/sha2'
 import { concatBytes } from '@noble/hashes/utils'
 
 import {

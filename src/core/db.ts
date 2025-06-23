@@ -1,105 +1,131 @@
 import { DB_NAME, DB_VERSION } from '@/const.js'
+import { Assert }              from '@/util/index.js'
 
-type StoreCallback = (data: Record<string, any>) => void
-type StoreData     = Record<string, any>
-type StoreSubMap   = Map<string, Set<StoreCallback>>
+import type { StoreData } from '@/types/index.js'
+import { get_console } from '@/lib/logger'
 
-const _sub : StoreSubMap = new Map()
-let   _db  : IDBDatabase | null = null
+export class DBController {
+  private _db : IDBDatabase | null = null
 
-export namespace DBController {
-  export const init      = init_db
-  export const load      = load_db
-  export const save      = save_db
-  export const subscribe = subscribe_to_store
-}
+  constructor () {
+    this.log.info('controller created')
+  }
 
-async function init_db (storeName : string, defaults : StoreData) : Promise<void> {
-  // Load the current data.
-  const current  = await load_db(storeName)
-  // Get the missing data.
-  const missing  = get_missing_data(current, defaults)
-  // Get the orphaned keys.
-  const orphaned = get_orphaned_keys(current, defaults)
-  // Initialize the store.
-  return _init(storeName, missing, orphaned)
-}
+  get db () : IDBDatabase {
+    Assert.exists(this._db, 'database is not open')
+    return this._db
+  }
 
-async function load_db (storeName : string): Promise<StoreData> {
-  // Load the store in readonly mode.
-  const store = await _load(storeName, 'readonly')
-  // Try to load the data.
-  return new Promise<StoreData>((resolve, reject) => {
-    const result: StoreData = {}
-    // Create a cursor request to iterate over all entries
-    const request = store.openCursor()
-    // If the request fails, reject the promise.
-    request.onerror = () => reject(request.error)
-    // If the request succeeds, resolve the promise.
-    request.onsuccess = (event) => {
-      const cursor = (event.target as IDBRequest<IDBCursorWithValue | null>).result
-      if (cursor) {
-        // Store the key-value pair.
-        result[cursor.key.toString()] = cursor.value
-        // Move to the next entry.
-        cursor.continue()
-      } else {
-        // Resolve with the result
-        resolve(result)
-      }
+  get log () {
+    return get_console('[ db ]')
+  }
+
+  async _load (
+    storeName : string,
+    mode      : IDBTransactionMode
+  ) : Promise<IDBObjectStore> {
+    // Open the database.
+    const db = await this._open()
+    // Create a transaction on the store.
+    const tx = db.transaction(storeName, mode)
+    // Return the object store.
+    return tx.objectStore(storeName)
+  }
+
+  async _open () : Promise<IDBDatabase> {
+    // If the database is not open,
+    if (!this._db) {
+      // Open the database.
+      const db = await open_store()
+      // Close the database when the version changes.
+      db.onversionchange = () => { db.close(); this._db = null }
+      // Set the database.
+      this._db = db
+      // Log the database opening.
+      this.log.info('database opened')
     }
-  })
-}
+    // Return the database.
+    return this._db
+  }
 
-async function save_db (storeName : string, data : StoreData) : Promise<void> {
-  // Load the store in readwrite mode.
-  const store = await _load(storeName, 'readwrite')
-  // Store each property separately.
-  const promises = Object.entries(data).map(async ([ key, value ]) => {
-    // Create a promise to save the data.
-    return new Promise<void>((resolve, reject) => {
-      // Create a request to save the data.
-      const request = store.put(value, key)
+  async init (storeName : string, defaults : StoreData) : Promise<StoreData> {
+    // Load the current data.
+    const current  = await this.fetch(storeName)
+    // Get the missing data.
+    const missing  = get_missing_data(current, defaults)
+    // Get the orphaned keys.
+    const orphaned = get_orphaned_keys(current, defaults)
+    // If there is no database, open it.
+    const db = await this._open()
+    // Initialize the store.
+    await initialize_store(db, storeName, missing, orphaned)
+    // Load the store.
+    const store = await this.fetch(storeName)
+    // Log the store initialization.
+    this.log.info('store initialized:', storeName)
+    // Return the store.
+    return store
+  }
+
+  async fetch (storeName : string) : Promise<StoreData> {
+    // Load the store in readonly mode.
+    const store = await this._load(storeName, 'readonly')
+    // Try to load the data.
+    return new Promise<StoreData>((resolve, reject) => {
+      // Create a new object to store the data.
+      const result: StoreData = {}
+      // Create a cursor request to iterate over all entries
+      const request = store.openCursor()
       // If the request fails, reject the promise.
-      request.onerror = () => reject(request.error)
-      // If the request succeeds, resolve the promise.
-      request.onsuccess = () => resolve()
-    })
-  })
-  // Wait for all promises to resolve.
-  await Promise.all(promises)
-  // Notify the subscribers.
-  _notify(storeName, data)
-}
-
-function subscribe_to_store (storeName : string, callback: StoreCallback): () => void {
-  // If the store does not exist,
-  if (!_sub.has(storeName)) {
-    // Create a new set of callbacks for the store.
-    _sub.set(storeName, new Set())
-  }
-  // Add the callback to the store.
-  _sub.get(storeName)!.add(callback)
-  // Return an unsubscribe function.
-  return () => {
-    // Get the set of callbacks for the store.
-    const subs = _sub.get(storeName)
-    // If the store exists,
-    if (subs) {
-      // Remove the callback from the store.
-      subs.delete(callback)
-      // If the store has no callbacks,
-      if (subs.size === 0) {
-        // Delete the store.
-        _sub.delete(storeName)
+      request.onerror = () => {
+        // Log the error.
+        this.log.error('failed to fetch store:', storeName)
+        // Reject the promise.
+        reject(request.error)
       }
-    }
+      // If the request succeeds, resolve the promise.
+      request.onsuccess = (event) => {
+        // Get the cursor from the event.
+        const cursor = (event.target as IDBRequest<IDBCursorWithValue | null>).result
+        // If the cursor is not null,
+        if (cursor) {
+          // Store the key-value pair.
+          result[cursor.key.toString()] = cursor.value
+          // Move to the next entry.
+          cursor.continue()
+        } else {
+          // Log the store fetch.
+          this.log.info('store fetched:', storeName)
+          // Resolve with the result.
+          resolve(result)
+        }
+      }
+    })
+  }
+
+  async save (storeName : string, data : StoreData) : Promise<void> {
+    // Load the store in readwrite mode.
+    const store = await this._load(storeName, 'readwrite')
+    // Store each property separately.
+    const promises = Object.entries(data).map(async ([ key, value ]) => {
+      // Create a promise to save the data.
+      return new Promise<void>((resolve, reject) => {
+        // Create a request to save the data.
+        const request = store.put(value, key)
+        // If the request fails, reject the promise.
+        request.onerror = () => reject(request.error)
+        // If the request succeeds, resolve the promise.
+        request.onsuccess = () => resolve()
+      })
+    })
+    // Execute the promises.
+    await Promise.all(promises)
+    // Log the store save.
+    this.log.info('store saved:', storeName)
   }
 }
 
-async function _open (storeName : string): Promise<IDBDatabase> {
-  // If the database is already open, return it.
-  if (_db) return _db
+function open_store (): Promise<IDBDatabase> {
   // Return a promise that opens the database.
   return new Promise((resolve, reject) => {
     // Create the open request.
@@ -109,33 +135,18 @@ async function _open (storeName : string): Promise<IDBDatabase> {
     // If the database is opened, resolve the promise.
     request.onsuccess = () => {
       // Unpack the database from the result.
-      const db = request.result
-      // Handle version changes from other tabs/windows.
-      db.onversionchange = () => { db.close(); _db = null }
-      // Resolve the promise with the database.
-      resolve(db)
-    }
-    // If the database upgrade is requested,
-    request.onupgradeneeded = (event) => {
-      // Get the database.
-      const db = (event.target as IDBOpenDBRequest).result
-      // If the store doesn't exist,
-      if (!db.objectStoreNames.contains(storeName)) {
-        // Create the store.
-        db.createObjectStore(storeName)
-      }
+      resolve(request.result)
     }
   })
 }
 
-function _init (
+function initialize_store (
+  db        : IDBDatabase,
   storeName : string,
   missing   : StoreData,
   orphaned  : string[]
 ) : Promise<void> {
   return new Promise<void>(async(resolve, reject) => {
-    // Open the database.
-    const db    = await _open(storeName)
     // Create a transaction on the store.
     const tx    = db.transaction(storeName, 'readwrite')
     // Get the store from the transaction.
@@ -168,19 +179,6 @@ function _init (
       tx.onerror = () => reject(tx.error)
     }).catch(reject)
   })
-}
-
-async function _load (storeName : string, mode : IDBTransactionMode) : Promise<IDBObjectStore> {
-  // Open the database.
-  const db = await _open(storeName)
-  // Create a transaction on the store.
-  const tx = db.transaction(storeName, mode)
-  // Return the object store.
-  return tx.objectStore(storeName)
-}
-
-function _notify (storeName : string, data: StoreData): void {
-  _sub.get(storeName)?.forEach(callback => callback(data))
 }
 
 function get_missing_data (

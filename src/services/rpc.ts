@@ -1,76 +1,112 @@
-// import {
-//   ConnectionToken,
-//   NostrClient,
-//   SessionToken,
-//   SignedEvent
-// } from '@cmdcode/nostr-connect'
+import { EventEmitter }      from '@/class/emitter.js'
+import { BifrostSignDevice } from '@/class/signer.js'
+import { GlobalController }  from '@/core/global.js'
 
-// import { BifrostSignDevice }   from '@/class/signer.js'
-// import { BifrostNodeService }       from '@/services/node.js'
-// import { DBController }        from '@/services/db.js'
-// import { MessageBus }          from '@/services/mbus.js'
-// import { LogService }          from '@/services/logger.js'
-// import { validate_node_state } from '@/lib/validate.js'
-// import * as CONST              from '@/const.js' 
+import {
+  NostrClient,
+  SessionManager
+} from '@cmdcode/nostr-connect'
 
-// import type {
-//   AppStore,
-//   GlobalScope,
-//   RequestMessage
-// } from '@/types/index.js'
+import type { GlobalInitScope } from '@/types/index.js'
 
-// const CLIENT_ACTION  = CONST.SYMBOLS.CLIENT
-// const SESSION_ACTION = CONST.SYMBOLS.SESSION
-// const STORE_KEY      = CONST.STORE_DB_KEY
+export class RpcController extends EventEmitter {
+  private readonly _global : GlobalController
 
-// const DEFAULT_STATE = {
-//   active  : [],
-//   pending : []
-// }
+  private _client  : NostrClient       | null = null
+  private _session : SessionManager    | null = null
+  private _signer  : BifrostSignDevice | null = null
 
-// const PARAMS_REQUIRED = [
-//   SESSION_ACTION.CANCEL,
-//   SESSION_ACTION.CONNECT,
-//   SESSION_ACTION.REVOKE,
-//   SESSION_ACTION.UPDATE
-// ]
+  constructor (scope : GlobalInitScope) {
+    super()
+    this._global = GlobalController.fetch(scope)
+  }
 
-// const LOG_PREFIX = '[ rpc ]'
+  get global () {
+    return this._global
+  }
 
-// export class RpcController {
-//   private readonly _global : GlobalScope
-//   private readonly _client : NostrClient | null = null
+  get can_init () : boolean {
+    // Define the enclave from the global state.
+    const enclave = this.global.scope.enclave
+    // If the enclave is not ready, return false.
+    if (!enclave || !enclave.is_ready) return false
+    // Define the share from the enclave store.
+    const share = enclave.store.share
+    // If the share is not present, return false.
+    if (!share) return false
+    // If all checks pass, return true.
+    return true
+  }
 
-//   constructor (global : GlobalScope) {
-//     this._global = global
-//   }
+  get is_ready () : boolean {
+    return (
+      this._client  !== null &&
+      this._session !== null &&
+      this.client.is_ready
+    )
+  }
 
-//   get is_ready () : boolean {
-//     return this._client !== null
-//   }
+  get client () : NostrClient {
+    if (!this._client) {
+      throw new Error('client not initialized')
+    }
+    return this._client
+  }
 
-//   get client () : NostrClient | null {
-//     if (!this._client) {
-//       throw new Error('client not initialized')
-//     }
-//     return this._client
-//   }
+  get session () : SessionManager {
+    if (!this._session) {
+      throw new Error('session not initialized')
+    }
+    return this._session
+  }
 
-//   async init () : Promise<void> {
-//     const node = BifrostNodeService.get()
-//   }
+  get signer () : BifrostSignDevice {
+    if (!this._signer) {
+      throw new Error('signer not initialized')
+    }
+    return this._signer
+  }
 
-//   async subscribe () : Promise<void> {
-//     const node = BifrostNodeService.get()
-//   }
+  _dispatch (event : string) : void {
+    // TODO: Implement this.
+  }
 
-//   async reset () : Promise<void> {
-//     this._client = null
-//   }
+  async init () : Promise<string | null> {
+    // Fetch the bifrost node from the global state.
+    const node = this.global.scope.node.client
+    // If the node is not initialized, return an error.
+    if (!node) return 'bifrost node not initialized'
+    // Fetch the sessions from the cache.
+    const sessions = this.global.scope.cache.data.sessions
+    // Create a new signer.
+    const signer  = new BifrostSignDevice(node)
+    // Create a new client.
+    const client  = new NostrClient(signer)
+    // Create a new session manager.
+    const session = new SessionManager(client, { sessions })
+    // Update the global state.
+    this._client  = client
+    this._session = session
+    this._signer  = signer
+    // Return null for success.
+    return null
+  }
 
-//   async handler (msg : RequestMessage) : Promise<void> {
-//     switch (msg.topic) {
-//   }
+  async subscribe () : Promise<void> {
+    // TODO: Implement this.
+  }
+
+  async reset () : Promise<void> {
+    this._client  = null
+    this._session = null
+    this._signer  = null
+  }
+}
+
+// function get_private_store (global : GlobalState) : PrivateEnclave | null {
+//   const enclave = global.enclave
+//   if (!enclave || !enclave.is_ready) return null
+//   return global.enclave?.store
 // }
 
 // function register_session_service () {

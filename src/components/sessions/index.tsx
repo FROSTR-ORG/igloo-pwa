@@ -1,13 +1,13 @@
 import { useState, useEffect } from 'react'
 import { ConnectToken }        from '@cmdcode/nostr-connect'
-import { useSession }          from '@/hooks/useSession.js'
+import { useNostrSession }          from '@/hooks/useSession.js'
 import { PermissionsDropdown } from '@/components/sessions/permissions.js'
 
 import type { PermissionMap } from '@cmdcode/nostr-connect'
-import type { SessionStore }  from '@/types/index.js'
+import type { SessionState }  from '@/types/index.js'
 
 export function Sessions() {
-  const client = useSession()
+  const client = useNostrSession()
 
   const [ connectStr, setConnectStr ] = useState('')
   const [ error, setError           ] = useState<string | null>(null)
