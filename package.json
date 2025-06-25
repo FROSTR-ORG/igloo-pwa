@@ -22,6 +22,7 @@
     "src"
   ],
   "type": "module",
+  "homepage": "./",
   "scripts": {
     "build": "tsx script/build.ts",
     "dev": "tsx script/dev.ts",

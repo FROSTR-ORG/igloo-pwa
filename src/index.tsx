@@ -18,9 +18,9 @@ if ('serviceWorker' in navigator) {
   window.addEventListener('load', async () => {
     try {
       // Configure the service worker options.
-      const options = { scope: '/' }
+      const options = { scope: './' }
       // Register the service worker.
-      const worker  = await navigator.serviceWorker.register('/sw.js', options)
+      const worker  = await navigator.serviceWorker.register('./sw.js', options)
       // If the worker is not active, throw an error.
       if (!worker.active) throw new Error('[ app ] worker returned null')
       // Create the initialization message.
