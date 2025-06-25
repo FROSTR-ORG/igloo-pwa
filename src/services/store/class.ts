@@ -15,9 +15,6 @@ import type {
   MessageEnvelope
 } from '@/types/index.js'
 
-const CACHE_KEY    = CONST.SYMBOLS.STORE.CACHE
-const SETTINGS_KEY = CONST.SYMBOLS.STORE.SETTINGS
-
 export class StoreController <T extends StoreData> extends EventEmitter<{
   update : [ current : T, updated : T ]
   ready  : [ data : T ]

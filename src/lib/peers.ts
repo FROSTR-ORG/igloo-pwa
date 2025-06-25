@@ -10,15 +10,17 @@ export function get_peer_configs (settings : AppSettings) {
   if (!group || !pubkey) return []
   // Initialize the peer config array.
   const configs : PeerConfig[] = []
-  // For each commit in the group,
-  for (const commit of group.commits) {
-    // If the commit pubkey is the same as the pubkey, skip.
-    if (commit.pubkey === pubkey) continue
+  // Get the pubkeys of the group.
+  const group_pks = group.commits.map(e => convert_pubkey(e.pubkey, 'bip340'))
+  // For each pubkey in the group,
+  for (const peer_pk of group_pks) {
+    // If the pubkey is the same as the pubkey, skip.
+    if (peer_pk === pubkey) continue
     // Find the peer config for the commit.
-    const config = settings.peers.find(e => e.pubkey === commit.pubkey)
+    const config = settings.peers.find(e => e.pubkey === peer_pk)
     // Add the config to the configs array.
     configs.push({
-      pubkey : convert_pubkey(commit.pubkey, 'bip340'),
+      pubkey : peer_pk,
       policy : {
         send : config?.policy.send ?? true,
         recv : config?.policy.recv ?? true

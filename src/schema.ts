@@ -52,7 +52,7 @@ export const peer_data   = BifrostSchema.peer.data
 export const node_status = z.enum([ 'online', 'offline', 'locked', 'connecting', 'loading' ])
 
 export const peer_config = BifrostSchema.peer.config.extend({
-  pubkey : BaseSchema.hex33,
+  pubkey : BaseSchema.hex32,
 })
 
 export const relay_policy = z.object({
@@ -75,7 +75,7 @@ export const app_state = z.object({
 export const app_settings = z.object({
   group    : BifrostSchema.pkg.group.nullable(),
   peers    : z.array(peer_config),
-  pubkey   : BaseSchema.hex33.nullable(),
+  pubkey   : BaseSchema.hex32.nullable(),
   relays   : z.array(relay_policy),
   share    : z.string().nullable(),
 })

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useSettings }     from '@/hooks/useSettings.js'
+import { useSettings }         from '@/hooks/useSettings.js'
 import { QRScanner }           from '@/components/util/scanner.js'
 
 import {

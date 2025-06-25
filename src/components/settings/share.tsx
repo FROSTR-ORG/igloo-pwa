@@ -64,7 +64,7 @@ export function ShareConfigField() {
       return
     }
     // Get the public key from the secret key.
-    const pubkey = get_pubkey(share.seckey, 'ecdsa')
+    const pubkey = get_pubkey(share.seckey, 'bip340')
     // Update the credentials in the store.
     const encrypted = encrypt_secret(input, password)
     // If encryption fails,
