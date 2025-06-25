@@ -16,6 +16,7 @@ import type {
   GlobalInitScope,
   GlobalStateKey
 } from '@/types/index.js'
+import { sleep } from '@vbyte/micro-lib/util'
 
 const GLOBAL_DATA     = CONST.GLOBAL_DATA
 const GLOBAL_SERVICES = CONST.GLOBAL_SERVICES
@@ -52,10 +53,21 @@ self.addEventListener('activate', (event) => {
   self.skipWaiting()
 })
 
-self.addEventListener('message', (event) => {
-  if (self.core) self.core.mbus.handle(event)
-  else log.warn('message bus not initialized')
+self.addEventListener('message', async (event) => {
+  if (!self.core) { 
+    log.info('initializing service worker ...')
+    init_service_worker(self)
+    await sleep(5000)
+    log.info('service worker initialized')
+  }
+  self.core?.mbus.handle(event)
 })
+
+function init_service_worker (scope : any) {
+  init_global_values(scope)
+  create_global_services(scope)
+  init_global_services(scope)
+}
 
 function init_global_values (scope : any) {
   // For each key in the global defaults,
