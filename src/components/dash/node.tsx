@@ -58,21 +58,25 @@ export function NodeInfoView () {
           <span className="status-pill locked">Locked</span>
         </div>
         <form onSubmit={handleUnlock} className="unlock-form">
-          <input
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            placeholder="Enter password to unlock..."
-            className="nsec-input"
-            autoComplete="current-password"
-          />
-          <button 
-            type="submit"
-            className="button button-primary"
-            disabled={!password}
-          >
-            Unlock
-          </button>
+          <div className="input-with-button">
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="Enter password to unlock..."
+              className="nsec-input"
+              autoComplete="current-password"
+            />
+          </div>
+          <div className="action-buttons">
+            <button 
+              type="submit"
+              className="button button-primary"
+              disabled={!password}
+            >
+              Unlock
+            </button>
+          </div>
         </form>
         {error && <div className="error-text">{error}</div>}
       </div>
