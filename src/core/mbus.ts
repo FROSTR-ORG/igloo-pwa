@@ -1,4 +1,4 @@
-import { create_logger } from '@/lib/logger.js'
+import { create_logger } from '@vbyte/micro-lib/logger'
 
 import {
   filter_message,
@@ -23,6 +23,7 @@ export class MessageBus {
 
   constructor (scope : GlobalInitScope) {
     this._scope = scope
+    this.log.debug('controller installed')
   }
 
   get log () {    
@@ -35,7 +36,7 @@ export class MessageBus {
     // If the message is not valid, return.
     if (!message) return
     // Log the message.
-    this.log.info('received message:', message)
+    this.log.debug('received message:', message)
     // For each subscription,
     for (const sub of this._subs) {
       // If the message does not match the filter, skip.
@@ -57,7 +58,7 @@ export class MessageBus {
       client.postMessage(message)
     }
     // Log the message.
-    this.log.info('sent message:', message)
+    this.log.debug('sent message:', message)
   }
 
   reject (id : string, error : string) {
@@ -65,6 +66,8 @@ export class MessageBus {
     const message = { id, ok : false, error, type : 'reject' }
     // Send the message.
     this._send(message as RejectMessage)
+    // Log the message.
+    this.log.info('sent rejection:', message)
   }
 
   respond (id : string, result : unknown) {
@@ -72,6 +75,8 @@ export class MessageBus {
     const message = { id, ok : true, result, type : 'accept' }
     // Send the message.
     this._send(message as AcceptMessage)
+    // Log the message.
+    this.log.info('sent response:', message)
   }
 
   send (template : EventTemplate) {
@@ -79,6 +84,8 @@ export class MessageBus {
     const message = { ...template, id : generate_id(), type : 'event' }
     // Send the message.
     this._send(message as EventMessage)
+    // Log the message.
+    this.log.info('sent event:', message)
   }
 
   subscribe (callback : (message: MessageEnvelope) => void, filter? : MessageFilter) {

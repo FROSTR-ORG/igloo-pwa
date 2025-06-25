@@ -1,7 +1,7 @@
 import { useMessageBus, useMessageQuery } from '@/hooks/useMessage.js'
 
 import * as CONST           from '@/const.js'
-import { get_store_topics } from '@/lib/store.js'
+import { get_store_topics } from '@/lib/message.js'
 
 import type { AppSettings } from '@/types/index.js'
 

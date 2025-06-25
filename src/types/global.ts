@@ -1,8 +1,8 @@
 import type { CoreController }  from '@/core/ctrl.js'
-import type { LogController }     from '@/services/logger.js'
-import type { BifrostController } from '@/services/node.js'
-import type { RpcController }     from '@/services/rpc.js'
-import type { StoreController }   from '@/services/store.js'
+import type { ConsoleController }     from '@/services/console.js'
+import type { BifrostController } from '@/services/node/class.js'
+import type { RpcController }     from '@/services/rpc/class.js'
+import type { StoreController }   from '@/services/store/class.js'
 
 import type {
   AppCache,
@@ -33,7 +33,7 @@ export interface GlobalData {
 export interface GlobalServices {
   cache    : CacheController    | null
   core     : CoreController   | null
-  log      : LogController      | null
+  log      : ConsoleController      | null
   node     : BifrostController  | null
   rpc      : RpcController  | null
   settings : SettingsController | null
@@ -42,7 +42,7 @@ export interface GlobalServices {
 export interface GlobalReady {
   cache    : CacheController
   ctrl     : CoreController
-  log      : LogController
+  log      : ConsoleController
   node     : BifrostController
   rpc      : RpcController
   settings : SettingsController

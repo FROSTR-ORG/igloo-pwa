@@ -2,15 +2,15 @@
 
 import { create_logger }     from '@vbyte/micro-lib/logger'
 import { CoreController }    from '@/core/ctrl.js'
-import { LogController }     from '@/services/logger.js'
-import { BifrostController } from '@/services/node.js'
-import { RpcController }     from '@/services/rpc.js' 
+import { ConsoleController } from '@/services/console.js'
+import { BifrostController } from '@/services/node/class.js'
+import { RpcController }     from '@/services/rpc/class.js' 
 import * as CONST            from '@/const.js'
 
-import {
-  init_cache_store,
-  init_settings_store
-} from '@/lib/store.js'
+import { 
+  create_cache_store,
+  create_settings_store
+} from '@/services/store/create.js'
 
 import type {
   GlobalInitScope,
@@ -31,8 +31,12 @@ self.addEventListener('install', async (_event) => {
   log.info('installing ...')
   // Initialize the global values.
   init_global_values(self)
+  // Log the global state initialization.
+  log.info('global state initialized')
   // Create the global services.
   create_global_services(self)
+  // Log the global services initialization.
+  log.info('global services installed')
   // Skip waiting for the service worker to become active.
   self.skipWaiting()
 })
@@ -42,13 +46,15 @@ self.addEventListener('activate', (event) => {
   console.log('[ sw ] activating ...')
   // Initialize the global services.
   init_global_services(self)
+  // Log the global services initialization.
+  log.info('global services activated')
   // Skip waiting for the service worker to become active.
   self.skipWaiting()
 })
 
 self.addEventListener('message', (event) => {
   if (self.core) self.core.mbus.handle(event)
-  else log.warn('controller not initialized')
+  else log.warn('message bus not initialized')
 })
 
 function init_global_values (scope : any) {
@@ -64,11 +70,11 @@ function init_global_values (scope : any) {
 
 function create_global_services (scope : GlobalInitScope) {
   scope.core     ??= new CoreController(scope)
-  scope.log      ??= new LogController(scope)
+  scope.log      ??= new ConsoleController(scope)
   scope.node     ??= new BifrostController(scope)
   scope.rpc      ??= new RpcController(scope)
-  scope.cache    ??= init_cache_store(scope)
-  scope.settings ??= init_settings_store(scope)
+  scope.cache    ??= create_cache_store(scope)
+  scope.settings ??= create_settings_store(scope)
 }
 
 function init_global_services (scope : any) {
@@ -76,8 +82,8 @@ function init_global_services (scope : any) {
   for (const key in GLOBAL_SERVICES) {
     // If the key is not in the state,
     if (typeof scope[key] === 'object') {
-      if (typeof scope[key].init === 'function') {
-        scope[key].init()
+      if (typeof scope[key]['init'] === 'function') {
+        scope[key]['init']()
       }
     }
   }

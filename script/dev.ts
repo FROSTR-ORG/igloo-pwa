@@ -4,7 +4,7 @@ const SERVE_HOST = 'http://localhost'
 const SERVE_PORT = 3000
 
 concurrently([
-  `tsx scripts/build.ts --watch`,
+  `tsx script/build.ts --watch`,
   `serve dist -p ${SERVE_PORT} --cors --no-etag`
 ])
 

@@ -7,7 +7,7 @@ export function Header () {
         className="frost-logo"
       />
       <div className="title-container">
-        <h1>FROSTR Web</h1>
+        <h1>Igloo PWA</h1>
       </div>
       <p>Enterprise security for the individual.</p>
       <a 

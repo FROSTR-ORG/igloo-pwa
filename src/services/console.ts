@@ -17,7 +17,7 @@ const LOG_DOMAIN = CONST.SYMBOLS.DOMAIN.LOG
 const LOG_TOPIC  = CONST.SYMBOLS.TOPIC.LOG
 const LOG_LIMIT  = 100
 
-export class LogController extends EventEmitter {
+export class ConsoleController extends EventEmitter {
   private readonly _global : CoreController
 
   private _logs : LogEntry[] = []
@@ -25,6 +25,7 @@ export class LogController extends EventEmitter {
   constructor (scope : GlobalInitScope) {
     super()
     this._global = CoreController.fetch(scope)
+    this.log.debug('controller installed')
   }
 
   get global () {
@@ -55,15 +56,15 @@ export class LogController extends EventEmitter {
     }
   }
 
-  _subscribe () {
-    const filter : MessageFilter = { domain : LOG_DOMAIN }
-    this.global.mbus.subscribe(this._handler.bind(this), filter)
-    this.log.info('subscribed')
-  }
-
   init () {
-    this._subscribe()
-    this.log.info('initialized')
+    // Define a filter for the message bus.
+    const filter : MessageFilter = { domain : LOG_DOMAIN }
+    // Subscribe to the message bus.
+    this.global.mbus.subscribe(this._handler.bind(this), filter)
+    // Log the subscription.
+    this.log.info('subscribed')
+    // Log the activation.
+    this.log.info('service activated')
   }
 
   fetch (filter? : LogFilter) : LogEntry[] {

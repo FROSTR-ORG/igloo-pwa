@@ -4,6 +4,7 @@ import { DBController }        from './db.js'
 import { MessageBus }          from './mbus.js'
 
 import type { GlobalInitScope } from '@/types/index.js'
+import { ConsoleController } from '../services/console.js'
 
 export class CoreController {
   static fetch (scope : GlobalInitScope) : CoreController {
@@ -18,10 +19,10 @@ export class CoreController {
   private readonly _scope : GlobalInitScope
 
   constructor (scope : GlobalInitScope) {
-    this._scope = scope
-    this._db    = new DBController()
-    this._mbus  = new MessageBus(scope)
-    this.log.info('controller created')
+    this._db      = new DBController()
+    this._mbus    = new MessageBus(scope)
+    this._scope   = scope
+    this.log.debug('controller installed')
   }
 
   get db () {
@@ -39,6 +40,22 @@ export class CoreController {
   get scope () {
     assert_global_ready(this._scope)
     return this._scope
+  }
+
+  get service () {
+    return {
+      console : this.scope.log,
+      node    : this.scope.node,
+      rpc     : this.scope.rpc,
+    }
+  }
+
+  get store () {
+    return {
+      cache    : this.scope.cache,
+      private  : this.scope.private,
+      settings : this.scope.settings
+    }
   }
 
 }

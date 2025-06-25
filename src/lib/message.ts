@@ -1,4 +1,5 @@
-import { Buff }    from '@cmdcode/buff'
+import { Buff }    from '@vbyte/buff'
+import * as CONST  from '@/const.js'
 import * as Schema from '@/schema.js'
 
 import type {
@@ -9,8 +10,19 @@ import type {
   MessageFilter
 } from '@/types/index.js'
 
+const STORE_TOPIC  = CONST.SYMBOLS.TOPIC.STORE
+
 export function generate_id () {
   return Buff.random(16).hex
+}
+
+export function get_store_topics (store_key : string) {
+  return {
+    EVENT  : `${store_key}.${STORE_TOPIC.EVENT}`,
+    FETCH  : `${store_key}.${STORE_TOPIC.FETCH}`,
+    RESET  : `${store_key}.${STORE_TOPIC.RESET}`,
+    UPDATE : `${store_key}.${STORE_TOPIC.UPDATE}`
+  }
 }
 
 export function has_message_topic (

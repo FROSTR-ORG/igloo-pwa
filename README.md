@@ -1,10 +1,5 @@
-# PWA Template
+# Igloo PWA
 
-A Progressive Web App (PWA) template.
+A NIP-46 signing device for mobile and web, powered by FROSTR.
 
-## Features
-
-- Registers a service worker in the background.
-- Uses a basic message system to communicate.
-- Includes an IndexDB controller for data storage.
-- Can be installed as PWA on any device.
+More documentation coming soon!

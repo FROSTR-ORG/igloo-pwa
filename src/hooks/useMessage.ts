@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useQuery, useQueryClient }                 from '@tanstack/react-query'
 
-import { BUS_TIMEOUT } from '@/const.js'
-import { Assert }      from '@/util/assert.js'
+import { BUS_TIMEOUT }   from '@/const.js'
+import { Assert }        from '@vbyte/micro-lib/assert'
+import { create_logger } from '@vbyte/micro-lib/logger'
 
 import {
   generate_id,
@@ -18,7 +19,8 @@ import type {
   EventMessage
 } from '@/types/index.js'
 
-const SW = navigator.serviceWorker
+const SW  = navigator.serviceWorker
+const log = create_logger('useMessage')
 
 export function useMessageBus() {
   const [ isReady, setIsReady ] = useState(false)
@@ -38,7 +40,7 @@ export function useMessageBus() {
     // Clear the timeout.
     clearTimeout(timeoutId)
     // Log the message.
-    console.log('[ useMessage ] received response:', message)
+    log.debug('received response:', message)
     // Resolve the message.
     resolve(message)
   }, [])
@@ -64,7 +66,7 @@ export function useMessageBus() {
       notify_subscribers(message)
     } else {
       // Log the invalid message and return.
-      console.error('[ useMessage ] received invalid message', message)
+      log.error('received invalid message', message)
     }
   }, [ handle_response, notify_subscribers ])
 
@@ -124,7 +126,7 @@ export function useMessageBus() {
     // Pack the message with the id.
     const message : RequestMessage = { ...template, id, type: 'request' }
     // Log the message.
-    console.log('[ useMessage ] sending request:', message)
+    log.info('sending request:', message)
     // Return a promise that resolves with the response message.
     return new Promise<ResponseMessage>((resolve, reject) => {
       // Set a timeout to reject the promise if the response is not received.
@@ -135,7 +137,7 @@ export function useMessageBus() {
           pendingRef.current.delete(id)
           // Reject the promise.
           reject(() => {
-            console.error('[ useMessage ] response timeout for request:', id)
+            log.error('response timeout for request:', id)
           })
         }
       }, BUS_TIMEOUT)

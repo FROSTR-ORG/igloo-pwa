@@ -1,7 +1,7 @@
 import { DB_NAME, DB_VERSION } from '@/const.js'
-import { EventEmitter }        from '@/class/emitter.js'
+import { Assert }              from '@vbyte/micro-lib/assert'
 import { create_logger }       from '@vbyte/micro-lib/logger'
-import { Assert }              from '@/util/index.js'
+import { EventEmitter }        from '@/class/emitter.js'
 
 import type { StoreData } from '@/types/index.js'
 
@@ -17,7 +17,7 @@ export class DBController extends EventEmitter<{
 
   constructor () {
     super()
-    this.log.info('controller created')
+    this.log.debug('controller installed')
   }
 
   get db () : IDBDatabase {

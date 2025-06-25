@@ -1,7 +1,7 @@
 {
-  "name": "igloo-web",
-  "version": "1.0.0",
-  "description": "Nostr NIP-46 signing device",
+  "name": "igloo-pwa",
+  "version": "0.1.0",
+  "description": "Frostr signing device for mobile and web.",
   "main": "dist/app.js",
   "type": "module",
   "scripts": {

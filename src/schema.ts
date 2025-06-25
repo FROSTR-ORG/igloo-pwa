@@ -1,4 +1,4 @@
-import { StoreController } from '@/services/store.js'
+import { StoreController } from '@/services/store/class.js'
 import { BaseSchema }      from '@/util/index.js'
 
 import {
@@ -7,7 +7,6 @@ import {
 } from '@frostr/bifrost'
 
 import {
-  Schema as ConnectSchema,
   NostrClient,
   SessionManager
 } from '@cmdcode/nostr-connect'
