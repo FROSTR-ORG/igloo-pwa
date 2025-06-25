@@ -1,4 +1,5 @@
 import { create_logger } from '@vbyte/micro-lib/logger'
+import { parse_error }   from '@vbyte/micro-lib/util'
 
 import {
   filter_message,
@@ -61,7 +62,9 @@ export class MessageBus {
     this.log.debug('sent message:', message)
   }
 
-  reject (id : string, error : string) {
+  reject (id : string, err : unknown) {
+    // Parse the error.
+    const error   = parse_error(err)
     // Create the message.
     const message = { id, ok : false, error, type : 'reject' }
     // Send the message.
