@@ -1,8 +1,26 @@
 {
-  "name": "igloo-pwa",
+  "name": "@frostr/igloo-pwa",
   "version": "0.1.0",
-  "description": "Frostr signing device for mobile and web.",
-  "main": "dist/app.js",
+  "description": "FROSTR signing device for mobile and web.",
+  "author": "Christopher Scott",
+  "license": "MIT",
+  "keywords": [
+    "bitcoin",
+    "nostr",
+    "frostr",
+    "pwa",
+    "nip46"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/frostr-org/igloo-pwa.git"
+  },
+  "files": [
+    "README.md",
+    "LICENSE",
+    "dist",
+    "src"
+  ],
   "type": "module",
   "scripts": {
     "build": "tsx script/build.ts",
@@ -11,13 +29,6 @@
     "relay": "tsx script/relay.ts",
     "release": "tsx script/release.ts"
   },
-  "keywords": [
-    "nostr",
-    "frostr",
-    "pwa"
-  ],
-  "author": "Christopher Scott",
-  "license": "MIT",
   "dependencies": {
     "@cmdcode/nostr-connect": "^0.0.2",
     "@cmdcode/nostr-p2p": "^2.0.11",
