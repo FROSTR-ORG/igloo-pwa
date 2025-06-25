@@ -1,9 +1,13 @@
-import { StrictMode } from 'react'
-import { createRoot } from 'react-dom/client'
-import { App }        from '@/components/app.js'
-import * as CONST     from '@/const.js'
-
+import { StrictMode }             from 'react'
+import { createRoot }             from 'react-dom/client'
+import { App }                    from '@/components/app.js'
 import { create_request_message } from '@/lib/message.js'
+
+import { 
+  QueryClient,
+  QueryClientProvider
+} from '@tanstack/react-query'
+
 
 import './styles/global.css'
 import './styles/layout.css'
@@ -12,6 +16,16 @@ import './styles/console.css'
 import './styles/sessions.css'
 import './styles/settings.css'
 import './styles/scanner.css'
+
+// Create a client instance
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      retry: 1,
+      staleTime: 5 * 60 * 1000, // 5 minutes
+    },
+  },
+})
 
 // Register service worker
 if ('serviceWorker' in navigator) {
@@ -61,6 +75,8 @@ const root = createRoot(container)
 // Render the app.
 root.render(
   <StrictMode>
-    <App />
+    <QueryClientProvider client={queryClient}>
+      <App />
+    </QueryClientProvider>
   </StrictMode>
 )

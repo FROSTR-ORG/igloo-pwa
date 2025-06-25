@@ -31,6 +31,19 @@ export function ShareConfigField() {
     setInput(decrypted)
   }
 
+  const encrypt = () => {
+    if (!is_share_string(input)) {
+      setError('invalid share string')
+      return
+    }
+    const encrypted = encrypt_secret(input, password)
+    if (!encrypted) {
+      setError('failed to encrypt secret share')
+      return
+    }
+    setInput(encrypted)
+  }
+
   /**
    * Handle the update of the store.
    */
@@ -109,6 +122,27 @@ export function ShareConfigField() {
             onChange={e => setInput(e.target.value.trim())}
             placeholder="bfshare..."
           />
+          <div className="input-actions">
+            {input.startsWith('bfshare') && (
+            <button 
+              className="button"
+                onClick={() => setShow(!show)}
+              >
+                {show ? 'hide' : 'show'}
+              </button>
+            )}
+            {!input.startsWith('bfshare') && (
+              <button 
+                className="button"
+                onClick={() => decrypt()}
+               >
+                 decrypt
+               </button>
+            )}
+          </div>
+        </div>
+
+        <div className="input-with-button">
           <input
             type="password"
             value={password}
@@ -116,33 +150,22 @@ export function ShareConfigField() {
             placeholder="enter a password to encrypt your share"
             className="nsec-input flex-input"
           />
-          <div className="input-actions">
-            <button 
-              className="button"
-              onClick={() => setShow(!show)}
-            >
-              {show ? 'hide' : 'show'}
-            </button>
-            <button 
-              className="button"
-              onClick={() => decrypt()}
-            >
-              decrypt
-            </button>
-            <button
-              className="button"
-              onClick={() => setIsScanning(!isScanning)}
-            >
-              {isScanning ? 'stop scan' : 'scan'}
-            </button>
-            <button
-              className={`button action-button ${saved ? 'saved-button' : ''}`} 
-              onClick={update}
-              disabled={input === share || error !== null}
-            >
-              {saved ? 'saved' : 'save'}
-            </button>
-          </div>
+        </div>
+        
+        <div className="action-buttons">
+          <button
+            className="button"
+            onClick={() => setIsScanning(!isScanning)}
+          >
+            {isScanning ? 'stop scan' : 'scan'}
+          </button>
+          <button
+            className={`button action-button ${saved ? 'saved-button' : ''}`} 
+            onClick={update}
+            disabled={input === share || error !== null}
+          >
+            {saved ? 'saved' : 'save'}
+          </button>
         </div>
         
         {isScanning && (

@@ -103,20 +103,23 @@ export function GroupConfigField() {
             >
               {show ? 'hide' : 'show'}
             </button>
-            <button
-              className="button"
-              onClick={() => setIsScanning(!isScanning)}
-            >
-              {isScanning ? 'stop scan' : 'scan'}
-            </button>
-            <button
-              className={`button action-button ${saved ? 'saved-button' : ''}`} 
-              onClick={() => update(input)}
-              disabled={!is_group_changed(input, store.data.group) || error !== null}
-            >
-              {saved ? 'Saved' : 'Save'}
-            </button>
           </div>
+        </div>
+        
+        <div className="action-buttons">
+          <button
+            className="button"
+            onClick={() => setIsScanning(!isScanning)}
+          >
+            {isScanning ? 'stop scan' : 'scan'}
+          </button>
+          <button
+            className={`button action-button ${saved ? 'saved-button' : ''}`} 
+            onClick={() => update(input)}
+            disabled={!is_group_changed(input, store.data.group) || error !== null}
+          >
+            {saved ? 'Saved' : 'Save'}
+          </button>
         </div>
         
         {isScanning && (
