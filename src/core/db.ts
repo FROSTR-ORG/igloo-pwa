@@ -37,18 +37,18 @@ export class DBController extends EventEmitter<{
     mode      : IDBTransactionMode
   ) : Promise<IDBObjectStore> {
     // Open the database.
-    const db = await this._open()
+    const db = await this._open(this)
     // Create a transaction on the store.
     const tx = db.transaction(storeName, mode)
     // Return the object store.
     return tx.objectStore(storeName)
   }
 
-  async _open () : Promise<IDBDatabase> {
+  async _open (self: DBController) : Promise<IDBDatabase> {
     // If the database is not open,
     if (!this._db) {
       // Open the database.
-      const db = await open_store()
+      const db = await open_store(self)
       // Close the database when the version changes.
       db.onversionchange = () => { db.close(); this._db = null }
       // Set the database.
@@ -70,7 +70,7 @@ export class DBController extends EventEmitter<{
     // Get the orphaned keys.
     const orphaned = get_orphaned_keys(current, defaults)
     // If there is no database, open it.
-    const db = await this._open()
+    const db = await this._open(this)
     // Initialize the store.
     await initialize_store(db, storeName, missing, orphaned)
     // Load the store.
@@ -148,7 +148,7 @@ export class DBController extends EventEmitter<{
   }
 }
 
-function open_store (): Promise<IDBDatabase> {
+function open_store (self: DBController): Promise<IDBDatabase> {
   // Return a promise that opens the database.
   return new Promise((resolve, reject) => {
     // Create the open request.
@@ -158,13 +158,19 @@ function open_store (): Promise<IDBDatabase> {
     // Handle database schema creation/upgrade
     request.onupgradeneeded = (event) => {
       const db = (event.target as IDBOpenDBRequest).result
+      self.log.info('upgrading database to version', DB_VERSION)
+      self.log.info(' existing stores:', Array.from(db.objectStoreNames))
       // For each store name in the stores array,
       for (const store of STORES) {
         // Create object stores if they don't exist
         if (!db.objectStoreNames.contains(store)) {
+          self.log.info('creating object store:', store)
           db.createObjectStore(store)
+        } else {
+          self.log.info('object store already exists:', store)
         }
       }
+      self.log.info('final stores:', Array.from(db.objectStoreNames))
     }
     // If the database is opened, resolve the promise.
     request.onsuccess = () => {

@@ -10,7 +10,7 @@ import SYMBOLS from '@/symbols.json' assert { type: 'json '}
 export { SYMBOLS }
 
 export const DB_NAME     = 'frostr-pwa'
-export const DB_VERSION  = 1
+export const DB_VERSION  = 2
 export const BUS_TIMEOUT = 5000
 export const LOG_LIMIT   = 100
 
