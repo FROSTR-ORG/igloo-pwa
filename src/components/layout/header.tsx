@@ -2,7 +2,7 @@ export function Header () {
   return (
     <div className="page-header">
       <img
-        src="/icons/logo.png" 
+        src="./icons/logo.png" 
         alt="Frost Logo" 
         className="frost-logo"
       />

@@ -1,10 +1,8 @@
 import type {
   AppCache,
   AppSettings,
-  GlobalFlags,
   GlobalData,
-  GlobalServices,
-  PrivateCache
+  GlobalServices
 } from '@/types/index.js'
 
 import SYMBOLS from '@/symbols.json' assert { type: 'json '}

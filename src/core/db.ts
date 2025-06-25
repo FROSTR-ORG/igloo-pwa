@@ -2,6 +2,9 @@ import { DB_NAME, DB_VERSION } from '@/const.js'
 import { Assert }              from '@vbyte/micro-lib/assert'
 import { create_logger }       from '@vbyte/micro-lib/logger'
 import { EventEmitter }        from '@/class/emitter.js'
+import { SYMBOLS }             from '@/const.js'
+
+const STORES = Object.values(SYMBOLS.STORE) as string[]
 
 import type { StoreData } from '@/types/index.js'
 
@@ -152,6 +155,17 @@ function open_store (): Promise<IDBDatabase> {
     const request = indexedDB.open(DB_NAME, DB_VERSION)
     // If the database is not open, reject the promise.
     request.onerror   = () => reject(request.error)
+    // Handle database schema creation/upgrade
+    request.onupgradeneeded = (event) => {
+      const db = (event.target as IDBOpenDBRequest).result
+      // For each store name in the stores array,
+      for (const store of STORES) {
+        // Create object stores if they don't exist
+        if (!db.objectStoreNames.contains(store)) {
+          db.createObjectStore(store)
+        }
+      }
+    }
     // If the database is opened, resolve the promise.
     request.onsuccess = () => {
       // Unpack the database from the result.
