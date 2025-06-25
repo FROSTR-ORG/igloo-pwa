@@ -39,7 +39,7 @@
     "@noble/hashes": "^1.8.0",
     "@tanstack/react-query": "^5.81.2",
     "@vbyte/buff": "^1.0.2",
-    "@vbyte/micro-lib": "^1.0.8",
+    "@vbyte/micro-lib": "^1.0.9",
     "nostr-tools": "^2.15.0",
     "qr-scanner": "^1.4.2",
     "react": "^19.1.0",
