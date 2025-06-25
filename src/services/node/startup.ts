@@ -2,7 +2,7 @@ import { BifrostNode }        from '@frostr/bifrost'
 import { Assert }             from '@/util/index.js'
 import { sanitize_payload }   from '@/lib/message.js'
 import { BifrostController }  from './class.js'
-import { get_peer_configs }   from './lib.js'
+import { get_peer_configs }   from '@/lib/peers.js'
 import * as CONST             from '@/const.js'
 
 import type { LogType } from '@/types/logger.js'

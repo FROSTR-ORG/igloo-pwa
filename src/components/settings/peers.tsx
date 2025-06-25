@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useSettings }         from '@/hooks/useSettings.js'
 
 import type { PeerConfig } from '@frostr/bifrost'
+import { get_peer_configs } from '@/lib/peers'
 
 export function PeerConfigField() {
   const store = useSettings()
@@ -37,6 +38,17 @@ export function PeerConfigField() {
   useEffect(() => {
     setPeers(store.data.peers)
   }, [ store.data.peers ])
+
+  useEffect(() => {
+    if (
+      store.data.group  && 
+      store.data.pubkey &&
+      store.data.peers.length === 0
+    ) {
+      const configs = get_peer_configs(store.data)
+      setPeers(configs)
+    }
+  }, [ store.data ])
 
   return (
     <div className="container">
