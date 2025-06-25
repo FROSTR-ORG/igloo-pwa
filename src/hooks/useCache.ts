@@ -3,7 +3,7 @@ import { useMessageBus, useMessageQuery } from '@/hooks/useMessage.js'
 import * as CONST           from '@/const.js'
 import { get_store_topics } from '@/lib/store.js'
 
-import type { ApplicationCache } from '@/types/index.js'
+import type { AppCache } from '@/types/index.js'
 
 const STORE_KEY   = CONST.SYMBOLS.STORE.CACHE
 const STORE_TOPIC = get_store_topics(STORE_KEY)
@@ -17,13 +17,13 @@ export function useCache() {
     data = DEFAULTS,
     isLoading,
     error
-  } = useMessageQuery<ApplicationCache>(STORE_TOPIC.FETCH, STORE_TOPIC.EVENT)
+  } = useMessageQuery<AppCache>(STORE_TOPIC.FETCH, STORE_TOPIC.EVENT)
   // Define the reset method.
   const reset = () => {
     return bus.request({ topic: STORE_TOPIC.RESET })
   }
   // Define the update method.
-  const update = (data: Partial<ApplicationCache>) => {
+  const update = (data: Partial<AppCache>) => {
     return bus.request({ topic: STORE_TOPIC.UPDATE, params: data })
   }
   // Return the data API and action methods.

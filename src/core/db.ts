@@ -1,13 +1,22 @@
 import { DB_NAME, DB_VERSION } from '@/const.js'
+import { EventEmitter }        from '@/class/emitter.js'
+import { create_logger }       from '@vbyte/micro-lib/logger'
 import { Assert }              from '@/util/index.js'
 
 import type { StoreData } from '@/types/index.js'
-import { get_console } from '@/lib/logger'
 
-export class DBController {
+export class DBController extends EventEmitter<{
+  open  : [ db : IDBDatabase ]
+  init  : [ storeName : string, data : StoreData ]
+  fetch : [ storeName : string, data : StoreData ]
+  save  : [ storeName : string, data : StoreData ]
+  close : [ db : IDBDatabase ]
+  error : [ error : unknown ]
+}> {
   private _db : IDBDatabase | null = null
 
   constructor () {
+    super()
     this.log.info('controller created')
   }
 
@@ -17,7 +26,7 @@ export class DBController {
   }
 
   get log () {
-    return get_console('[ db ]')
+    return create_logger('db')
   }
 
   async _load (
@@ -41,6 +50,8 @@ export class DBController {
       db.onversionchange = () => { db.close(); this._db = null }
       // Set the database.
       this._db = db
+      // Emit the database opening.
+      this.emit('open', db)
       // Log the database opening.
       this.log.info('database opened')
     }
@@ -61,6 +72,8 @@ export class DBController {
     await initialize_store(db, storeName, missing, orphaned)
     // Load the store.
     const store = await this.fetch(storeName)
+    // Emit the store initialization.
+    this.emit('init', storeName, store)
     // Log the store initialization.
     this.log.info('store initialized:', storeName)
     // Return the store.
@@ -94,6 +107,8 @@ export class DBController {
           // Move to the next entry.
           cursor.continue()
         } else {
+          // Emit the store fetch.
+          this.emit('fetch', storeName, result)
           // Log the store fetch.
           this.log.info('store fetched:', storeName)
           // Resolve with the result.
@@ -115,13 +130,18 @@ export class DBController {
         // If the request fails, reject the promise.
         request.onerror = () => reject(request.error)
         // If the request succeeds, resolve the promise.
-        request.onsuccess = () => resolve()
+        request.onsuccess = () => {
+          // Emit the store save.
+          this.emit('save', storeName, data)
+          // Log the store save.
+          this.log.info('store saved:', storeName)
+          // Resolve the promise.
+          resolve()
+        }
       })
     })
     // Execute the promises.
     await Promise.all(promises)
-    // Log the store save.
-    this.log.info('store saved:', storeName)
   }
 }
 

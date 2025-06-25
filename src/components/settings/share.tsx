@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react'
+import { get_pubkey }          from '@frostr/bifrost/util'
 import { QRScanner }           from '@/components/util/scanner.js'
 import { useSettings }         from '@/hooks/useSettings.js'
 import { decode_share }        from '@/lib/encoder.js'
 
 import { decrypt_secret, encrypt_secret } from '@/lib/crypto.js'
-import { get_pubkey } from '@frostr/bifrost/util'
 
-export function ShareConfig() {
+export function ShareConfigField() {
   const store = useSettings()
   const share = store.data.share
 

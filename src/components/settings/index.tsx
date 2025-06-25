@@ -1,17 +1,17 @@
-import { GroupConfig }       from './group.js'
-import { PeerConfig }        from './peers.js'
-import { RelayConfig }       from './relays.js'
-import { ResetStore }        from './reset.js'
-import { ShareConfig }       from './share.js'
+import { GroupConfigField }  from './group.js'
+import { PeerConfigField }   from './peers.js'
+import { RelayConfigField }  from './relays.js'
+import { ResetStoreField }   from './reset.js'
+import { ShareConfigField }  from './share.js'
 
-export function Settings () {
+export function SettingsView () {
   return (
     <>
-      <GroupConfig       />
-      <ShareConfig       />
-      <PeerConfig        />
-      <RelayConfig       />
-      <ResetStore        />
+      <GroupConfigField       />
+      <ShareConfigField       />
+      <PeerConfigField        />
+      <RelayConfigField       />
+      <ResetStoreField        />
     </>
   )
 }

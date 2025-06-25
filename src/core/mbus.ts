@@ -1,13 +1,10 @@
-import { EventEmitter }     from '@/class/emitter.js'
-import { BUS_TIMEOUT }      from '@/const.js'
-import { GlobalController } from '@/core/global.js'
-import { parse_error }      from '@/util/index.js'
+import { create_logger } from '@/lib/logger.js'
 
 import {
   filter_message,
   generate_id,
   parse_message
-} from '@/lib/message'
+} from '@/lib/message.js'
 
 import type {
   EventTemplate,
@@ -16,28 +13,29 @@ import type {
   EventMessage,
   RejectMessage,
   AcceptMessage,
-  GlobalInitScope
+  GlobalInitScope,
+  MessageSubscription
 } from '@/types/index.js'
-
-interface MessageSubscription {
-  callback : (message: MessageEnvelope) => void
-  filter?  : MessageFilter
-}
 
 export class MessageBus {
   private readonly _scope : GlobalInitScope
-  private readonly _subs : Set<MessageSubscription> = new Set()
+  private readonly _subs  : Set<MessageSubscription> = new Set()
 
   constructor (scope : GlobalInitScope) {
     this._scope = scope
-    this._scope.addEventListener('message', this._handler.bind(this))
   }
 
-  _handler (event : ExtendableMessageEvent) {
+  get log () {    
+    return create_logger('mbus')
+  }
+
+  handle (event : ExtendableMessageEvent) {
     // Parse the message.
     const message = parse_message(event.data)
     // If the message is not valid, return.
     if (!message) return
+    // Log the message.
+    this.log.info('received message:', message)
     // For each subscription,
     for (const sub of this._subs) {
       // If the message does not match the filter, skip.
@@ -59,7 +57,7 @@ export class MessageBus {
       client.postMessage(message)
     }
     // Log the message.
-    console.log('[ bus ] sent message:', message)
+    this.log.info('sent message:', message)
   }
 
   reject (id : string, error : string) {

@@ -5,6 +5,7 @@ import { now }          from '@/util/helpers.js'
 
 import type { SignedEvent, SignerDeviceAPI } from '@cmdcode/nostr-connect'
 import type { EventTemplate }                from 'nostr-tools'
+import { convert_pubkey } from '@frostr/bifrost/util'
 
 const SIGN_METHODS : Record<string, string> = {
   sign_event    : 'sign_event',
@@ -61,12 +62,14 @@ export class BifrostSignDevice implements SignerDeviceAPI {
   async nip44_encrypt (pubkey : string, plaintext : string) : Promise<string> {
     const res = await this._node.req.ecdh(pubkey)
     if (!res.ok) throw new Error(res.err)
-    return cipher.nip44_encrypt(res.data, plaintext)
+    const secret = convert_pubkey(res.data, 'bip340')
+    return cipher.nip44_encrypt(secret, plaintext)
   }
 
   async nip44_decrypt (pubkey : string, ciphertext : string) : Promise<string> {
     const res = await this._node.req.ecdh(pubkey)
     if (!res.ok) throw new Error(res.err)
-    return cipher.nip44_decrypt(res.data, ciphertext)
+    const secret = convert_pubkey(res.data, 'bip340')
+    return cipher.nip44_decrypt(secret, ciphertext)
   }
 }

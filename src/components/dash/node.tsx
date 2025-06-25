@@ -1,13 +1,11 @@
 import { useState }       from 'react'
 import { nip19 }          from 'nostr-tools'
 import { useBifrostNode } from '@/hooks/useNode.js'
-import { useEnclave }     from '@/hooks/useEnclave.js'
 
-export function NodeInfo () {
-  const client  = useBifrostNode()
-  const enclave = useEnclave()
-  const pubkey  = client.data.pubkey
-  const status  = client.data.status
+export function NodeInfoView () {
+  const client = useBifrostNode()
+  const pubkey = client.data.pubkey
+  const status = client.data.status
 
   const [ password, setPassword ]       = useState('')
   const [ error, setError ]             = useState<string | null>(null)
@@ -31,7 +29,7 @@ export function NodeInfo () {
       setError('Password is required')
       return
     }
-    const res = await enclave.unlock(password)
+    const res = await client.unlock(password)
     if (!res.ok) {
       setError(res.error)
       return

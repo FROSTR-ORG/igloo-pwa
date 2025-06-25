@@ -9,7 +9,7 @@ import {
 
 import type { GroupPackage } from '@frostr/bifrost'
 
-export function GroupConfig() {
+export function GroupConfigField() {
   const store = useSettings()
 
   const [ input, setInput ] = useState<string>('')

@@ -3,8 +3,8 @@ import * as Schema         from '@/schema.js'
 import * as CONST          from '@/const.js'
 
 import type {
-  ApplicationCache,
-  ApplicationSettings,
+  AppCache,
+  AppSettings,
   GlobalInitScope
 } from '@/types/index.js'
 
@@ -23,17 +23,16 @@ export function get_store_topics (store_key : string) {
 
 export function init_cache_store (scope : GlobalInitScope) {
   const config = {
-    topics     : get_store_topics(CACHE_KEY),
-    store_key  : CACHE_KEY,
-    defaults   : CONST.APP_CACHE,
-    validator  : assert_cache_data
+    defaults  : CONST.APP_CACHE,
+    store_key : CACHE_KEY,
+    validator : assert_cache_data
   }
   return new StoreController (scope, config)
 }
 
 export function validate_cache_data (
   cache : unknown
-) : cache is ApplicationCache {
+) : cache is AppCache {
   const parsed = Schema.app_cache.safeParse(cache)
   if (!parsed.success) {
     console.error('[ store ] invalid cache data:')
@@ -45,7 +44,7 @@ export function validate_cache_data (
 
 export function assert_cache_data (
   cache : unknown
-) : asserts cache is ApplicationCache {
+) : asserts cache is AppCache {
   if (!validate_cache_data(cache)) {
     throw new Error('invalid cache data')
   }
@@ -53,9 +52,8 @@ export function assert_cache_data (
 
 export function init_settings_store (scope : GlobalInitScope) {
   const config = {
-    topics     : get_store_topics(SETTINGS_KEY),
-    store_key  : SETTINGS_KEY,
     defaults   : CONST.APP_SETTINGS,
+    store_key  : SETTINGS_KEY,
     validator  : assert_settings_data
   }
   return new StoreController(scope, config)
@@ -64,7 +62,7 @@ export function init_settings_store (scope : GlobalInitScope) {
 
 export function validate_settings_data (
   settings : unknown
-) : settings is ApplicationSettings {
+) : settings is AppSettings {
   const parsed = Schema.app_settings.safeParse(settings)
   if (!parsed.success) {
     console.error('[ store ] invalid settings data:')
@@ -76,7 +74,7 @@ export function validate_settings_data (
 
 export function assert_settings_data (
   settings : unknown
-) : asserts settings is ApplicationSettings {
+) : asserts settings is AppSettings {
   if (!validate_settings_data(settings)) {
     throw new Error('invalid settings data')
   }

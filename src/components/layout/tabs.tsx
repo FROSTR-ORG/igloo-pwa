@@ -1,7 +1,7 @@
-import { useState }  from 'react'
-import { Dashboard } from '@/components/dash/index.js'
-import { Sessions }  from '@/components/sessions/index.js'
-import { Settings }  from '@/components/settings/index.js'
+import { useState }      from 'react'
+import { DashboardView } from '@/components/dash/index.js'
+import { SessionsView }  from '@/components/sessions/index.js'
+import { SettingsView }  from '@/components/settings/index.js'
 
 import type { ReactElement } from 'react'
 
@@ -44,19 +44,19 @@ export function Tabs(): ReactElement {
       <div className="tab-content">
         {activeTab === 'dashboard' && (
           <div className="tab-panel">
-            <Dashboard />
+            <DashboardView />
           </div>
         )}
 
         {activeTab === 'sessions' && (
           <div className="tab-panel">
-            <Sessions />
+            <SessionsView />
           </div>
         )}
 
         {activeTab === 'settings' && (
           <div className="tab-panel">
-            <Settings />
+            <SettingsView />
           </div>
         )}
       </div>

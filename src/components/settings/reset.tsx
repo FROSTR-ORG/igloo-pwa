@@ -1,6 +1,6 @@
 import { useSettings } from '@/hooks/useSettings.js'
 
-export function ResetStore() {
+export function ResetStoreField() {
   const store = useSettings()
 
   // Update the peer policies in the store.

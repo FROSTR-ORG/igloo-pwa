@@ -1,16 +1,16 @@
 import { assert_global_ready } from '@/lib/global.js'
-import { get_console }  from '@/lib/logger.js'
-import { DBController } from './db.js'
-import { MessageBus }   from './mbus.js'
+import { create_logger }       from '@vbyte/micro-lib/logger'
+import { DBController }        from './db.js'
+import { MessageBus }          from './mbus.js'
 
 import type { GlobalInitScope } from '@/types/index.js'
 
-export class GlobalController {
-  static fetch (scope : GlobalInitScope) : GlobalController {
+export class CoreController {
+  static fetch (scope : GlobalInitScope) : CoreController {
     // If the controller is not initialized, throw an error.
-    assert_has_controller(scope.ctrl)
+    assert_has_controller(scope.core)
     // Return the controller.
-    return scope.ctrl as GlobalController
+    return scope.core as CoreController
   }
 
   private readonly _db    : DBController
@@ -33,7 +33,7 @@ export class GlobalController {
   }
 
   get log () {
-    return get_console('[ global ]')
+    return create_logger('global')
   }
 
   get scope () {
@@ -45,8 +45,8 @@ export class GlobalController {
 
 function assert_has_controller (
   controller : unknown
-) : asserts controller is GlobalController {
-  if (!(controller instanceof GlobalController)) {
+) : asserts controller is CoreController {
+  if (!(controller instanceof CoreController)) {
     throw new Error('controller is not a GlobalController')
   }
 }

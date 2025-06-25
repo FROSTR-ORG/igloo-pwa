@@ -13,29 +13,11 @@ import type {
 import type { LogType } from '@/types/index.js'
 
 const DOMAINS = CONST.SYMBOLS.DOMAIN
-const FLAGS   = CONST.FLAGS
-
-export function get_console (prefix : string) {
-  // Get the flags from the scope.
-  const { debug, verbose } = FLAGS
-  // Return the logger.
-  return {
-    debug : (...args : any[]) => { if (debug)   console.debug(`[ ${prefix} ]`, ...args) },
-    info  : (...args : any[]) => { if (verbose) console.info(`[ ${prefix} ]`, ...args)  },
-    error : (...args : any[]) => {              console.error(`[ ${prefix} ]`, ...args) },
-    warn  : (...args : any[]) => { if (verbose) console.warn(`[ ${prefix} ]`, ...args)  }
-  }
-}
 
 export function attach_node_logger (
   logger : LogController,
   node   : BifrostNode
 ) {
-  // Listen for client events.
-  node.client.on('*', (...args : any[]) => {
-    const [ event, data ] = args
-    console.log('[ node ] client event:', event, data)
-  })
   // Listen for node events.
   node.on('*', (event, data) => {
     // Skip message events.
@@ -81,7 +63,6 @@ export function attach_node_logger (
       payload = undefined
     } else {
       // Sanitize the payload.
-      console.log(' [ sw/service/client ] sanitizing payload', payload)
       payload = sanitize_payload(payload)
     }
 
@@ -99,7 +80,7 @@ export function attach_rpc_logger (
   client : NostrClient
 ) {
   client.on('ready', () => {
-    logger.add({ message : 'session client ready', topic: DOMAINS.RPC })
+    logger.add({ message : 'session client ready', topic: DOMAINS.SESSION })
     console.log('[ session ] session client ready')
   })
   client.on('subscribed', () => {
@@ -121,14 +102,14 @@ export function attach_rpc_logger (
   client.on('error', (err : unknown) => {
     logger.add({
       message : 'session client error',
-      topic   : DOMAINS.RPC,
+      topic   : DOMAINS.SESSION,
       type    : 'error',
       payload : err
     })
     console.error('[ session ] session client error:', err)
   })
   client.on('close', () => {
-    logger.add({ message : 'session client closed', topic : DOMAINS.RPC })
+    logger.add({ message : 'session client closed', topic : DOMAINS.SESSION })
     console.log('[ session ] session client closed')
   })
 }

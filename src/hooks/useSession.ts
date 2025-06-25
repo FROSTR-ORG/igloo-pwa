@@ -9,9 +9,11 @@ import type {
 
 import type { SessionState } from '@/types/index.js'
 
-const TOPIC   = CONST.SYMBOLS.TOPIC.SESSION
-const DEFAULTS = {
-  sessions : []
+const TOPIC    = CONST.SYMBOLS.TOPIC.SESSION
+const DEFAULTS : SessionState = {
+  active  : [],
+  pending : [],
+  status  : 'loading'
 }
 
 export function useNostrSession() {

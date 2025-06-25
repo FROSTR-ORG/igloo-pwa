@@ -1,8 +1,5 @@
-import { SessionToken } from '@cmdcode/nostr-connect'
-
-import {
-  PeerData
-} from '@frostr/bifrost'
+import type { SessionToken } from '@cmdcode/nostr-connect'
+import type { PeerData }     from '@frostr/bifrost'
 
 export interface NodeState {
   peers  : PeerData[]
@@ -11,8 +8,9 @@ export interface NodeState {
 }
 
 export interface SessionState {
-  sessions : { active : SessionToken[], pending : SessionToken[] }
-  status   : string
+  active  : SessionToken[]
+  pending : SessionToken[]
+  status  : string
 }
 
 export interface PeerPolicy {

@@ -3,7 +3,7 @@ import { useSettings }         from '@/hooks/useSettings.js'
 
 import type { RelayPolicy } from '@/types/index.js'
 
-export function RelayConfig() {
+export function RelayConfigField() {
   const store = useSettings()
 
   const [ relays, setRelays ]   = useState<RelayPolicy[]>(store.data.relays ?? [])

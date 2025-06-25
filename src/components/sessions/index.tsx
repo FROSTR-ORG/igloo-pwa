@@ -1,12 +1,11 @@
-import { useState, useEffect } from 'react'
+import { useState }            from 'react'
 import { ConnectToken }        from '@cmdcode/nostr-connect'
-import { useNostrSession }          from '@/hooks/useSession.js'
+import { useNostrSession }     from '@/hooks/useSession.js'
 import { PermissionsDropdown } from '@/components/sessions/permissions.js'
 
 import type { PermissionMap } from '@cmdcode/nostr-connect'
-import type { SessionState }  from '@/types/index.js'
 
-export function Sessions() {
+export function SessionsView() {
   const client = useNostrSession()
 
   const [ connectStr, setConnectStr ] = useState('')
@@ -27,7 +26,7 @@ export function Sessions() {
     }
   }
 
-  const togglePermissionsDropdown = (pubkey: string) => {
+  const toggle_dropdown = (pubkey: string) => {
     const newExpanded = new Set(expanded)
     if (newExpanded.has(pubkey)) {
       newExpanded.delete(pubkey)
@@ -53,18 +52,18 @@ export function Sessions() {
     setExpanded(newExpanded)
   }
 
-  const handlePermissionChange = (pubkey: string, permissions: PermissionMap) => {
+  const handle_permission_change = (pubkey: string, permissions: PermissionMap) => {
     setEditing(prev => ({
       ...prev,
       [pubkey]: permissions
     }))
   }
 
-  const handleEventKindChange = (pubkey: string, eventKind: string) => {
+  const handle_event_kind_change = (pubkey: string, eventKind: string) => {
     setNewKind(prev => ({ ...prev, [pubkey]: eventKind }))
   }
 
-  const handleUpdateSession = async (pubkey: string) => {
+  const handle_update_session = async (pubkey: string) => {
     try {
       const session = [ ...client.data.active ].find(s => s.pubkey === pubkey)
       if (!session) return
@@ -162,7 +161,7 @@ export function Sessions() {
                   {/* Permissions Toggle */}
                   <div className="session-permissions-toggle">
                     <button
-                      onClick={() => togglePermissionsDropdown(session.pubkey)}
+                      onClick={() => toggle_dropdown(session.pubkey)}
                       className="session-permissions-btn"
                     >
                       {expanded.has(session.pubkey) ? 'Hide' : 'Show'} Permissions
@@ -174,28 +173,19 @@ export function Sessions() {
                       session={session}
                       editingPermissions={editing[session.pubkey] || session.perms || {}}
                       newEventKind={newKind[session.pubkey] || ''}
-                      onPermissionChange={(permissions) => handlePermissionChange(session.pubkey, permissions)}
-                      onEventKindChange={(eventKind) => handleEventKindChange(session.pubkey, eventKind)}
-                      onUpdateSession={() => handleUpdateSession(session.pubkey)}
+                      onPermissionChange={(permissions) => handle_permission_change(session.pubkey, permissions)}
+                      onEventKindChange={(eventKind) => handle_event_kind_change(session.pubkey, eventKind)}
+                      onUpdateSession={() => handle_update_session(session.pubkey)}
                     />
                   )}
                   {/* Revoke/Cancel button in bottom-right */}
                   <div className="session-card-actions-bottom">
-                    {session.status === 'active' ? (
-                      <button
-                        onClick={() => client.revoke(session.pubkey)}
-                        className="session-revoke-btn"
-                      >
-                        Revoke
-                      </button>
-                    ) : (
-                      <button
-                        onClick={() => client.cancel(session.pubkey)}
-                        className="session-cancel-btn"
-                      >
-                        Cancel
-                      </button>
-                    )}
+                    <button
+                      onClick={() => client.revoke(session.pubkey)}
+                      className="session-revoke-btn"
+                    >
+                      Revoke
+                    </button>
                   </div>
                 </div>
               )

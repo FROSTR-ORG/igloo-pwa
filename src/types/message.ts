@@ -14,6 +14,11 @@ export interface MessageFilter {
   type?   : string | MessageType
 }
 
+export interface MessageSubscription {
+  callback : (message: MessageEnvelope) => void
+  filter?  : MessageFilter
+}
+
 export interface PendingResponse<T = unknown> {
   resolve   : (value   : ResponseMessage<T>) => void 
   reject    : (reason? : string) => void

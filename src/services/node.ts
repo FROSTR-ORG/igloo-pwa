@@ -1,23 +1,17 @@
-import { BifrostNode }           from '@frostr/bifrost'
-import { EventEmitter }          from '@/class/emitter.js'
-import { GlobalController }      from '@/core/global.js'
-import { Assert, JsonUtil }      from '@/util/index.js'
-import * as CONST                from '@/const.js'
-
-import {
-  attach_node_logger,
-  get_console
-} from '@/lib/logger.js'
-
-import {
-  get_peer_policies,
-  init_peer_permissions,
-  should_init_peers
-} from '@/lib/node.js'
+import { BifrostNode }        from '@frostr/bifrost'
+import { create_logger }      from '@vbyte/micro-lib/logger'
+import { EventEmitter }       from '@/class/emitter.js'
+import { CoreController }     from '@/core/ctrl.js'
+import { Assert, JsonUtil }   from '@/util/index.js'
+import { decrypt_secret }     from '@/lib/crypto.js'
+import { decode_share }       from '@/lib/encoder.js'
+import { get_peer_configs }   from '@/lib/node.js'
+import { attach_node_logger } from '@/lib/logger.js'
+import * as CONST             from '@/const.js'
 
 import type {
   MessageEnvelope,
-  ApplicationSettings,
+  AppSettings,
   GlobalInitScope,
   NodeState
 } from '@/types/index.js'
@@ -26,21 +20,24 @@ const NODE_DOMAIN = CONST.SYMBOLS.DOMAIN.NODE
 const NODE_TOPIC  = CONST.SYMBOLS.TOPIC.NODE
 
 export class BifrostController extends EventEmitter <{
-  ready : any[]
+  unlock : [ state : NodeState ]
+  ready  : any[]
+  reset  : [ state : NodeState ]
+  closed : any[]
+  error  : [ error : unknown ]
 }> {
-  private readonly _global : GlobalController
+  private readonly _global : CoreController
 
   private _client : BifrostNode | null = null
 
   constructor (scope : GlobalInitScope) {
     super()
-    this._global = GlobalController.fetch(scope)
-    this.global.mbus.subscribe(this._handler.bind(this), { domain : NODE_DOMAIN })
+    this._global = CoreController.fetch(scope)
   }
 
   get can_init () : boolean {
-    const enclave = this.global.scope.enclave
-    return this.has_settings && enclave.is_ready
+    const share = this.global.scope.private.share
+    return this.has_settings && !!share
   }
 
   get client () : BifrostNode | null {
@@ -55,16 +52,28 @@ export class BifrostController extends EventEmitter <{
     return has_node_settings(this)
   }
 
+  get has_share () : boolean {
+    return !!this.global.scope.private.share
+  }
+
+  get is_ready () : boolean {
+    return this.client?.is_ready ?? false
+  }
+
   get log () {
-    return get_console('[ node ]')
+    return create_logger('node')
   }
 
   get state () : NodeState {
     return {
       peers  : this.client?.peers ?? [],
       pubkey : this.client?.pubkey ?? null,
-      status : get_node_status(this)
+      status : this.status
     }
+  }
+
+  get status () : string {
+    return get_node_status(this)
   }
 
   set client (client : BifrostNode | null) {
@@ -81,43 +90,115 @@ export class BifrostController extends EventEmitter <{
     handle_node_message(this, msg)
   }
 
-  async _init () {
-    if (this.can_init) {
-      const err = init_node(this)
-      if (!err) {
+  _start () {
+    try {
+      // If the node cannot be initialized, return an error.
+      Assert.ok(this.has_settings, 'node is not configured')
+      // Get the share from the settings.
+      const share = this.global.scope.private.share
+      // If the share is not present, return an error.
+      Assert.exists(share, 'share not present')
+      // If the store is missing data, return early.
+      Assert.ok(this.can_init, 'store is not fully initialized')
+      // Get the settings cache.
+      const settings = this.global.scope.settings.data
+      // Extract the urls from the relay policies.
+      const urls = settings.relays.map(e => e.url)
+      // Get the peer policies.
+      const policies = get_peer_configs(settings)
+      // Initalize the bifrost node.
+      const node = new BifrostNode(settings.group!, share, urls, { policies })
+      // Attach the logger to the node.
+      attach_node_logger(this.global.scope.log, node)
+      // Dispatch the node state.
+      node.on('ready',  () => {
+        // Dispatch the node state.
         this._dispatch(this.state)
-        this.log.info('client initialized')
+        // Emit the ready event.
         this.emit('ready')
-      } else {
-        this.log.error('failed to initialize client:', err)
-      }
+        // Log the node ready event.
+        this.log.info('node ready')
+      })
+      node.on('closed', () => {
+        // Dispatch the node state.
+        this._dispatch(this.state)
+        // Emit the closed event.
+        this.emit('closed')
+        // Log the node closed event.
+        this.log.info('node closed')
+      })
+      node.on('/ping/handler/res', () => {
+        // Dispatch the node state.
+        this._dispatch(this.state)
+      })
+      // Connect the node.
+      node.connect()
+      // Update the global state.
+      this.client = node
+    } catch (err) {
+      // Log the error.
+      this.log.error('error during initialization:', err)
+      // Emit the error event.
+      this.emit('error', err)
     }
   }
 
   init () {
     // Subscribe to node messages.
     this.global.mbus.subscribe(msg => handle_node_message(this, msg))
-    // Subscribe to settings changes.
-    this.global.scope.settings.on_change(handle_peer_updates)
     // Subscribe to settings updates.
     this.global.scope.settings.on('update', (current, updated) => {
       handle_settings_updates(this, current, updated)
     })
-    // Subscribe to enclave updates.
-    this.global.scope.enclave.on('unlocked', () => this._init())
-    // Initialize the node.
-    this._init()
+    // Log the initialization.
+    this.log.info('initialized')
+  }
+
+  reset () {
+    // Reset the node.
+    this.client = null
+    // Dispatch the node state.
+    this._dispatch(this.state)
+    // Emit the reset event.
+    this.emit('reset', this.state)
+  }
+
+  unlock (password : string) {
+    // If password is not a string, return error.
+    if (typeof password !== 'string') return 'password is not a string'
+    // Get the share from the settings.
+    const share = this.global.scope.settings.data.share
+    // If the share is not present, return error.
+    if (!share) return 'share not present'
+    // Try to decrypt the secret share.
+    const decrypted = decrypt_secret(share, password)
+    // If the decryption failed, return error.
+    if (!decrypted) return 'failed to decrypt private data'
+    // Try to parse the decrypted data.
+    const parsed = decode_share(decrypted)
+    // If the parsing failed, return error.
+    if (!parsed) return 'failed to decode share package'
+    // Update the private store.
+    this.global.scope.private.share = parsed
+    // Emit the unlock event.
+    this.emit('unlock', this.state)
+    // Log the unlock event.
+    this.log.info('node unlocked')
+    // Run the node boot process.
+    this._start()
   }
 }
 
 function get_node_status (node : BifrostController) : string {
-  if (node.client?.is_ready) return 'online'
-  if (node.client)           return 'connecting'
-  return 'offline'
+  if (node.is_ready)           return 'online'
+  if (node.client)             return 'connecting'
+  if (node.has_share)          return 'unlocked'
+  if (has_node_settings(node)) return 'locked'
+  return 'loading'
 }
 
 function handle_node_message (
-  ctrl : BifrostController,
+  self : BifrostController,
   msg  : MessageEnvelope
 ) {
   // If the message is not a request, return.
@@ -127,119 +208,64 @@ function handle_node_message (
     // For echo requests,
     case NODE_TOPIC.ECHO: {
       // If the client is not initialized, return an error.
-      if (!ctrl.client) return ctrl.global.mbus.reject(msg.id, 'client not initialized')
+      if (!self.client) return self.global.mbus.reject(msg.id, 'client not initialized')
       // Send an echo request.
-      ctrl.client.req.echo(msg.params as string).then(res => {
+      self.client.req.echo(msg.params as string).then(res => {
         // If the ping failed, return an error.
-        if (!res.ok) return ctrl.global.mbus.reject(msg.id, res.err)
+        if (!res.ok) return self.global.mbus.reject(msg.id, res.err)
         // Respond with the result.
-        ctrl.global.mbus.respond(msg.id, true)
+        self.global.mbus.respond(msg.id, true)
       })
       break
     }
     // For fetch requests,
     case NODE_TOPIC.FETCH: {
       // Respond with the result.
-      ctrl.global.mbus.respond(msg.id, ctrl.state)
+      self.global.mbus.respond(msg.id, self.state)
       break
     }
     // For ping requests,
     case NODE_TOPIC.PING: {
       // If the client is not initialized, return an error.
-      if (!ctrl.client) return ctrl.global.mbus.reject(msg.id, 'client not initialized')
+      if (!self.client) return self.global.mbus.reject(msg.id, 'client not initialized')
       // Ping the peer.
-      ctrl.client.req.ping(msg.params as string).then(res => {
-        // If the ping failed, return an error.
-        if (!res.ok) return ctrl.global.mbus.reject(msg.id, res.err)
-        // Respond with the result.
-        ctrl.global.mbus.respond(msg.id, true)
+      self.client.req.ping(msg.params as string).then(res => {
+        // Dispatch the node state.
+        self._dispatch(self.state)
+        // Return the result.
+        if (res.ok) self.global.mbus.respond(msg.id, true)
+        else self.global.mbus.reject(msg.id, res.err)
       })
       break
     }
     // For reset requests,
     case NODE_TOPIC.RESET: {
-      // Initialize the client.
-      const err = init_node(ctrl)
-      // If error, return an error.
-      if (err) return ctrl.global.mbus.reject(msg.id, err)
+      // Reset the node.
+      self.reset()
       // Send a response.
-      ctrl.global.mbus.respond(msg.id, true)
+      self.global.mbus.respond(msg.id, true)
+      break
+    }
+    // For unlock requests,
+    case NODE_TOPIC.UNLOCK: {
+      // Unlock the node.
+      self.unlock(msg.params as string)
+      // Send a response.
+      self.global.mbus.respond(msg.id, true)
       break
     }
   }
 }
 
-function init_node (ctrl : BifrostController) {
-  try {
-    // If the node cannot be initialized, return an error.
-    if (!ctrl.has_settings) return 'node is not configured'
-    // Get the enclave.
-    const enclave = ctrl.global.scope.enclave
-    // If the enclave is not ready, return an error.
-    if (!enclave || !enclave.is_ready) return 'enclave not ready'
-    // Get the share from the enclave.
-    const share = enclave.store.share
-    // If the share is not present, return an error.
-    if (!share) return 'share not present'
-    // If the store is missing data, return early.
-    if (!share || !ctrl.can_init) {
-      return 'store is not fully initialized'
-    }
-    // Get the settings cache.
-    const settings = ctrl.global.scope.settings.data
-    // Extract the urls from the relay policies.
-    const urls = settings.relays.map(e => e.url)
-    // Get the peer policies.
-    const policies = get_peer_policies(settings.peers)
-    // Initalize the bifrost node.
-    const node = new BifrostNode(settings.group!, share, urls, { policies })
-    // Attach the logger to the node.
-    attach_node_logger(ctrl.global.scope.log, node)
-    // Connect the node.
-    node.connect()
-    // Update the global state.
-    ctrl.client = node
-    // Return null for success.
-    return null
-  } catch (err) {
-    // Log the error.
-    console.error(err)
-    // Return an error response.
-    return 'error during initialization'
-  }
-}
-
-function handle_peer_updates (
-  current : ApplicationSettings,
-  updated : ApplicationSettings
-) : ApplicationSettings {
-  if (should_init_peers(current, updated)) {
-    // Initialize the peer permissions.
-    const peers = init_peer_permissions(updated)
-    // Update the global state.
-    return { ...updated, peers }
-  }
-  // Return the updated settings.
-  return updated
-}
-
 function handle_settings_updates (
-  ctrl    : BifrostController,
-  current : ApplicationSettings,
-  updated : ApplicationSettings
+  self    : BifrostController,
+  current : AppSettings,
+  updated : AppSettings
 ) {
   // Check if we should reset the node.
-  const is_reset = should_reset_node(ctrl, current, updated)
-  // If we should, reset the node.
-  if (is_reset) {
-    // If we can initialize,
-    if (ctrl.can_init) {
-      // Load the node.
-      init_node(ctrl)
-    } else {
-      // Reset the node.
-      ctrl.client = null
-    }
+  if (should_reset_node(self, current, updated)) {
+    // Reset the node.
+    self.reset()
   }
 }
 
@@ -253,12 +279,12 @@ function has_node_settings (ctrl : BifrostController) : boolean {
 }
 
 function should_reset_node (
-  ctrl    : BifrostController,
-  current : ApplicationSettings,
-  updated : ApplicationSettings
+  self    : BifrostController,
+  current : AppSettings,
+  updated : AppSettings
 ) {
   // If we can't initialize, then return false.
-  if (!ctrl.global.scope.private) return false
+  if (!self.global.scope.private) return false
   // If the share data has changed, return false.
   if (current.share !== updated.share) return false
   // If the group data has changed, return true.

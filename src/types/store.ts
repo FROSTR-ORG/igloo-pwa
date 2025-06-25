@@ -16,15 +16,14 @@ export interface StoreTopics {
 export interface StoreConfig <T extends StoreData> {
   defaults   : T
   store_key  : string
-  topics     : StoreTopics
   validator? : (data : unknown) => asserts data is T
 }
 
-export interface ApplicationCache {
+export interface AppCache {
   sessions : SessionToken[]
 }
 
-export interface ApplicationSettings {
+export interface AppSettings {
   group    : GroupPackage | null
   peers    : PeerConfig[]
   pubkey   : string | null
@@ -32,6 +31,6 @@ export interface ApplicationSettings {
   share    : string | null
 }
 
-export interface PrivateStore {
+export interface PrivateCache {
   share : SharePackage | null
 }

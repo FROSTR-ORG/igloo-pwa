@@ -1,13 +1,13 @@
-import { NodeInfo } from './info.js'
-import { PeerInfo } from './peers.js'
-import { Console }  from './console.js'
+import { NodeInfoView } from './node.js'
+import { PeerInfoView } from './peers.js'
+import { ConsoleView }  from './console.js'
 
-export function Dashboard () {
+export function DashboardView () {
   return (
     <>
-      <NodeInfo />
-      <PeerInfo />
-      <Console />
+      <NodeInfoView />
+      <PeerInfoView />
+      <ConsoleView />
     </>
   )
 }

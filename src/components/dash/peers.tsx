@@ -1,16 +1,19 @@
-import { RefreshIcon } from '@/components/util/icons.js'
-import { useBifrostNode }   from '@/hooks/useNode'
+import { RefreshIcon }    from '@/components/util/icons.js'
+import { useBifrostNode } from '@/hooks/useNode.js'
 
-export function PeerInfo() {
+export function PeerInfoView () {
   const node  = useBifrostNode()
-  const peers = node.data.peers
 
   return (
     <div className="dashboard-container">
-      <h2 className="section-header">Peer Status</h2>
-      {peers.length === 0 ? (
-        <p>waiting for peers...</p>
-      ) : (
+      <h2 className="section-header">Peer Info</h2>
+      {node.data.status === 'loading' && (
+        <p>waiting for node to initialize...</p>
+      )}
+      {node.data.status === 'locked' && (
+        <p>waiting for node to unlock...</p>
+      )}
+      {node.data.peers.length > 0 && (
         <table className="peers-table">
           <thead>
             <tr>
@@ -20,7 +23,7 @@ export function PeerInfo() {
             </tr>
           </thead>
           <tbody>
-            {peers.map((peer) => (
+            {node.data.peers.map((peer) => (
               <tr key={peer.pubkey}>
                 <td className="pubkey-cell">{peer.pubkey}</td>
                 <td className="status-cell">

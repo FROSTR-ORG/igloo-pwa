@@ -29,6 +29,10 @@ export function useBifrostNode() {
   const reset = () => {
     return bus.request({ topic: TOPIC.RESET })
   }
+  // Define the unlock method.
+  const unlock = (password : string) => {
+    return bus.request({ topic: TOPIC.UNLOCK, params: password })
+  }
   // Return the data API and action methods.
-  return { data, isLoading, error, ping, reset }
+  return { data, isLoading, error, ping, reset, unlock }
 }

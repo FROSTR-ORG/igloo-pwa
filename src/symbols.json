@@ -1,11 +1,9 @@
 {
   "DOMAIN": {
     "APP"    : "app",
-    "ENCLAVE": "enclave",
     "GLOBAL" : "global",
     "LOG"    : "log",
     "NODE"   : "node",
-    "RPC"    : "rpc",
     "SESSION": "session",
     "STORE"  : "store"
   },
@@ -34,7 +32,8 @@
       "EVENT" : "node.event.state",
       "FETCH" : "node.action.fetch",
       "PING"  : "node.action.ping",
-      "RESET" : "node.action.reset"
+      "RESET" : "node.action.reset",
+      "UNLOCK": "node.action.unlock"
     },
     "SESSION": {
       "EVENT"    : "session.event.state",

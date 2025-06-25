@@ -1,11 +1,11 @@
 /// <reference lib="webworker" />
 
-import * as CONST            from '@/const.js'
-import { GlobalController }  from '@/core/global.js'
-import { EnclaveController } from '@/services/enclave.js'
+import { create_logger }     from '@vbyte/micro-lib/logger'
+import { CoreController }    from '@/core/ctrl.js'
 import { LogController }     from '@/services/logger.js'
 import { BifrostController } from '@/services/node.js'
-import { RpcController }     from '@/services/rpc.js'
+import { RpcController }     from '@/services/rpc.js' 
+import * as CONST            from '@/const.js'
 
 import {
   init_cache_store,
@@ -24,15 +24,15 @@ const GLOBAL_STATE    = { ...GLOBAL_DATA, ...GLOBAL_SERVICES }
 // Declare the service worker global scope
 declare const self : GlobalInitScope
 
+const log = create_logger('sw')
+
 // Register service worker
 self.addEventListener('install', async (_event) => {
-  console.log('[ sw ] installing ...')
+  log.info('installing ...')
   // Initialize the global values.
   init_global_values(self)
   // Create the global services.
   create_global_services(self)
-  // Initialize the global services.
-  init_global_services(self)
   // Skip waiting for the service worker to become active.
   self.skipWaiting()
 })
@@ -40,12 +40,15 @@ self.addEventListener('install', async (_event) => {
 self.addEventListener('activate', (event) => {
   // Log the activate event.
   console.log('[ sw ] activating ...')
+  // Initialize the global services.
+  init_global_services(self)
   // Skip waiting for the service worker to become active.
   self.skipWaiting()
 })
 
 self.addEventListener('message', (event) => {
-  console.log('[ sw ] received message:', event.data)
+  if (self.core) self.core.mbus.handle(event)
+  else log.warn('controller not initialized')
 })
 
 function init_global_values (scope : any) {
@@ -60,8 +63,7 @@ function init_global_values (scope : any) {
 }
 
 function create_global_services (scope : GlobalInitScope) {
-  scope.ctrl     ??= new GlobalController(scope)
-  scope.enclave  ??= new EnclaveController(scope)
+  scope.core     ??= new CoreController(scope)
   scope.log      ??= new LogController(scope)
   scope.node     ??= new BifrostController(scope)
   scope.rpc      ??= new RpcController(scope)
@@ -73,12 +75,10 @@ function init_global_services (scope : any) {
   // For each key in the global defaults,
   for (const key in GLOBAL_SERVICES) {
     // If the key is not in the state,
-    if (
-      typeof scope[key] === 'object' &&
-      typeof scope[key].init === 'function'
-    ) {
-      // Run the init function.
-      scope[key].init()
+    if (typeof scope[key] === 'object') {
+      if (typeof scope[key].init === 'function') {
+        scope[key].init()
+      }
     }
   }
 }

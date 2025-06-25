@@ -3,7 +3,7 @@ import { useSettings }         from '@/hooks/useSettings.js'
 
 import type { PeerConfig } from '@frostr/bifrost'
 
-export function PeerConfig() {
+export function PeerConfigField() {
   const store = useSettings()
 
   const [ peers, setPeers ]     = useState<PeerConfig[]>([])

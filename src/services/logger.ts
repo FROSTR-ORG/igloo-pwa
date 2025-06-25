@@ -1,7 +1,8 @@
 import { EventEmitter }      from '@/class/emitter.js'
-import * as CONST            from '@/const.js'
-import { GlobalController }  from '../core/global.js'
+import { CoreController }    from '@/core/ctrl.js'
+import { create_logger }     from '@vbyte/micro-lib/logger'
 import { now }               from '@/util/index.js'
+import * as CONST            from '@/const.js'
 
 import type {
   GlobalInitScope,
@@ -17,17 +18,21 @@ const LOG_TOPIC  = CONST.SYMBOLS.TOPIC.LOG
 const LOG_LIMIT  = 100
 
 export class LogController extends EventEmitter {
-  private readonly _global : GlobalController
+  private readonly _global : CoreController
 
   private _logs : LogEntry[] = []
 
   constructor (scope : GlobalInitScope) {
     super()
-    this._global = GlobalController.fetch(scope)
+    this._global = CoreController.fetch(scope)
   }
 
   get global () {
     return this._global
+  }
+
+  get log () {
+    return create_logger('logger')
   }
 
   _dispatch () {
@@ -46,9 +51,19 @@ export class LogController extends EventEmitter {
       case LOG_TOPIC.CLEAR:
         this.clear()
         this.global.mbus.respond(message.id, true)
-        this.global.mbus.send({ topic : LOG_TOPIC.EVENT, payload : [] })
         break
     }
+  }
+
+  _subscribe () {
+    const filter : MessageFilter = { domain : LOG_DOMAIN }
+    this.global.mbus.subscribe(this._handler.bind(this), filter)
+    this.log.info('subscribed')
+  }
+
+  init () {
+    this._subscribe()
+    this.log.info('initialized')
   }
 
   fetch (filter? : LogFilter) : LogEntry[] {
@@ -73,13 +88,8 @@ export class LogController extends EventEmitter {
   clear () {
     this._logs = []
     this._dispatch()
+    this.log.info('cleared logs')
   }
-
-  subscribe () {
-    const filter : MessageFilter = { domain : LOG_DOMAIN }
-    this.global.mbus.subscribe(this._handler.bind(this), filter)
-  }
-
 }
 
 function filter_log (
