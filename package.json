@@ -27,7 +27,8 @@
     "dev": "tsx script/dev.ts",
     "keygen": "tsx script/keygen.ts",
     "relay": "tsx script/relay.ts",
-    "release": "tsx script/release.ts"
+    "release": "tsx script/release.ts",
+    "test": "tsx test/tape.ts"
   },
   "dependencies": {
     "@cmdcode/nostr-connect": "^0.0.2",
@@ -47,10 +48,12 @@
     "@types/node": "^24.0.4",
     "@types/react": "^19.1.8",
     "@types/react-dom": "^19.1.6",
+    "@types/tape": "^5.8.1",
     "@types/ws": "^8.18.1",
     "concurrently": "^9.2.0",
     "esbuild": "^0.25.5",
     "serve": "^14.2.4",
+    "tape": "^5.9.0",
     "tsx": "^4.20.3",
     "typescript": "^5.8.3",
     "ws": "^8.18.2"
