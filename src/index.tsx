@@ -14,6 +14,7 @@ import './styles/layout.css'
 import './styles/node.css'
 import './styles/console.css'
 import './styles/sessions.css'
+import './styles/requests.css'
 import './styles/settings.css'
 import './styles/scanner.css'
 

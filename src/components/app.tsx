@@ -3,6 +3,7 @@ import { useEffect }        from 'react'
 
 import { Header }      from '@/components/layout/header.js'
 import { Tabs }        from '@/components/layout/tabs.js'
+import { ConsoleView } from '@/components/layout/console.js'
 import { useSettings } from '@/hooks/useSettings.js'
 
 import type { AppSettings } from '@/types/index.js'
@@ -68,6 +69,7 @@ export function App () {
     <div className="app">
       <Header />
       <Tabs />
+      <ConsoleView />
     </div>
   )
 }

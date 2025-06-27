@@ -6,6 +6,7 @@ import { SettingsView }  from '@/components/settings/index.js'
 import type { ReactElement } from 'react'
 
 import * as Icons from '@/components/util/icons.js'
+import { RequestsView } from '../requests'
 
 export function Tabs(): ReactElement {
   const [ activeTab, setActiveTab ] = useState('dashboard')
@@ -21,6 +22,14 @@ export function Tabs(): ReactElement {
           >
             <Icons.ConsoleIcon />
             <span>Dashboard</span>
+          </button>
+
+          <button 
+            className={`tab-button ${activeTab === 'requests' ? 'active' : ''}`}
+            onClick={() => setActiveTab('requests')}
+          >
+            <Icons.NodeIcon />
+            <span>Requests</span>
           </button>
 
           <button 
@@ -45,6 +54,12 @@ export function Tabs(): ReactElement {
         {activeTab === 'dashboard' && (
           <div className="tab-panel">
             <DashboardView />
+          </div>
+        )}
+
+        {activeTab === 'requests' && (
+          <div className="tab-panel">
+            <RequestsView />
           </div>
         )}
 
