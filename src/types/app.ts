@@ -1,16 +1,23 @@
-import type { SessionToken } from '@cmdcode/nostr-connect'
-import type { PeerData }     from '@frostr/bifrost'
+import type { PeerData }      from '@frostr/bifrost'
+import type { SignerSession } from '@cmdcode/nostr-connect'
 
-export interface NodeState {
+export interface BifrostState {
   peers  : PeerData[]
   pubkey : string | null
   status : string
 }
 
+export interface SignerState {
+  status : string
+}
+
+export interface RequestState {
+  pending : PermRequest[]
+}
+
 export interface SessionState {
-  active  : SessionToken[]
-  pending : SessionToken[]
-  status  : string
+  active  : SignerSession[]
+  pending : SignerSession[]
 }
 
 export interface PeerPolicy {

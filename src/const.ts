@@ -2,13 +2,14 @@ import type {
   AppCache,
   AppSettings,
   GlobalData,
-  GlobalServices
+  GlobalServicesInit
 } from '@/types/index.js'
 
 import SYMBOLS from '@/symbols.json' assert { type: 'json '}
 
 export { SYMBOLS }
 
+export const CACHE_NAME  = 'frostr-pwa'
 export const DB_NAME     = 'frostr-pwa'
 export const DB_VERSION  = 2
 export const BUS_TIMEOUT = 5000
@@ -19,6 +20,7 @@ export const APP_CACHE : AppCache = {
 }
 
 export const APP_SETTINGS : AppSettings = {
+  flags    : { notifications : true },
   group    : null,
   peers    : [],
   pubkey   : null,
@@ -26,13 +28,13 @@ export const APP_SETTINGS : AppSettings = {
   share    : null
 }
 
-export const GLOBAL_SERVICES : GlobalServices = {
+export const GLOBAL_SERVICES : GlobalServicesInit = {
   cache    : null,
-  core     : null,
-  log      : null,
+  console  : null,
+  global   : null,
   node     : null,
-  rpc      : null,
-  settings : null
+  settings : null,
+  signer   : null
 }
 
 export const GLOBAL_DATA : GlobalData = {

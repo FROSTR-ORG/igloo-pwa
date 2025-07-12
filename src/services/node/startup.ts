@@ -1,5 +1,5 @@
 import { BifrostNode }        from '@frostr/bifrost'
-import { Assert }             from '@/util/index.js'
+import { Assert }             from '@vbyte/micro-lib/assert'
 import { sanitize_payload }   from '@/lib/message.js'
 import { BifrostController }  from './class.js'
 import { get_peer_configs }   from '@/lib/peers.js'

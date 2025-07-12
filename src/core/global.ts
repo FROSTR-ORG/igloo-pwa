@@ -1,17 +1,19 @@
 import { assert_global_ready } from '@/lib/global.js'
-import { create_logger }       from '@vbyte/micro-lib/logger'
+import { logger }              from '@/logger.js'
 import { DBController }        from './db.js'
 import { MessageBus }          from './mbus.js'
 
 import type { GlobalInitScope } from '@/types/index.js'
 import { ConsoleController } from '../services/console.js'
 
-export class CoreController {
-  static fetch (scope : GlobalInitScope) : CoreController {
+const LOG = logger('global')
+
+export class GlobalController {
+  static fetch (scope : GlobalInitScope) : GlobalController {
     // If the controller is not initialized, throw an error.
-    assert_has_controller(scope.core)
+    assert_has_controller(scope.global)
     // Return the controller.
-    return scope.core as CoreController
+    return scope.global as GlobalController
   }
 
   private readonly _db    : DBController
@@ -22,7 +24,11 @@ export class CoreController {
     this._db      = new DBController()
     this._mbus    = new MessageBus(scope)
     this._scope   = scope
-    this.log.debug('controller installed')
+    LOG.debug('controller installed')
+  }
+
+  get cache () {
+    return this.scope.cache
   }
 
   get db () {
@@ -33,8 +39,8 @@ export class CoreController {
     return this._mbus
   }
 
-  get log () {
-    return create_logger('global')
+  get private () {
+    return this.scope.private
   }
 
   get scope () {
@@ -44,26 +50,22 @@ export class CoreController {
 
   get service () {
     return {
-      console : this.scope.log,
+      console : this.scope.console,
       node    : this.scope.node,
-      rpc     : this.scope.rpc,
+      signer  : this.scope.signer,
     }
   }
 
-  get store () {
-    return {
-      cache    : this.scope.cache,
-      private  : this.scope.private,
-      settings : this.scope.settings
-    }
+  get settings () {
+    return this.scope.settings
   }
 
 }
 
 function assert_has_controller (
   controller : unknown
-) : asserts controller is CoreController {
-  if (!(controller instanceof CoreController)) {
+) : asserts controller is GlobalController {
+  if (!(controller instanceof GlobalController)) {
     throw new Error('controller is not a GlobalController')
   }
 }

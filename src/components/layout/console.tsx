@@ -1,10 +1,10 @@
 
 import { useState }  from 'react'
 import { TrashIcon } from '@/components/util/icons.js'
-import { useLogger } from '@/hooks/useLogger.js'
+import { useConsole } from '@/hooks/useConsole.js'
 
 export function ConsoleView () {
-  const logger = useLogger()
+  const logger = useConsole()
   
   const [ expandedIdx, setExpandedIdx ] = useState<Record<number, boolean>>({})
 

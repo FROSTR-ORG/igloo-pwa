@@ -1,7 +1,7 @@
 import { BifrostSignDevice }     from '@/class/signer.js'
 import { Assert }                from '@vbyte/micro-lib/assert'
 import { handle_signer_request } from './handler.js'
-import { RpcController }         from './class.js'
+import { SignerController }         from './class.js'
 import * as CONST                from '@/const.js'
 
 import {
@@ -15,7 +15,7 @@ import type {
   SignedEvent
 } from '@cmdcode/nostr-connect'
 
-export function start_rpc_service (self : RpcController) {
+export function start_rpc_service (self : SignerController) {
   // Fetch the bifrost node from the global state.
   const node = self.global.service.node.client
   // If the node is not initialized, return an error.
@@ -32,7 +32,7 @@ export function start_rpc_service (self : RpcController) {
   return { client, session, signer }
 }
 
-export function attach_rpc_listeners (self : RpcController) {
+export function attach_rpc_listeners (self : SignerController) {
   Assert.exists(self.session, 'session not initialized')
   // Attach the session state handler.
   self.session.on('activated', () => {
@@ -53,7 +53,7 @@ export function attach_rpc_listeners (self : RpcController) {
   })
 }
 
-export function attach_rpc_console (self : RpcController) {
+export function attach_rpc_console (self : SignerController) {
   Assert.ok(self.client,  'client not initialized')
   Assert.ok(self.session, 'session not initialized')
 
@@ -90,7 +90,7 @@ export function attach_rpc_console (self : RpcController) {
     self.log.info('session revoked:', session)
   })
 
-  self.session.on('updated', (session : SessionToken) => {
+  self.session.on('updated', (session : Partial<SessionToken>) => {
     console.add({ message : 'session updated', payload : session, topic })
     self.log.info('session updated:', session)
   })
@@ -105,7 +105,7 @@ export function attach_rpc_console (self : RpcController) {
   
 }
 
-export function attach_rpc_debugger (self : RpcController) {
+export function attach_rpc_debugger (self : SignerController) {
   Assert.ok(self.client,  'client not initialized')
   Assert.ok(self.session, 'session not initialized')
 
@@ -137,7 +137,7 @@ export function attach_rpc_debugger (self : RpcController) {
     self.log.debug('session cleared')
   })
 
-  self.session.on('updated', (session : SessionToken) => {
+  self.session.on('updated', (session : Partial<SessionToken>) => {
     self.log.debug('session updated:', session)
   })
 }

@@ -3,7 +3,7 @@ import { nip19 }  from 'nostr-tools'
 import { gcm }    from '@noble/ciphers/aes'
 import { pbkdf2 } from '@noble/hashes/pbkdf2'
 import { sha256 } from '@noble/hashes/sha2'
-import { Assert } from '@/util/index.js'
+import { Assert } from '@vbyte/micro-lib/assert'
 
 const PKDF_OPT = { c: 100000, dkLen: 32 }
 

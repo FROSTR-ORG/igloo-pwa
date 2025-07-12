@@ -1,12 +1,13 @@
-import { DB_NAME, DB_VERSION } from '@/const.js'
+import { EventEmitter }        from '@vbyte/micro-lib'
 import { Assert }              from '@vbyte/micro-lib/assert'
-import { create_logger }       from '@vbyte/micro-lib/logger'
-import { EventEmitter }        from '@/class/emitter.js'
-import { SYMBOLS }             from '@/const.js'
+import { logger }              from '@/logger.js'
 
-const STORES = Object.values(SYMBOLS.STORE) as string[]
+import { SYMBOLS, DB_NAME, DB_VERSION } from '@/const.js'
 
 import type { StoreData } from '@/types/index.js'
+
+const LOG    = logger('db')
+const STORES = Object.values(SYMBOLS.STORE) as string[]
 
 export class DBController extends EventEmitter<{
   open  : [ db : IDBDatabase ]
@@ -20,7 +21,7 @@ export class DBController extends EventEmitter<{
 
   constructor () {
     super()
-    this.log.debug('controller installed')
+    LOG.debug('controller installed')
   }
 
   get db () : IDBDatabase {
@@ -28,8 +29,8 @@ export class DBController extends EventEmitter<{
     return this._db
   }
 
-  get log () {
-    return create_logger('db')
+  get is_open () : boolean {
+    return this._db !== null
   }
 
   async _load (
@@ -37,18 +38,18 @@ export class DBController extends EventEmitter<{
     mode      : IDBTransactionMode
   ) : Promise<IDBObjectStore> {
     // Open the database.
-    const db = await this._open(this)
+    await this.open()
     // Create a transaction on the store.
-    const tx = db.transaction(storeName, mode)
+    const tx = this.db.transaction(storeName, mode)
     // Return the object store.
     return tx.objectStore(storeName)
   }
 
-  async _open (self: DBController) : Promise<IDBDatabase> {
+  async open () {
     // If the database is not open,
-    if (!this._db) {
+    if (!this.is_open) {
       // Open the database.
-      const db = await open_store(self)
+      const db = await open_store(this)
       // Close the database when the version changes.
       db.onversionchange = () => { db.close(); this._db = null }
       // Set the database.
@@ -56,10 +57,8 @@ export class DBController extends EventEmitter<{
       // Emit the database opening.
       this.emit('open', db)
       // Log the database opening.
-      this.log.info('database opened')
+      LOG.info('database opened')
     }
-    // Return the database.
-    return this._db
   }
 
   async init (storeName : string, defaults : StoreData) : Promise<StoreData> {
@@ -70,15 +69,15 @@ export class DBController extends EventEmitter<{
     // Get the orphaned keys.
     const orphaned = get_orphaned_keys(current, defaults)
     // If there is no database, open it.
-    const db = await this._open(this)
+    await this.open()
     // Initialize the store.
-    await initialize_store(db, storeName, missing, orphaned)
+    await initialize_store(this.db, storeName, missing, orphaned)
     // Load the store.
     const store = await this.fetch(storeName)
     // Emit the store initialization.
     this.emit('init', storeName, store)
     // Log the store initialization.
-    this.log.info('store initialized:', storeName)
+    LOG.info('store initialized:', storeName)
     // Return the store.
     return store
   }
@@ -95,7 +94,7 @@ export class DBController extends EventEmitter<{
       // If the request fails, reject the promise.
       request.onerror = () => {
         // Log the error.
-        this.log.error('failed to fetch store:', storeName)
+        LOG.error('failed to fetch store:', storeName)
         // Reject the promise.
         reject(request.error)
       }
@@ -113,7 +112,7 @@ export class DBController extends EventEmitter<{
           // Emit the store fetch.
           this.emit('fetch', storeName, result)
           // Log the store fetch.
-          this.log.info('store fetched:', storeName)
+          LOG.info('store fetched:', storeName)
           // Resolve with the result.
           resolve(result)
         }
@@ -137,7 +136,7 @@ export class DBController extends EventEmitter<{
           // Emit the store save.
           this.emit('save', storeName, data)
           // Log the store save.
-          this.log.info('store saved:', storeName)
+          LOG.info('store saved:', storeName)
           // Resolve the promise.
           resolve()
         }
@@ -158,19 +157,19 @@ function open_store (self: DBController): Promise<IDBDatabase> {
     // Handle database schema creation/upgrade
     request.onupgradeneeded = (event) => {
       const db = (event.target as IDBOpenDBRequest).result
-      self.log.info('upgrading database to version', DB_VERSION)
-      self.log.info(' existing stores:', Array.from(db.objectStoreNames))
+      LOG.info('upgrading database to version', DB_VERSION)
+      LOG.info(' existing stores:', Array.from(db.objectStoreNames))
       // For each store name in the stores array,
       for (const store of STORES) {
         // Create object stores if they don't exist
         if (!db.objectStoreNames.contains(store)) {
-          self.log.info('creating object store:', store)
+          LOG.info('creating object store:', store)
           db.createObjectStore(store)
         } else {
-          self.log.info('object store already exists:', store)
+          LOG.info('object store already exists:', store)
         }
       }
-      self.log.info('final stores:', Array.from(db.objectStoreNames))
+      LOG.info('final stores:', Array.from(db.objectStoreNames))
     }
     // If the database is opened, resolve the promise.
     request.onsuccess = () => {
@@ -189,24 +188,31 @@ function initialize_store (
   return new Promise<void>(async(resolve, reject) => {
     // Create a transaction on the store.
     const tx    = db.transaction(storeName, 'readwrite')
-    // Get the store from the transaction.
+    // Get the store controller from the transaction.
     const store = tx.objectStore(storeName)
-    // Create a list of promises for the missing data.
+    // Initialize a promise array.
     const promises: Promise<void>[] = []
-    // Handle missing data
-    for (const [key, value] of Object.entries(missing)) {
+    // For each missing entry,
+    for (const [ key, value ] of Object.entries(missing)) {
+      // Wrap our operation in a promise.
       promises.push(new Promise<void>((resolve, reject) => {
+        // Create a request to save the data.
         const request = store.put(value, key)
+        // If the request fails, reject the promise.
         request.onerror   = () => reject(request.error)
+        // If the request succeeds, resolve the promise.
         request.onsuccess = () => resolve()
       }))
     }
-
-    // Handle orphaned keys
+    // For each orphaned key,
     for (const key of orphaned) {
+      // Wrap our operation in a promise.
       promises.push(new Promise<void>((resolve, reject) => {
+        // Create a request to delete the data.
         const request = store.delete(key)
+        // If the request fails, reject the promise.
         request.onerror   = () => reject(request.error)
+        // If the request succeeds, resolve the promise.
         request.onsuccess = () => resolve()
       }))
     }

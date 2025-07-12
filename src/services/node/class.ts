@@ -1,10 +1,10 @@
-import { BifrostNode }    from '@frostr/bifrost'
-import { create_logger }  from '@vbyte/micro-lib/logger'
-import { EventEmitter }   from '@/class/emitter.js'
-import { CoreController } from '@/core/ctrl.js'
-import { decrypt_secret } from '@/lib/crypto.js'
-import { decode_share }   from '@/lib/encoder.js'
-import * as CONST         from '@/const.js'
+import { BifrostNode }      from '@frostr/bifrost'
+import { EventEmitter }     from '@vbyte/micro-lib'
+import { GlobalController } from '@/core/global.js'
+import { decrypt_secret }   from '@/lib/crypto.js'
+import { decode_share }     from '@/lib/encoder.js'
+import * as CONST           from '@/const.js'
+import { logger }           from '@/logger.js'
 
 import {
   handle_node_message,
@@ -13,7 +13,7 @@ import {
 
 import {
   get_node_status,
-  has_node_settings
+  has_node_config
 } from './lib.js'
 
 import {
@@ -27,26 +27,29 @@ import {
 import type {
   MessageEnvelope,
   GlobalInitScope,
-  NodeState
+  BifrostState,
+  MessageFilter
 } from '@/types/index.js'
 
-const NODE_TOPIC = CONST.SYMBOLS.TOPIC.NODE
+const LOG = logger('node')
+const NODE_DOMAIN = CONST.SYMBOLS.DOMAIN.NODE
+const NODE_TOPIC  = CONST.SYMBOLS.TOPIC.NODE
 
 export class BifrostController extends EventEmitter <{
-  unlock : [ state : NodeState ]
+  unlock : [ state : BifrostState ]
   ready  : any[]
-  reset  : [ state : NodeState ]
+  reset  : [ state : BifrostState ]
   closed : any[]
   error  : [ error : unknown ]
 }> {
-  private readonly _global : CoreController
+  private readonly _global : GlobalController
 
   private _client : BifrostNode | null = null
 
   constructor (scope : GlobalInitScope) {
     super()
-    this._global = CoreController.fetch(scope)
-    this.log.debug('controller installed')
+    this._global = GlobalController.fetch(scope)
+    LOG.debug('controller installed')
   }
 
   get client () : BifrostNode | null {
@@ -57,8 +60,8 @@ export class BifrostController extends EventEmitter <{
     return this._global
   }
 
-  get has_settings () : boolean {
-    return has_node_settings(this)
+  get has_config () : boolean {
+    return has_node_config(this)
   }
 
   get has_share () : boolean {
@@ -71,14 +74,10 @@ export class BifrostController extends EventEmitter <{
 
   get is_ready () : boolean {
     const share = this.global.scope.private.share
-    return this.has_settings && !!share
+    return this.has_config && !!share
   }
 
-  get log () {
-    return create_logger('node')
-  }
-
-  get state () : NodeState {
+  get state () : BifrostState {
     return {
       peers  : this.client?.peers ?? [],
       pubkey : this.client?.pubkey ?? null,
@@ -94,9 +93,9 @@ export class BifrostController extends EventEmitter <{
     this._client = client
   }
 
-  _dispatch (payload : NodeState) {
+  _dispatch (payload : BifrostState) {
     // Send a node status event.
-    this.global.mbus.send({ topic: NODE_TOPIC.EVENT, payload })
+    this.global.mbus.publish({ topic: NODE_TOPIC.EVENT, payload })
   }
 
   _handler (msg : MessageEnvelope) {
@@ -126,7 +125,7 @@ export class BifrostController extends EventEmitter <{
         // Emit the ready event.
         this.emit('ready')
         // Log the ready event.
-        this.log.info('node ready')
+        LOG.info('node ready')
       })
       // Connect the node.
       node.connect()
@@ -136,21 +135,23 @@ export class BifrostController extends EventEmitter <{
       this._dispatch(this.state)
     } catch (err) {
       // Log the error.
-      this.log.error('error during initialization:', err)
+      LOG.error('error during initialization:', err)
       // Emit the error event.
       this.emit('error', err)
     }
   }
 
   init () {
+    // Define a filter for the message bus.
+    const filter : MessageFilter = { domain : NODE_DOMAIN }
     // Subscribe to node messages.
-    this.global.mbus.subscribe(msg => handle_node_message(this, msg))
+    this.global.mbus.subscribe((msg) => handle_node_message(this, msg), filter)
     // Subscribe to settings updates.
-    this.global.store.settings.on('update', (current, updated) => {
+    this.global.settings.on('update', (current, updated) => {
       handle_settings_updates(this, current, updated)
     })
     // Log the initialization.
-    this.log.info('service activated')
+    LOG.info('service activated')
   }
 
   reset () {
@@ -161,7 +162,7 @@ export class BifrostController extends EventEmitter <{
     // Emit the reset event.
     this.emit('reset', this.state)
     // Log the reset event.
-    this.log.info('node reset')
+    LOG.info('node reset')
     // Run the node boot process.
     this._start()
   }
@@ -170,7 +171,7 @@ export class BifrostController extends EventEmitter <{
     // If password is not a string, return error.
     if (typeof password !== 'string') return 'password is not a string'
     // Get the share from the settings.
-    const share = this.global.store.settings.data.share
+    const share = this.global.settings.data.share
     // If the share is not present, return error.
     if (!share) return 'share not present'
     // Try to decrypt the secret share.
@@ -182,11 +183,11 @@ export class BifrostController extends EventEmitter <{
     // If the parsing failed, return error.
     if (!parsed) return 'failed to decode share package'
     // Update the private store.
-    this.global.store.private.share = parsed
+    this.global.private.share = parsed
     // Emit the unlock event.
     this.emit('unlock', this.state)
     // Log the unlock event.
-    this.log.info('node unlocked')
+    LOG.info('node unlocked')
     // Run the node boot process.
     this._start()
   }

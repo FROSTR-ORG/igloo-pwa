@@ -22,7 +22,7 @@ export async function handle_store_message <T extends StoreData> (
         // Fetch the store and respond with the store.
         await self.fetch()
         // Respond with the store.
-        self.global.mbus.respond(msg.id, self.data)
+        self.global.mbus.accept(msg.id, self.data)
         break
       case self.topics.UPDATE:
         // Get the current store.
@@ -34,7 +34,7 @@ export async function handle_store_message <T extends StoreData> (
         // Emit the update event.
         self.emit('update', current, updated)
         // Respond with success.
-        self.global.mbus.respond(msg.id, true)
+        self.global.mbus.accept(msg.id, true)
         break
       case self.topics.RESET:
         // Reset the store.
@@ -42,7 +42,7 @@ export async function handle_store_message <T extends StoreData> (
         // Emit the reset event.
         self.emit('reset', self.data)
         // Respond with success.
-        self.global.mbus.respond(msg.id, true)
+        self.global.mbus.accept(msg.id, true)
         break
       default:
         self.log.error('unknown action: ' + msg.topic)

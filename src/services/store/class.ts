@@ -1,10 +1,9 @@
-import { EventEmitter }         from '@/class/emitter.js'
-import { CoreController }       from '@/core/ctrl.js'
-import { create_logger }        from '@vbyte/micro-lib/logger'
+import { EventEmitter }         from '@vbyte/micro-lib'
 import { Assert }               from '@vbyte/micro-lib/assert'
-import { handle_store_message } from './handler.js'
+import { GlobalController }     from '@/core/global.js'
 import { get_store_topics }     from '@/lib/message.js'
-import * as CONST               from '@/const.js'
+import { logger }               from '@/logger.js'
+import { handle_store_message } from './handler.js'
 
 import type {
   StoreData,
@@ -20,7 +19,7 @@ export class StoreController <T extends StoreData> extends EventEmitter<{
   ready  : [ data : T ]
   reset  : [ data : T ]
 }> {
-  private readonly _global     : CoreController
+  private readonly _global     : GlobalController
   private readonly _defaults   : T
   private readonly _store_key  : string
   private readonly _topics     : StoreTopics
@@ -34,7 +33,7 @@ export class StoreController <T extends StoreData> extends EventEmitter<{
     config : StoreConfig<T>
   ) {
     super()
-    this._global    = CoreController.fetch(scope)
+    this._global    = GlobalController.fetch(scope)
     this._store_key = config.store_key
     this._topics    = get_store_topics(this._store_key)
     this._defaults  = config.defaults
@@ -55,7 +54,7 @@ export class StoreController <T extends StoreData> extends EventEmitter<{
   }
 
   get log () {
-    return create_logger(this._store_key)
+    return logger(this._store_key)
   }
 
   get store_key () {
@@ -68,7 +67,7 @@ export class StoreController <T extends StoreData> extends EventEmitter<{
 
   _dispatch (payload : T = this.data) {
     // Send the update event to the message bus.
-    this.global.mbus.send({ topic : this.topics.EVENT, payload })
+    this.global.mbus.publish({ topic : this.topics.EVENT, payload })
   }
 
   async _handler (msg : MessageEnvelope) {

@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useQuery, useQueryClient }                 from '@tanstack/react-query'
 
-import { BUS_TIMEOUT }   from '@/const.js'
-import { Assert }        from '@vbyte/micro-lib/assert'
-import { create_logger } from '@vbyte/micro-lib/logger'
+import { Assert }      from '@vbyte/micro-lib/assert'
+import { BUS_TIMEOUT } from '@/const.js'
+import { logger }      from '@/logger.js'
 
 import {
   generate_id,
@@ -19,8 +19,8 @@ import type {
   EventMessage
 } from '@/types/index.js'
 
-const SW  = navigator.serviceWorker
-const log = create_logger('useMessage')
+const LOG    = logger('useMessage')
+const WORKER = navigator.serviceWorker
 
 export function useMessageBus() {
   const [ isReady, setIsReady ] = useState(false)
@@ -40,7 +40,7 @@ export function useMessageBus() {
     // Clear the timeout.
     clearTimeout(timeoutId)
     // Log the message.
-    log.debug('received response:', message)
+    LOG.debug('received response:', message)
     // Resolve the message.
     resolve(message)
   }, [])
@@ -66,13 +66,13 @@ export function useMessageBus() {
       notify_subscribers(message)
     } else {
       // Log the invalid message and return.
-      log.error('received invalid message', message)
+      LOG.error('received invalid message', message)
     }
   }, [ handle_response, notify_subscribers ])
 
   const connect = useCallback(async (): Promise<void> => {
     // If the service worker controller is available,
-    if (SW.controller) {
+    if (WORKER.controller) {
       // Set the ready state to true.
       setIsReady(true)
       // Return a resolved promise.
@@ -81,7 +81,7 @@ export function useMessageBus() {
     // If the service worker controller is not available,
     return new Promise((resolve) => {
       // Add a listener for the controllerchange event.
-      SW.addEventListener('controllerchange', () => {
+      WORKER.addEventListener('controllerchange', () => {
         // Set the ready state to true.
         setIsReady(true)
         // Resolve the promise.
@@ -120,13 +120,13 @@ export function useMessageBus() {
     // Connect to the service worker.
     await connect()
     // If the controller is not available, throw an error.
-    Assert.exists(SW.controller, 'No service worker controller available')
+    Assert.exists(WORKER.controller, 'No service worker controller available')
     // Generate a new id.
     const id = generate_id()
     // Pack the message with the id.
     const message : RequestMessage = { ...template, id, type: 'request' }
     // Log the message.
-    log.info('sending request:', message)
+    LOG.info('sending request:', message)
     // Return a promise that resolves with the response message.
     return new Promise<ResponseMessage>((resolve, reject) => {
       // Set a timeout to reject the promise if the response is not received.
@@ -137,26 +137,26 @@ export function useMessageBus() {
           pendingRef.current.delete(id)
           // Reject the promise.
           reject(() => {
-            log.error('response timeout for request:', id)
+            LOG.error('response timeout for request:', id)
           })
         }
       }, BUS_TIMEOUT)
       // Set the pending response.
       pendingRef.current.set(id, { resolve: resolve as any, reject, timeoutId })
       // Post the message to the service worker.
-      SW.controller!.postMessage(message)
+      WORKER.controller!.postMessage(message)
     })
   }, [ connect ])
 
   useEffect(() => {
     // If the navigator is available and the service worker is available,
-    if (typeof navigator !== 'undefined' && SW) {
+    if (typeof navigator !== 'undefined' && WORKER) {
       // Add a listener for the message event.
-      SW.addEventListener('message', handle_message)
+      WORKER.addEventListener('message', handle_message)
       // Return a function to remove the listener.
       return () => {
         // Remove the listener for the message event.
-        SW.removeEventListener('message', handle_message)
+        WORKER.removeEventListener('message', handle_message)
       }
     }
   }, [ handle_message ])
@@ -185,6 +185,7 @@ export function useMessageQuery <T = unknown> (
   // Define the message bus and query client.
   const bus          = useMessageBus()
   const query_client = useQueryClient()
+
   // Define the message handler for updating the cache.
   const handler = useCallback((message: any) => {
     // Update the cache with the payload from the message.

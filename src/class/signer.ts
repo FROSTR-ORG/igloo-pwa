@@ -1,11 +1,12 @@
-import { get_event_id } from '@cmdcode/nostr-p2p/lib'
-import { BifrostNode }  from '@frostr/bifrost'
-import * as cipher      from '@/crypto/cipher.js'
-import { now }          from '@/util/helpers.js'
+import { get_event_id }     from '@cmdcode/nostr-p2p/lib'
+import { BifrostNode }      from '@frostr/bifrost'
+import * as cipher          from '@/crypto/cipher.js'
+import { now }              from '@vbyte/micro-lib/util'
+
+import { serialize_pubkey as convert_pubkey } from '@vbyte/micro-lib/ecc'
 
 import type { SignedEvent, SignerDeviceAPI } from '@cmdcode/nostr-connect'
 import type { EventTemplate }                from 'nostr-tools'
-import { convert_pubkey } from '@frostr/bifrost/util'
 
 const SIGN_METHODS : Record<string, string> = {
   sign_event    : 'sign_event',
@@ -63,13 +64,13 @@ export class BifrostSignDevice implements SignerDeviceAPI {
     const res = await this._node.req.ecdh(pubkey)
     if (!res.ok) throw new Error(res.err)
     const secret = convert_pubkey(res.data, 'bip340')
-    return cipher.nip44_encrypt(secret, plaintext)
+    return cipher.nip44_encrypt(secret.hex, plaintext)
   }
 
   async nip44_decrypt (pubkey : string, ciphertext : string) : Promise<string> {
     const res = await this._node.req.ecdh(pubkey)
     if (!res.ok) throw new Error(res.err)
     const secret = convert_pubkey(res.data, 'bip340')
-    return cipher.nip44_decrypt(secret, ciphertext)
+    return cipher.nip44_decrypt(secret.hex, ciphertext)
   }
 }

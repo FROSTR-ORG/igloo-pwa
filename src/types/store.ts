@@ -1,7 +1,7 @@
 import type { GroupPackage, PeerConfig, SharePackage } from '@frostr/bifrost'
 
-import type { SessionToken } from '@cmdcode/nostr-connect'
-import type { RelayPolicy }  from './app.js'
+import type { SignerSession } from '@cmdcode/nostr-connect'
+import type { RelayPolicy }   from './app.js'
 
 export type StoreData          = Record<string, any>
 export type StoreMiddleware<T> = (current : T, updated : T) => Promise<T> | T
@@ -20,10 +20,15 @@ export interface StoreConfig <T extends StoreData> {
 }
 
 export interface AppCache {
-  sessions : SessionToken[]
+  sessions : SignerSession[]
+}
+
+export interface AppFlags {
+  notifications : boolean
 }
 
 export interface AppSettings {
+  flags    : AppFlags
   group    : GroupPackage | null
   peers    : PeerConfig[]
   pubkey   : string | null

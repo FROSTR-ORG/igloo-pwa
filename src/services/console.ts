@@ -1,8 +1,7 @@
-import { EventEmitter }      from '@/class/emitter.js'
-import { CoreController }    from '@/core/ctrl.js'
-import { create_logger }     from '@vbyte/micro-lib/logger'
-import { now }               from '@/util/index.js'
-import * as CONST            from '@/const.js'
+import { GlobalController } from '@/core/global.js'
+import { logger }           from '@/logger.js'
+import { now }              from '@vbyte/micro-lib/util'
+import * as CONST           from '@/const.js'
 
 import type {
   GlobalInitScope,
@@ -13,32 +12,29 @@ import type {
   MessageFilter
 } from '@/types/index.js'
 
+const LOG = logger('console')
+
 const LOG_DOMAIN = CONST.SYMBOLS.DOMAIN.LOG
 const LOG_TOPIC  = CONST.SYMBOLS.TOPIC.LOG
 const LOG_LIMIT  = 100
 
-export class ConsoleController extends EventEmitter {
-  private readonly _global : CoreController
+export class ConsoleController {
+  private readonly _global : GlobalController
 
   private _logs : LogEntry[] = []
 
   constructor (scope : GlobalInitScope) {
-    super()
-    this._global = CoreController.fetch(scope)
-    this.log.debug('controller installed')
+    this._global = GlobalController.fetch(scope)
+    LOG.debug('controller installed')
   }
 
   get global () {
     return this._global
   }
 
-  get log () {
-    return create_logger('logger')
-  }
-
   _dispatch () {
     // Dispatch the logs to the message bus.
-    this.global.mbus.send({ topic : LOG_TOPIC.EVENT, payload : this._logs })
+    this.global.mbus.publish({ topic : LOG_TOPIC.EVENT, payload : this._logs })
   }
 
   _handler (message : MessageEnvelope) {
@@ -47,11 +43,11 @@ export class ConsoleController extends EventEmitter {
       case LOG_TOPIC.FETCH:
         const filter = message.params as LogFilter
         const logs   = this.fetch(filter)
-        this.global.mbus.respond(message.id, logs)
+        this.global.mbus.accept(message.id, logs)
         break
       case LOG_TOPIC.CLEAR:
         this.clear()
-        this.global.mbus.respond(message.id, true)
+        this.global.mbus.accept(message.id, true)
         break
     }
   }
@@ -62,9 +58,9 @@ export class ConsoleController extends EventEmitter {
     // Subscribe to the message bus.
     this.global.mbus.subscribe(this._handler.bind(this), filter)
     // Log the subscription.
-    this.log.info('subscribed')
+    LOG.info('subscribed')
     // Log the activation.
-    this.log.info('service activated')
+    LOG.info('service activated')
   }
 
   fetch (filter? : LogFilter) : LogEntry[] {
@@ -89,7 +85,7 @@ export class ConsoleController extends EventEmitter {
   clear () {
     this._logs = []
     this._dispatch()
-    this.log.info('cleared logs')
+    LOG.info('cleared logs')
   }
 }
 

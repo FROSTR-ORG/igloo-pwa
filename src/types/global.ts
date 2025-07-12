@@ -1,7 +1,7 @@
-import type { CoreController }  from '@/core/ctrl.js'
-import type { ConsoleController }     from '@/services/console.js'
+import type { GlobalController }  from '@/core/global.js'
+import type { ConsoleController } from '@/services/console.js'
 import type { BifrostController } from '@/services/node/class.js'
-import type { RpcController }     from '@/services/rpc/class.js'
+import type { SignerController }  from '@/services/signer/class.js'
 import type { StoreController }   from '@/services/store/class.js'
 
 import type {
@@ -14,8 +14,8 @@ export type GlobalInitScope    = ServiceWorkerGlobalScope & GlobalInitState
 export type GlobalReadyScope   = ServiceWorkerGlobalScope & GlobalReadyState
 export type GlobalStateKey     = keyof GlobalInitState
 
-export type GlobalInitState    = GlobalServices & GlobalData
-export type GlobalReadyState   = GlobalReady & GlobalData
+export type GlobalInitState    = GlobalServicesInit  & GlobalData
+export type GlobalReadyState   = GlobalServicesReady & GlobalData
 
 export type CacheController    = StoreController<AppCache>
 export type SettingsController = StoreController<AppSettings>
@@ -30,20 +30,20 @@ export interface GlobalData {
   private : PrivateCache
 }
 
-export interface GlobalServices {
+export interface GlobalServicesInit {
   cache    : CacheController    | null
-  core     : CoreController   | null
-  log      : ConsoleController      | null
+  console  : ConsoleController  | null
+  global   : GlobalController   | null
   node     : BifrostController  | null
-  rpc      : RpcController  | null
   settings : SettingsController | null
+  signer   : SignerController   | null
 }
 
-export interface GlobalReady {
+export interface GlobalServicesReady {
   cache    : CacheController
-  ctrl     : CoreController
-  log      : ConsoleController
+  console  : ConsoleController
+  global   : GlobalController
   node     : BifrostController
-  rpc      : RpcController
   settings : SettingsController
+  signer   : SignerController
 }

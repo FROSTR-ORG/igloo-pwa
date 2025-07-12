@@ -3,7 +3,7 @@ import * as CONST from '@/const.js'
 import type {
   GlobalInitState,
   GlobalReadyState,
-  GlobalServices,
+  GlobalServicesInit,
 } from '@/types/index.js'
 
 const GLOBAL_DATA     = CONST.GLOBAL_DATA
@@ -66,7 +66,7 @@ export function print_service_status (global : any) {
   // For each key in the global flags,
   for (const global_key in GLOBAL_SERVICES) {
     // Define the key as a global service key.
-    const key = global_key as keyof GlobalServices
+    const key = global_key as keyof GlobalServicesInit
     // Initialize the status as 'INIT'.
     let status = 'INIT'
     // If the key is an object, set the status to 'OK'.
@@ -82,6 +82,6 @@ export function print_global_services (global : any) {
   // For each key in the global services,
   for (const key in GLOBAL_SERVICES) {
     // If the key is not in the state,
-    console.log(`${key}:`, global[key as keyof GlobalServices])
+    console.log(`${key}:`, global[key as keyof GlobalServicesInit])
   }
 }

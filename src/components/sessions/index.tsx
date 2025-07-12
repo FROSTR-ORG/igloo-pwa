@@ -1,12 +1,12 @@
 import { useState }            from 'react'
 import { ConnectToken }        from '@cmdcode/nostr-connect'
-import { useNostrSession }     from '@/hooks/useSession.js'
+import { useSession }     from '@/hooks/useSession.js'
 import { PermissionsDropdown } from '@/components/sessions/permissions.js'
 
 import type { PermissionMap } from '@cmdcode/nostr-connect'
 
 export function SessionsView() {
-  const client = useNostrSession()
+  const client = useSession()
 
   const [ connectStr, setConnectStr ] = useState('')
   const [ error, setError           ] = useState<string | null>(null)

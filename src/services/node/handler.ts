@@ -3,18 +3,16 @@ import { should_reset_node } from './lib.js'
 import * as CONST            from '@/const.js'
 
 import type {
-  MessageEnvelope,
-  AppSettings
+  AppSettings,
+  RequestMessage
 } from '@/types/index.js'
 
 const NODE_TOPIC = CONST.SYMBOLS.TOPIC.NODE
 
 export function handle_node_message (
   self : BifrostController,
-  msg  : MessageEnvelope
+  msg  : RequestMessage
 ) {
-  // If the message is not a request, return.
-  if (msg.type !== 'request') return
   // Handle the node message.
   switch (msg.topic) {
     // For echo requests,
@@ -26,14 +24,14 @@ export function handle_node_message (
         // If the ping failed, return an error.
         if (!res.ok) return self.global.mbus.reject(msg.id, res.err)
         // Respond with the result.
-        self.global.mbus.respond(msg.id, true)
+        self.global.mbus.accept(msg.id, true)
       })
       break
     }
     // For fetch requests,
     case NODE_TOPIC.FETCH: {
       // Respond with the result.
-      self.global.mbus.respond(msg.id, self.state)
+      self.global.mbus.accept(msg.id, self.state)
       break
     }
     // For ping requests,
@@ -45,7 +43,7 @@ export function handle_node_message (
         // Dispatch the node state.
         self._dispatch(self.state)
         // Return the result.
-        if (res.ok) self.global.mbus.respond(msg.id, true)
+        if (res.ok) self.global.mbus.accept(msg.id, true)
         else self.global.mbus.reject(msg.id, res.err)
       })
       break
@@ -55,7 +53,7 @@ export function handle_node_message (
       // Reset the node.
       self.reset()
       // Send a response.
-      self.global.mbus.respond(msg.id, true)
+      self.global.mbus.accept(msg.id, true)
       break
     }
     // For unlock requests,
@@ -63,7 +61,7 @@ export function handle_node_message (
       // Unlock the node.
       self.unlock(msg.params as string)
       // Send a response.
-      self.global.mbus.respond(msg.id, true)
+      self.global.mbus.accept(msg.id, true)
       break
     }
   }

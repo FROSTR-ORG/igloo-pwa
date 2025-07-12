@@ -2,7 +2,7 @@ import { useMessageBus, useMessageQuery } from '@/hooks/useMessage.js'
 
 import * as CONST from '@/const.js'
 
-import type { NodeState } from '@/types/index.js'
+import type { BifrostState } from '@/types/index.js'
 
 const TOPIC   = CONST.SYMBOLS.TOPIC.NODE
 
@@ -20,7 +20,7 @@ export function useBifrostNode() {
     data = DEFAULTS,
     isLoading,
     error
-  } = useMessageQuery<NodeState>(TOPIC.FETCH, TOPIC.EVENT)
+  } = useMessageQuery<BifrostState>(TOPIC.FETCH, TOPIC.EVENT)
   // Define the ping method.
   const ping = (pubkey : string) => {
     return bus.request({ topic: TOPIC.PING, params: pubkey })

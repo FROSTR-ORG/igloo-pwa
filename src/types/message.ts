@@ -11,11 +11,10 @@ export interface MessageFilter {
   domain? : string
   id?     : string
   topic?  : string
-  type?   : string | MessageType
 }
 
 export interface MessageSubscription {
-  callback : (message: MessageEnvelope) => void
+  callback : (message: RequestMessage) => void
   filter?  : MessageFilter
 }
 

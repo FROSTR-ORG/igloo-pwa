@@ -1,5 +1,6 @@
-import { create_logger } from '@vbyte/micro-lib/logger'
-import { parse_error }   from '@vbyte/micro-lib/util'
+import { logger }       from '@/logger.js'
+import { EventEmitter } from '@vbyte/micro-lib'
+import { parse_error }  from '@vbyte/micro-lib/util'
 
 import {
   filter_message,
@@ -10,34 +11,34 @@ import {
 import type {
   EventTemplate,
   MessageEnvelope,
-  MessageFilter,
   EventMessage,
   RejectMessage,
   AcceptMessage,
   GlobalInitScope,
-  MessageSubscription
+  MessageFilter,
+  MessageSubscription,
+  RequestMessage
 } from '@/types/index.js'
+
+const LOG = logger('mbus')
 
 export class MessageBus {
   private readonly _scope : GlobalInitScope
-  private readonly _subs  : Set<MessageSubscription> = new Set()
+
+  private _subs : Set<MessageSubscription> = new Set()
 
   constructor (scope : GlobalInitScope) {
     this._scope = scope
-    this.log.debug('controller installed')
+    LOG.debug('controller installed')
   }
 
-  get log () {    
-    return create_logger('mbus')
-  }
-
-  handle (event : ExtendableMessageEvent) {
+  handler (event : ExtendableMessageEvent) {
     // Parse the message.
     const message = parse_message(event.data)
-    // If the message is not valid, return.
-    if (!message) return
+    // If the message is not valid or not a request, return.
+    if (!message || message.type !== 'request') return
     // Log the message.
-    this.log.debug('received message:', message)
+    LOG.debug('received request:', message)
     // For each subscription,
     for (const sub of this._subs) {
       // If the message does not match the filter, skip.
@@ -59,39 +60,42 @@ export class MessageBus {
       client.postMessage(message)
     }
     // Log the message.
-    this.log.debug('sent message:', message)
+    LOG.debug('sent message:', message)
   }
 
-  reject (id : string, err : unknown) {
-    // Parse the error.
-    const error   = parse_error(err)
-    // Create the message.
-    const message = { id, ok : false, error, type : 'reject' }
-    // Send the message.
-    this._send(message as RejectMessage)
-    // Log the message.
-    this.log.info('sent rejection:', message)
-  }
-
-  respond (id : string, result : unknown) {
+  accept (id : string, result : unknown) {
     // Create the message.
     const message = { id, ok : true, result, type : 'accept' }
     // Send the message.
     this._send(message as AcceptMessage)
     // Log the message.
-    this.log.info('sent response:', message)
+    LOG.debug('sent response:', message)
   }
 
-  send (template : EventTemplate) {
+  reject (id : string, error : unknown) {
+    // Parse the error.
+    const reason = parse_error(error)
+    // Create the message.
+    const message = { id, ok : false, error : reason, type : 'reject' }
+    // Send the message.
+    this._send(message as RejectMessage)
+    // Log the message.
+    LOG.debug('sent rejection:', message)
+  }
+
+  publish (template : EventTemplate) {
     // Create the message.
     const message = { ...template, id : generate_id(), type : 'event' }
     // Send the message.
     this._send(message as EventMessage)
     // Log the message.
-    this.log.info('sent event:', message)
+    LOG.debug('sent event:', message)
   }
 
-  subscribe (callback : (message: MessageEnvelope) => void, filter? : MessageFilter) {
+  subscribe (
+    callback : (message: RequestMessage) => void,
+    filter?  : MessageFilter
+  ) {
     // Create the subscription.
     const sub : MessageSubscription = { callback, filter }
     // Add the subscription.

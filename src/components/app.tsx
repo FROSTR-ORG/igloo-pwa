@@ -10,12 +10,12 @@ import type { AppSettings } from '@/types/index.js'
 
 export function App () {
 
-  const store = useSettings()
+  const settings = useSettings()
 
   useEffect(() => {
     try {
       // Get the current settings.
-      const { group, pubkey, share, relays } = store.data
+      const { group, pubkey, share, relays } = settings.data
       // Define the updated settings object.
       const updated : Partial<AppSettings> = {}
       // Parse the URL parameters for relay URLs.
@@ -58,7 +58,7 @@ export function App () {
       // If the updated settings object is not empty,
       if (Object.keys(updated).length > 0) {
         // Update the store.
-        store.update(updated)
+        settings.update(updated)
       }
     } catch (e) {
       console.error(e)
