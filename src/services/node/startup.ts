@@ -4,10 +4,12 @@ import { sanitize_payload }   from '@/lib/message.js'
 import { BifrostController }  from './class.js'
 import { get_peer_configs }   from '@/lib/peers.js'
 import * as CONST             from '@/const.js'
+import { logger }             from '@/logger.js'
 
-import type { LogType } from '@/types/logger.js'
+import type { LogType } from '@/types/console.js'
 
-const DOMAINS = CONST.SYMBOLS.DOMAIN
+const LOG    = logger('node')
+const DOMAIN = CONST.SYMBOLS.DOMAIN.NODE
 
 export function start_bifrost_node (self : BifrostController) {
   // If the node cannot be initialized, return an error.
@@ -36,7 +38,7 @@ export function attach_listeners (self : BifrostController) {
     // Emit the closed event.
     self.emit('closed')
     // Log the node closed event.
-    self.log.info('node closed')
+    LOG.info('node closed')
   })
   self.client.on('/ping/handler/res', () => {
     // Dispatch the node state.
@@ -55,10 +57,10 @@ export function attach_debugger (self : BifrostController) {
   self.client.on('*', (event, data) => {
     switch (true) {
       case event === 'message':
-        self.log.debug('received message', data)
+        LOG.debug('received message', data)
         break
       case event.startsWith('/ping/req'):
-        self.log.debug('received ping', data)
+        LOG.debug('received ping', data)
     }
   })
 }
@@ -106,10 +108,10 @@ export function attach_console (self : BifrostController) {
     }
     // Add the log entry.
     self.global.service.console.add({
+      domain  : DOMAIN,
       message : message,
-      topic   : DOMAINS.NODE,
-      type    : type,
-      payload : payload
+      payload : payload,
+      type    : type
     })
   })
 }

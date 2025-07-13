@@ -31,9 +31,9 @@ import type {
   MessageFilter
 } from '@/types/index.js'
 
-const LOG = logger('node')
-const NODE_DOMAIN = CONST.SYMBOLS.DOMAIN.NODE
-const NODE_TOPIC  = CONST.SYMBOLS.TOPIC.NODE
+const LOG    = logger('node')
+const DOMAIN = CONST.SYMBOLS.DOMAIN.NODE
+const TOPIC  = CONST.SYMBOLS.TOPIC.NODE
 
 export class BifrostController extends EventEmitter <{
   unlock : [ state : BifrostState ]
@@ -95,7 +95,11 @@ export class BifrostController extends EventEmitter <{
 
   _dispatch (payload : BifrostState) {
     // Send a node status event.
-    this.global.mbus.publish({ topic: NODE_TOPIC.EVENT, payload })
+    this.global.mbus.publish({
+      domain  : DOMAIN,
+      topic   : TOPIC.EVENT,
+      payload : payload
+    })
   }
 
   _handler (msg : MessageEnvelope) {
@@ -143,7 +147,7 @@ export class BifrostController extends EventEmitter <{
 
   init () {
     // Define a filter for the message bus.
-    const filter : MessageFilter = { domain : NODE_DOMAIN }
+    const filter : MessageFilter = { domain : DOMAIN }
     // Subscribe to node messages.
     this.global.mbus.subscribe((msg) => handle_node_message(this, msg), filter)
     // Subscribe to settings updates.

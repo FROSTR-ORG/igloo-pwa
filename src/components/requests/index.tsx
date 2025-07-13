@@ -1,5 +1,8 @@
-import { useClientCtx } from '@/demo/context/client.js'
-import { useRequests } from '@/demo/hooks/useRequests.js'
+
+import { useState }       from 'react'
+import { useRequest }     from '@/hooks/useRequest.js'
+import { useBifrostNode } from '@/hooks/useNode.js'
+import { useSettings }    from '@/hooks/useSettings.js'
 
 import {
   BaseRequestCard,
@@ -7,12 +10,16 @@ import {
 } from './cards/index.js'
 
 export function RequestsView() {
-  const ctx = useClientCtx()
-  const requestsHook = useRequests()
-  const { pendingRequests, expanded, isLoading, notificationEnabled } = requestsHook
+  const node     = useBifrostNode()
+  const requests = useRequest()
+  const settings = useSettings()
+
+  const [ expanded, setExpanded ] = useState<Set<string>>(new Set())
+
+  const { data, isLoading, error } = requests
 
   // Show locked state if client is locked
-  if (ctx.status === 'locked') {
+  if (node.data.status === 'locked') {
     return (
       <div className="requests-container">
         <h2 className="section-header">Permission Requests</h2>
@@ -36,7 +43,7 @@ export function RequestsView() {
       <h2 className="section-header">Permission Requests</h2>
       
       {/* Show notification status */}
-      {notificationEnabled && (
+      {settings.data.flags.notifications && (
         <div style={{ 
           backgroundColor: '#4CAF50', 
           color: '#fff', 
@@ -50,7 +57,7 @@ export function RequestsView() {
       )}
       
       {/* Show offline warning if client is offline */}
-      {ctx.status === 'offline' && (
+      {node.data.status === 'offline' && (
         <div style={{ 
           backgroundColor: '#ffa500', 
           color: '#000', 
@@ -62,22 +69,21 @@ export function RequestsView() {
         </div>
       )}
 
-      {/* Pending Requests */}
+      {/* Permission Requests */}
       <div className="requests-section">
-        {pendingRequests.length === 0 ? (
+        {data.queue.length === 0 ? (
           <p className="requests-empty">No pending requests</p>
         ) : (
           <div className="requests-list">
-            {pendingRequests.map((request) => {
+            {data.queue.map((request) => {
               const isExpanded = expanded.has(request.id)
               
-              if (request.request_type === 'note_signature') {
+              if (request.method === 'sign_event') {
                 return (
                   <NoteSignatureRequestCard
                     key={request.id}
                     request={request}
                     isExpanded={isExpanded}
-                    requests={requestsHook}
                   />
                 )
               } else {
@@ -86,7 +92,6 @@ export function RequestsView() {
                     key={request.id}
                     request={request}
                     isExpanded={isExpanded}
-                    requests={requestsHook}
                   />
                 )
               }

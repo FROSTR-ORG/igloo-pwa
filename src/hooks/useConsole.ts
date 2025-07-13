@@ -4,7 +4,8 @@ import * as CONST from '@/const.js'
 
 import type { LogEntry } from '@/types/index.js'
 
-const LOG_TOPIC = CONST.SYMBOLS.TOPIC.LOG
+const CONSOLE_DOMAIN = CONST.SYMBOLS.DOMAIN.CONSOLE
+const CONSOLE_TOPIC  = CONST.SYMBOLS.TOPIC.CONSOLE
 
 export function useConsole () {
   // Define the message bus and query client.
@@ -14,9 +15,9 @@ export function useConsole () {
     data = [],
     isLoading,
     error
-  } = useMessageQuery<LogEntry[]>(LOG_TOPIC.FETCH, LOG_TOPIC.EVENT)
+  } = useMessageQuery<LogEntry[]>(CONSOLE_TOPIC.FETCH, CONSOLE_TOPIC.EVENT)
   // Define the clear method.
-  const clear = () => { bus.request({ topic : LOG_TOPIC.CLEAR }) }
+  const clear = () => { bus.request({ domain: CONSOLE_DOMAIN, topic: CONSOLE_TOPIC.CLEAR }) }
   // Return the data API and action methods.
   return { data, isLoading, error, clear }
 }

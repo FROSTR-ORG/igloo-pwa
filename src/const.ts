@@ -33,6 +33,8 @@ export const GLOBAL_SERVICES : GlobalServicesInit = {
   console  : null,
   global   : null,
   node     : null,
+  request  : null,
+  session  : null,
   settings : null,
   signer   : null
 }

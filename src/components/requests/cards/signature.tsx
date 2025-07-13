@@ -1,47 +1,84 @@
 // Note signature request card component
+import { useState }   from 'react'
+import { useRequest } from '@/hooks/useRequest.js'
+
 import { RequestCardHeader, RequestCardBody } from './shared.js'
-import type { NoteSignatureCardProps, PermRequest } from './types.js'
-import type { UseRequestsResult } from '@/demo/hooks/useRequests.js'
 
-function NoteSignatureActions({ 
-  request, 
-  requests
-}: {
-  request: PermRequest
-  requests: UseRequestsResult
-}) {
-  const { handleApprove, handleDeny, handleApproveAll, handleDenyAll, handleApproveAllKinds, handleDenyAllKinds } = requests
-  // Extract event kind from content if available
-  const getEventKind = (): number | null => {
-    try {
-      if (request.content && typeof request.content === 'object') {
-        const content = request.content as any
-        if (content.kind !== undefined) return content.kind
-        // Try to parse if it's a JSON string
-        if (typeof content === 'string') {
-          const parsed = JSON.parse(content)
-          return parsed.kind || null
-        }
-      }
-      return null
-    } catch {
-      return null
-    }
+import type { NoteSignatureCardProps } from './types.js'
+
+import type {
+  EventTemplate,
+  PermissionPolicy,
+  PermissionRequest
+} from '@cmdcode/nostr-connect'
+
+interface NoteSignatureActionsProps {
+  request: PermissionRequest
+}
+ 
+function NoteSignatureActions({ request }: NoteSignatureActionsProps) {
+  const requests = useRequest()
+  const event    = request.params as unknown as EventTemplate
+  
+  const handleApprove = () => {
+    requests.approve(request)
   }
-
-  const eventKind = getEventKind()
+  
+  const handleDeny = () => {
+    requests.deny(request, 'User denied')
+  }
+  
+  const handleApproveAll = () => {
+    // Create a permission policy that auto-approves all future requests of this method type
+    const policy : Partial<PermissionPolicy> = {
+      methods : { [ request.method ]: true }
+    }
+    
+    // Apply to all current requests of this method with the policy
+    requests.approve(request, policy)
+  }
+  
+  const handleDenyAll = () => {
+    // Create a permission policy that auto-denies all future requests of this method type
+    const policy : Partial<PermissionPolicy> = {
+      methods : { [ request.method ]: false }
+    }
+    
+    // Apply to all current requests of this method with the policy
+    requests.deny(request, 'request denied', policy)
+  }
+  
+  const handleApproveAllKinds = () => {
+    // Create a permission policy for this specific event kind
+    const policy : Partial<PermissionPolicy> = {
+      kinds : { [ event.kind ]: true }
+    }
+    
+    // Apply to all current requests with the same event kind
+    requests.approve(request, policy)
+  }
+  
+  const handleDenyAllKinds = () => {
+    // Create a permission policy for this specific event kind
+    const policy : Partial<PermissionPolicy> = {
+      kinds : { [ event.kind ]: false }
+    }
+    
+    // Apply to all current requests with the same event kind
+    requests.deny(request, 'request denied', policy)
+  }
 
   return (
     <div className="request-actions">
       <div className="request-actions-primary">
         <button
-          onClick={() => handleApprove(request.id)}
+          onClick={handleApprove}
           className="request-btn request-btn-approve"
         >
           Approve
         </button>
         <button
-          onClick={() => handleDeny(request.id)}
+          onClick={handleDeny}
           className="request-btn request-btn-deny"
         >
           Deny
@@ -52,37 +89,40 @@ function NoteSignatureActions({
           onClick={handleApproveAll}
           className="request-btn request-btn-approve-all"
         >
-          Approve All
+          Approve All {request.method}
         </button>
         <button
           onClick={handleDenyAll}
           className="request-btn request-btn-deny-all"
         >
-          Deny All
+          Deny All {request.method}
         </button>
       </div>
-      {eventKind !== null && (
-        <div className="request-actions-kinds">
-          <button
-            onClick={() => handleApproveAllKinds(eventKind)}
-            className="request-btn request-btn-approve-kinds"
-          >
-            Approve All Kind {eventKind}
-          </button>
-          <button
-            onClick={() => handleDenyAllKinds(eventKind)}
-            className="request-btn request-btn-deny-kinds"
-          >
-            Deny All Kind {eventKind}
-          </button>
-        </div>
-      )}
+      <div className="request-actions-kinds">
+        <button
+          onClick={handleApproveAllKinds}
+          className="request-btn request-btn-approve-kinds"
+        >
+          Approve All Kind {event.kind}
+        </button>
+        <button
+          onClick={handleDenyAllKinds}
+          className="request-btn request-btn-deny-kinds"
+        >
+          Deny All Kind {event.kind}
+        </button>
+      </div>
     </div>
   )
 }
 
 export function NoteSignatureRequestCard(props: NoteSignatureCardProps) {
-  const { request, requests } = props
+  const { request, isExpanded } = props
+  const [expanded, setExpanded] = useState(isExpanded)
+
+  const toggleExpanded = () => {
+    setExpanded(!expanded)
+  }
 
   return (
     <div className="request-card request-card-signature">
@@ -91,12 +131,11 @@ export function NoteSignatureRequestCard(props: NoteSignatureCardProps) {
       />
       <RequestCardBody 
         request={request} 
-        isExpanded={props.isExpanded} 
-        onToggleExpanded={() => requests.toggleExpanded(request.id)} 
+        isExpanded={expanded} 
+        onToggleExpanded={toggleExpanded} 
       />
       <NoteSignatureActions 
         request={request}
-        requests={requests}
       />
     </div>
   )

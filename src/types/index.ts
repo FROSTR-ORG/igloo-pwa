@@ -1,5 +1,5 @@
 export * from './app.js'
 export * from './global.js'
-export * from './logger.js'
+export * from './console.js'
 export * from './message.js'
 export * from './store.js'

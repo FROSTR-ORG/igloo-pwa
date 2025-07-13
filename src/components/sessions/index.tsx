@@ -1,9 +1,9 @@
 import { useState }            from 'react'
-import { ConnectToken }        from '@cmdcode/nostr-connect'
-import { useSession }     from '@/hooks/useSession.js'
+import { InviteEncoder }       from '@cmdcode/nostr-connect'
+import { useSession }          from '@/hooks/useSession.js'
 import { PermissionsDropdown } from '@/components/sessions/permissions.js'
 
-import type { PermissionMap } from '@cmdcode/nostr-connect'
+import type { PermissionPolicy } from '@cmdcode/nostr-connect'
 
 export function SessionsView() {
   const client = useSession()
@@ -11,14 +11,14 @@ export function SessionsView() {
   const [ connectStr, setConnectStr ] = useState('')
   const [ error, setError           ] = useState<string | null>(null)
   const [ expanded, setExpanded     ] = useState<Set<string>>(new Set())
-  const [ editing, setEditing       ] = useState<Record<string, PermissionMap>>({})
+  const [ editing, setEditing       ] = useState<Record<string, PermissionPolicy>>({})
   const [ newKind, setNewKind       ] = useState<Record<string, string>>({})
   const [ copied, setCopied         ] = useState<string | null>(null)
 
   const connect = async () => {
     try {
       setError(null)
-      const token = ConnectToken.decode(connectStr)
+      const token = InviteEncoder.decode(connectStr)
       client.connect(token)
       setConnectStr('')
     } catch (err) {
@@ -45,14 +45,14 @@ export function SessionsView() {
       if (session) {
         setEditing(prev => ({
           ...prev,
-          [pubkey]: { ...(session.perms || {}) }
+          [pubkey]: { ...(session.policy || {}) }
         }))
       }
     }
     setExpanded(newExpanded)
   }
 
-  const handle_permission_change = (pubkey: string, permissions: PermissionMap) => {
+  const handle_permission_change = (pubkey: string, permissions: PermissionPolicy) => {
     setEditing(prev => ({
       ...prev,
       [pubkey]: permissions
@@ -102,8 +102,8 @@ export function SessionsView() {
 
   // Combine active and pending sessions
   const allSessions = [
-    ...client.data.active.map(s  => ({ ...s, status: 'active'  as const  })),
-    ...client.data.pending.map(s => ({ ...s, status: 'pending' as const }))
+    ...client.data.pending.map(s => ({ ...s, status: 'pending' as const })),
+    ...client.data.active.map(s  => ({ ...s, status: 'active'  as const  }))
   ]
 
   return (
@@ -126,23 +126,23 @@ export function SessionsView() {
                   <div className="session-header">
                     <div className="session-info">
                       <div className="session-name-container">
-                        {session.image && (
+                        {session.profile.image && (
                           <img 
-                            src={session.image} 
-                            alt={`${session.name || 'Unknown'} icon`}
+                            src={session.profile.image} 
+                            alt={`${session.profile.name || 'Unknown'} icon`}
                             className="session-icon"
                           />
                         )}
-                        <span className="session-name">{session.name ?? 'unknown'}</span>
+                        <span className="session-name">{session.profile.name ?? 'unknown'}</span>
                       </div>
-                      {session.url && (
+                      {session.profile.url && (
                         <a 
-                          href={session.url} 
+                          href={session.profile.url} 
                           target="_blank" 
                           rel="noopener noreferrer"
                           className="session-url"
                         >
-                          {new URL(session.url).hostname}
+                          {new URL(session.profile.url).hostname}
                         </a>
                       )}
                       <div className="session-pubkey-container">
@@ -171,7 +171,7 @@ export function SessionsView() {
                   {expanded.has(session.pubkey) && (
                     <PermissionsDropdown
                       session={session}
-                      editingPermissions={editing[session.pubkey] || session.perms || {}}
+                      editingPermissions={editing[session.pubkey] || session.policy || {}}
                       newEventKind={newKind[session.pubkey] || ''}
                       onPermissionChange={(permissions) => handle_permission_change(session.pubkey, permissions)}
                       onEventKindChange={(eventKind) => handle_event_kind_change(session.pubkey, eventKind)}

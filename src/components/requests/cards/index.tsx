@@ -4,7 +4,6 @@ export { NoteSignatureRequestCard } from './signature.js'
 export { RequestCardHeader, RequestCardBody } from './shared.js'
 export type { 
   BaseCardProps, 
-  NoteSignatureCardProps, 
-  PermRequest, 
+  NoteSignatureCardProps,
   SessionOrigin 
 } from './types.js' 

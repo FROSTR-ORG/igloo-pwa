@@ -1,5 +1,9 @@
-import type { PeerData }      from '@frostr/bifrost'
-import type { SignerSession } from '@cmdcode/nostr-connect'
+import type { PeerData } from '@frostr/bifrost'
+
+import type {
+  PermissionRequest,
+  SignerSession
+} from '@cmdcode/nostr-connect'
 
 export interface BifrostState {
   peers  : PeerData[]
@@ -12,7 +16,7 @@ export interface SignerState {
 }
 
 export interface RequestState {
-  pending : PermRequest[]
+  queue : PermissionRequest[]
 }
 
 export interface SessionState {
@@ -24,13 +28,6 @@ export interface PeerPolicy {
   pubkey : string
   send   : boolean
   recv   : boolean
-}
-
-export interface PermRequest {
-  content? : unknown
-  id       : string
-  source   : string
-  method   : string
 }
 
 export interface RelayPolicy {

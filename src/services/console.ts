@@ -12,10 +12,10 @@ import type {
   MessageFilter
 } from '@/types/index.js'
 
-const LOG = logger('console')
+const LOG    = logger('console')
+const DOMAIN = CONST.SYMBOLS.DOMAIN.CONSOLE
+const TOPIC  = CONST.SYMBOLS.TOPIC.CONSOLE
 
-const LOG_DOMAIN = CONST.SYMBOLS.DOMAIN.LOG
-const LOG_TOPIC  = CONST.SYMBOLS.TOPIC.LOG
 const LOG_LIMIT  = 100
 
 export class ConsoleController {
@@ -34,18 +34,22 @@ export class ConsoleController {
 
   _dispatch () {
     // Dispatch the logs to the message bus.
-    this.global.mbus.publish({ topic : LOG_TOPIC.EVENT, payload : this._logs })
+    this.global.mbus.publish({
+      domain  : DOMAIN,
+      topic   : TOPIC.EVENT,
+      payload : this._logs
+    })
   }
 
   _handler (message : MessageEnvelope) {
     if (message.type !== 'request') return
     switch (message.topic) {
-      case LOG_TOPIC.FETCH:
+      case TOPIC.FETCH:
         const filter = message.params as LogFilter
         const logs   = this.fetch(filter)
         this.global.mbus.accept(message.id, logs)
         break
-      case LOG_TOPIC.CLEAR:
+      case TOPIC.CLEAR:
         this.clear()
         this.global.mbus.accept(message.id, true)
         break
@@ -54,7 +58,7 @@ export class ConsoleController {
 
   init () {
     // Define a filter for the message bus.
-    const filter : MessageFilter = { domain : LOG_DOMAIN }
+    const filter : MessageFilter = { domain : DOMAIN }
     // Subscribe to the message bus.
     this.global.mbus.subscribe(this._handler.bind(this), filter)
     // Log the subscription.
@@ -93,7 +97,7 @@ function filter_log (
   filter : LogFilter,
   entry  : LogEntry
 ) {
-  if (filter.topic && entry.topic !== filter.topic) return false
-  if (filter.type  && entry.type  !== filter.type)   return false
+  if (filter.domain && entry.domain !== filter.domain) return false
+  if (filter.type   && entry.type   !== filter.type)   return false
   return true
 }

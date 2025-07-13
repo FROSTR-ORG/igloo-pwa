@@ -7,16 +7,19 @@ import type {
   RequestMessage
 } from '@/types/index.js'
 
-const NODE_TOPIC = CONST.SYMBOLS.TOPIC.NODE
+const DOMAIN = CONST.SYMBOLS.DOMAIN.NODE
+const TOPIC  = CONST.SYMBOLS.TOPIC.NODE
 
 export function handle_node_message (
   self : BifrostController,
   msg  : RequestMessage
 ) {
+  // If the message is not for this domain, return.
+  if (msg.domain !== DOMAIN) return
   // Handle the node message.
   switch (msg.topic) {
     // For echo requests,
-    case NODE_TOPIC.ECHO: {
+    case TOPIC.ECHO: {
       // If the client is not initialized, return an error.
       if (!self.client) return self.global.mbus.reject(msg.id, 'client not initialized')
       // Send an echo request.
@@ -29,13 +32,13 @@ export function handle_node_message (
       break
     }
     // For fetch requests,
-    case NODE_TOPIC.FETCH: {
+    case TOPIC.FETCH: {
       // Respond with the result.
       self.global.mbus.accept(msg.id, self.state)
       break
     }
     // For ping requests,
-    case NODE_TOPIC.PING: {
+    case TOPIC.PING: {
       // If the client is not initialized, return an error.
       if (!self.client) return self.global.mbus.reject(msg.id, 'client not initialized')
       // Ping the peer.
@@ -49,7 +52,7 @@ export function handle_node_message (
       break
     }
     // For reset requests,
-    case NODE_TOPIC.RESET: {
+    case TOPIC.RESET: {
       // Reset the node.
       self.reset()
       // Send a response.
@@ -57,7 +60,7 @@ export function handle_node_message (
       break
     }
     // For unlock requests,
-    case NODE_TOPIC.UNLOCK: {
+    case TOPIC.UNLOCK: {
       // Unlock the node.
       self.unlock(msg.params as string)
       // Send a response.

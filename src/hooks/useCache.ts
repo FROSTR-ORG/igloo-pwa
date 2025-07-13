@@ -20,11 +20,11 @@ export function useCache() {
   } = useMessageQuery<AppCache>(STORE_TOPIC.FETCH, STORE_TOPIC.EVENT)
   // Define the reset method.
   const reset = () => {
-    return bus.request({ topic: STORE_TOPIC.RESET })
+    return bus.request({ domain: STORE_KEY, topic: STORE_TOPIC.RESET })
   }
   // Define the update method.
   const update = (data: Partial<AppCache>) => {
-    return bus.request({ topic: STORE_TOPIC.UPDATE, params: data })
+    return bus.request({ domain: STORE_KEY, topic: STORE_TOPIC.UPDATE, params: data })
   }
   // Return the data API and action methods.
   return { data, isLoading, error, reset, update }

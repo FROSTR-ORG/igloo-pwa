@@ -1,5 +1,5 @@
 // Shared types for request cards
-import type { UseRequestsResult } from '@/demo/hooks/useRequests.js'
+import type { PermissionRequest } from '@cmdcode/nostr-connect'
 
 export interface SessionOrigin {
   name?: string
@@ -8,23 +8,11 @@ export interface SessionOrigin {
   url?: string
 }
 
-export interface PermRequest {
-  id: string
-  method: string
-  source: string
-  content?: unknown
-  timestamp: number
-  session_origin?: SessionOrigin
-  request_type: 'base' | 'note_signature'
-  status: 'pending' | 'approved' | 'denied'
-}
-
 export interface BaseCardProps {
-  request: PermRequest
+  request: PermissionRequest
   isExpanded: boolean
-  requests: UseRequestsResult
 }
 
 export interface NoteSignatureCardProps extends BaseCardProps {
-  // Inherits requests hook from BaseCardProps
+  // Inherits from BaseCardProps
 } 

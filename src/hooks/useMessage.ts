@@ -201,7 +201,7 @@ export function useMessageQuery <T = unknown> (
   return useQuery<T>({
     queryFn  : async () => {
       // Fetch data from the store.
-      const res = await bus.request({ topic: fetch_key })
+      const res = await bus.request({ domain: fetch_key, topic: fetch_key })
       // If successful, return the result.
       if (res.ok) return res.result as T
       // Else, throw an error.

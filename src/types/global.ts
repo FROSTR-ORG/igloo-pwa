@@ -1,6 +1,8 @@
 import type { GlobalController }  from '@/core/global.js'
 import type { ConsoleController } from '@/services/console.js'
 import type { BifrostController } from '@/services/node/class.js'
+import type { RequestController } from '@/services/request/class.js'
+import type { SessionController } from '@/services/session/class.js'
 import type { SignerController }  from '@/services/signer/class.js'
 import type { StoreController }   from '@/services/store/class.js'
 
@@ -35,6 +37,8 @@ export interface GlobalServicesInit {
   console  : ConsoleController  | null
   global   : GlobalController   | null
   node     : BifrostController  | null
+  request  : RequestController  | null
+  session  : SessionController  | null
   settings : SettingsController | null
   signer   : SignerController   | null
 }
@@ -44,6 +48,8 @@ export interface GlobalServicesReady {
   console  : ConsoleController
   global   : GlobalController
   node     : BifrostController
+  request  : RequestController
+  session  : SessionController
   settings : SettingsController
   signer   : SignerController
 }

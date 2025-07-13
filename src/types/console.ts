@@ -1,23 +1,23 @@
 export type LogType = 'info' | 'debug' | 'error' | 'warn'
 
 export interface LogTemplate {
+  domain   : string
   message  : string
   payload? : any
   stamp?   : number
-  topic    : string
   type?    : LogType
 }
 
 export interface LogFilter {
-  topic? : string
-  type?  : LogType
-  limit? : number
+  domain? : string
+  type?   : LogType
+  limit?  : number
 }
 
 export interface LogEntry {
+  domain   : string
   message  : string
   payload? : any
   stamp    : number
-  topic    : string
   type     : LogType
 }

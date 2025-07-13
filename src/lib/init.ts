@@ -13,6 +13,8 @@ import type {
   GlobalInitScope,
   GlobalStateKey
 } from '@/types/index.js'
+import { RequestController } from '@/services/request/class'
+import { SessionController } from '@/services/session/class'
 
 const GLOBAL_DATA     = CONST.GLOBAL_DATA
 const GLOBAL_SERVICES = CONST.GLOBAL_SERVICES
@@ -34,6 +36,8 @@ export function init_global_services (scope : GlobalInitScope) {
   scope.global   ??= new GlobalController(scope)
   scope.console  ??= new ConsoleController(scope)
   scope.node     ??= new BifrostController(scope)
+  scope.request  ??= new RequestController(scope)
+  scope.session  ??= new SessionController(scope)
   scope.signer   ??= new SignerController(scope)
   scope.cache    ??= create_cache_store(scope)
   scope.settings ??= create_settings_store(scope)

@@ -25,6 +25,7 @@ export interface PendingResponse<T = unknown> {
 }
 
 export interface EventMessage<T = unknown> {
+  domain  : string
   id      : string
   payload : T
   topic   : string
@@ -32,6 +33,7 @@ export interface EventMessage<T = unknown> {
 }
 
 export interface RequestMessage<T = unknown> {
+  domain  : string
   id      : string
   params? : T
   topic   : string

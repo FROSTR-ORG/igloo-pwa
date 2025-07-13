@@ -51,9 +51,7 @@ export function filter_message (
   message : MessageEnvelope
 ) : boolean {
   // If the filter has an id and it does not match the message id.
-  if (filter.id    && filter.id    !== message.id)    return false
-  // If the filter has a type and it does not match the message type.
-  if (filter.type  && filter.type  !== message.type)  return false
+  if (filter.id && filter.id !== message.id) return false
   // If the filter has a topic,
   if (filter.topic || filter.domain) {
     // If the message does not have a topic, return false.

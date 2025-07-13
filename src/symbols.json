@@ -1,10 +1,11 @@
 {
   "DOMAIN": {
-    "APP"    : "app",
+    "CONSOLE": "console",
     "GLOBAL" : "global",
-    "LOG"    : "log",
     "NODE"   : "node",
+    "REQUEST": "request",
     "SESSION": "session",
+    "SIGNER" : "signer",
     "STORE"  : "store"
   },
   "STORE": {
@@ -12,36 +13,39 @@
     "SETTINGS" : "settings"
   },
   "TOPIC": {
-    "APP": {
-      "FETCH" : "app.action.fetch",
-      "EVENT" : "app.event.update"
-    },
-    "ENCLAVE": {
-      "EVENT" : "enclave.event.status",
-      "FETCH" : "enclave.action.fetch",
-      "LOCK"  : "enclave.action.lock",
-      "UNLOCK": "enclave.action.unlock"
-    },
-    "LOG": {
-      "EVENT" : "log.event.state",
-      "FETCH" : "log.action.fetch",
-      "CLEAR" : "log.action.clear"
+    "CONSOLE": {
+      "EVENT" : "console.event.state",
+      "FETCH" : "console.action.fetch",
+      "CLEAR" : "console.action.clear"
     },
     "NODE": {
-      "ECHO"  : "node.action.echo",
       "EVENT" : "node.event.state",
       "FETCH" : "node.action.fetch",
+      "ECHO"  : "node.action.echo",
       "PING"  : "node.action.ping",
       "RESET" : "node.action.reset",
       "UNLOCK": "node.action.unlock"
     },
+    "REQUEST": {
+      "EVENT" : "request.event.state",
+      "FETCH" : "request.action.fetch",
+      "APPROVE": "request.action.approve",
+      "DENY"  : "request.action.deny",
+      "CLEAR" : "request.action.clear"
+    },
     "SESSION": {
       "EVENT"    : "session.event.state",
+      "FETCH"    : "session.action.fetch",
       "CONNECT"  : "session.action.connect",
-      "RESET"    : "session.action.reset",
       "REVOKE"   : "session.action.revoke",
       "UPDATE"   : "session.action.update",
-      "FETCH"    : "session.action.fetch"
+      "CLEAR"    : "session.action.clear"
+    },
+    "SIGNER": {
+      "FETCH" : "signer.action.fetch",
+      "EVENT" : "signer.event.update",
+      "RESET" : "signer.action.reset",
+      "UPDATE": "signer.action.update"
     },
     "STORE": {
       "EVENT" :  "store.event.state",

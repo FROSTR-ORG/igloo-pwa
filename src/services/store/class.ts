@@ -67,7 +67,11 @@ export class StoreController <T extends StoreData> extends EventEmitter<{
 
   _dispatch (payload : T = this.data) {
     // Send the update event to the message bus.
-    this.global.mbus.publish({ topic : this.topics.EVENT, payload })
+    this.global.mbus.publish({
+      domain  : this._store_key,
+      topic   : this.topics.EVENT,
+      payload
+    })
   }
 
   async _handler (msg : MessageEnvelope) {

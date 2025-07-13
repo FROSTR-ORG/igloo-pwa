@@ -16,7 +16,8 @@ const DEFAULTS : SessionState = {
 }
 
 // Define the message topics to use.
-const TOPICS = CONST.SYMBOLS.TOPIC.SESSION
+const DOMAIN = CONST.SYMBOLS.DOMAIN.SESSION
+const TOPIC  = CONST.SYMBOLS.TOPIC.SESSION
 
 export function useSession() {
   // Define the message bus.
@@ -26,23 +27,23 @@ export function useSession() {
     data = DEFAULTS,
     isLoading,
     error
-  } = useMessageQuery<SessionState>(TOPICS.FETCH, TOPICS.EVENT)
+  } = useMessageQuery<SessionState>(TOPIC.FETCH, TOPIC.EVENT)
   // Define the connect method.
   const connect = (token : InviteToken) => {
-    bus.request({ topic : TOPICS.CONNECT, params : token })
+    bus.request({ domain: DOMAIN, topic: TOPIC.CONNECT, params: token })
   }
   // Define the reset method.
-  const reset = () => {
-    bus.request({ topic : TOPICS.RESET })
+  const clear = () => {
+    bus.request({ domain: DOMAIN, topic: TOPIC.CLEAR })
   }
   // Define the revoke method.
   const revoke = (pubkey : string) => {
-    bus.request({ topic : TOPICS.REVOKE, params : pubkey })
+    bus.request({ domain: DOMAIN, topic: TOPIC.REVOKE, params: pubkey })
   } 
   // Define the update method.
   const update = (session : SignerSession) => {
-    bus.request({ topic : TOPICS.UPDATE, params : session })
+    bus.request({ domain: DOMAIN, topic: TOPIC.UPDATE, params: session })
   }
   // Return the data API and action methods.
-  return { data, isLoading, error, connect, revoke, reset, update }
+  return { data, isLoading, error, connect, clear, revoke, update }
 }
