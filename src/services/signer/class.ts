@@ -2,16 +2,21 @@ import { Assert }                 from '@vbyte/micro-lib/assert'
 import { EventEmitter }           from '@vbyte/micro-lib'
 import { GlobalController }       from '@/core/global.js'
 import { logger }                 from '@/logger.js'
-import * as CONST                 from '@/const.js'
 import { handle_signer_message } from './handler.js'
 
-import type { SignerClient } from '@cmdcode/nostr-connect'
+import {
+  SYMBOLS,
+  DISPATCH_TIMEOUT
+} from '@/const.js'
 
 import {
   attach_console,
   attach_debugger,
+  attach_hooks,
   create_client,
 } from './startup.js'
+
+import type { SignerClient } from '@cmdcode/nostr-connect'
 
 import type {
   GlobalInitScope,
@@ -21,8 +26,8 @@ import type {
 
 const LOG = logger('signer')
 
-const SIGNER_DOMAIN = CONST.SYMBOLS.DOMAIN.SIGNER
-const SIGNER_TOPIC  = CONST.SYMBOLS.TOPIC.SIGNER
+const DOMAIN = SYMBOLS.DOMAIN.SIGNER
+const TOPIC  = SYMBOLS.TOPIC.SIGNER
 
 export class SignerController extends EventEmitter <{
   error : [ error : any ]
@@ -31,7 +36,8 @@ export class SignerController extends EventEmitter <{
 }> {
   private readonly _global : GlobalController
 
-  private _client  : SignerClient | null = null
+  private _client  : SignerClient   | null = null
+  private _timer   : NodeJS.Timeout | null = null
 
   constructor (scope : GlobalInitScope) {
     super()
@@ -65,12 +71,18 @@ export class SignerController extends EventEmitter <{
     return get_status(this)
   }
 
-  _dispatch () : void {
-    this.global.mbus.publish({
-      domain  : SIGNER_DOMAIN,
-      topic   : SIGNER_TOPIC.EVENT,
-      payload : this.state
-    })
+  _dispatch () {
+    // If the timer is not null, clear it.
+    if (this._timer) clearTimeout(this._timer)
+    // Set the timer to dispatch the payload.
+    this._timer = setTimeout(() => {
+      // Send a node status event.
+      this.global.mbus.publish({
+        domain  : DOMAIN,
+        topic   : TOPIC.EVENT,
+        payload : this.state
+      })
+    }, DISPATCH_TIMEOUT)
   }
 
   _handler (msg : RequestMessage) {
@@ -85,6 +97,8 @@ export class SignerController extends EventEmitter <{
       LOG.info('starting signer')
       // Start the rpc services.
       this._client = create_client(this)
+      // Attach the hooks.
+      attach_hooks(this)
       // Attach the console.
       attach_console(this)
       // Attach the debugger.

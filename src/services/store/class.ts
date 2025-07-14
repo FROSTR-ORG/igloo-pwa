@@ -65,12 +65,12 @@ export class StoreController <T extends StoreData> extends EventEmitter<{
     return this._topics
   }
 
-  _dispatch (payload : T = this.data) {
-    // Send the update event to the message bus.
+  _dispatch () {
+    // Send a node status event.
     this.global.mbus.publish({
       domain  : this._store_key,
       topic   : this.topics.EVENT,
-      payload
+      payload : this.data
     })
   }
 
@@ -87,6 +87,8 @@ export class StoreController <T extends StoreData> extends EventEmitter<{
       this._store = store_data as T
       // Subscribe to the message bus for updates.
       this.global.mbus.subscribe(this._handler.bind(this), { domain : this._store_key })
+      // Dispatch the store data.
+      this._dispatch()
       // Emit the ready event.
       this.emit('ready', this.data)
       // Log the store initialization.
@@ -111,6 +113,14 @@ export class StoreController <T extends StoreData> extends EventEmitter<{
     return () => this._middleware.delete(middleware)
   }
 
+  async reset () {
+    Assert.ok(this.is_ready, 'store not initialized')
+    // Return a promise that resolves when the store is reset.
+    await this.global.db.save(this._store_key, this._defaults)
+    // Dispatch the store data.
+    this._dispatch()
+  }
+
   async update (changes : Partial<T>) {
     Assert.ok(this.is_ready, 'store not initialized')
     // Load the current store.
@@ -131,12 +141,6 @@ export class StoreController <T extends StoreData> extends EventEmitter<{
     // Update the store.
     this._store = updated
     // Send the updated store to subscribers.
-    this._dispatch(updated)
-  }
-
-  reset () {
-    Assert.ok(this.is_ready, 'store not initialized')
-    // Return a promise that resolves when the store is reset.
-    return this.global.db.save(this._store_key, this._defaults)
+    this._dispatch()
   }
 }

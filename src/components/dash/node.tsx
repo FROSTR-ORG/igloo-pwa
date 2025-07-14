@@ -1,11 +1,12 @@
-import { useState }       from 'react'
+import { useEffect, useState }       from 'react'
 import { nip19 }          from 'nostr-tools'
 import { useBifrostNode } from '@/hooks/useNode.js'
+import { sleep } from '@vbyte/micro-lib/util'
 
 export function NodeInfoView () {
-  const client = useBifrostNode()
-  const pubkey = client.data.pubkey
-  const status = client.data.status
+  const node   = useBifrostNode()
+  const pubkey = node.data.pubkey
+  const status = node.data.status
 
   const [ password, setPassword ]       = useState('')
   const [ error, setError ]             = useState<string | null>(null)
@@ -29,7 +30,7 @@ export function NodeInfoView () {
       setError('Password is required')
       return
     }
-    const res = await client.unlock(password)
+    const res = await node.unlock(password)
     if (!res.ok) {
       setError(res.error)
       return
@@ -39,14 +40,14 @@ export function NodeInfoView () {
     }
   }
 
-  // useEffect(() => {
-  //   (async () => {
-  //     // Wait for 500ms.
-  //     await sleep(500)
-  //     // Fetch data from the store.
-  //     bus.request({ topic: fetch_key })
-  //   })()
-  // }, [ bus ])
+  useEffect(() => {
+    (async () => {
+      // Wait for 500ms.
+      await sleep(500)
+      // Fetch data from the store.
+      node.fetch()
+    })()
+  }, [])
 
   // If client is locked, show locked state
   if (status === 'locked') {
@@ -60,12 +61,12 @@ export function NodeInfoView () {
         <form onSubmit={handleUnlock} className="unlock-form">
           <div className="input-with-button">
             <input
-              type="password"
+              type="text"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder="Enter password to unlock..."
-              className="nsec-input"
-              autoComplete="current-password"
+              className="nsec-input password-masked"
+              autoComplete="off"
             />
           </div>
           <div className="action-buttons">
@@ -115,7 +116,7 @@ export function NodeInfoView () {
       </div>
       <button 
         className="button"
-        onClick={() => client.reset()}
+        onClick={() => node.reset()}
       >
         Reset Node
       </button>

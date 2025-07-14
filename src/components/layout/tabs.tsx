@@ -1,12 +1,11 @@
 import { useState }      from 'react'
 import { DashboardView } from '@/components/dash/index.js'
+import { RequestsView }  from '@/components/requests/index.js'
 import { SessionsView }  from '@/components/sessions/index.js'
 import { SettingsView }  from '@/components/settings/index.js'
+import * as Icons        from '@/components/util/icons.js'
 
 import type { ReactElement } from 'react'
-
-import * as Icons from '@/components/util/icons.js'
-import { RequestsView } from '../requests'
 
 export function Tabs(): ReactElement {
   const [ activeTab, setActiveTab ] = useState('dashboard')

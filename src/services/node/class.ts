@@ -1,10 +1,15 @@
 import { BifrostNode }      from '@frostr/bifrost'
 import { EventEmitter }     from '@vbyte/micro-lib'
+import { Assert }           from '@vbyte/micro-lib/assert'
 import { GlobalController } from '@/core/global.js'
 import { decrypt_secret }   from '@/lib/crypto.js'
 import { decode_share }     from '@/lib/encoder.js'
-import * as CONST           from '@/const.js'
 import { logger }           from '@/logger.js'
+
+import {
+  SYMBOLS,
+  DISPATCH_TIMEOUT
+} from '@/const.js'
 
 import {
   handle_node_message,
@@ -12,6 +17,7 @@ import {
 } from './handler.js'
 
 import {
+  get_node_state,
   get_node_status,
   has_node_config
 } from './lib.js'
@@ -19,21 +25,27 @@ import {
 import {
   attach_console,
   attach_debugger,
-  attach_listeners,
+  attach_hooks,
   ping_peers,
   start_bifrost_node
 } from './startup.js'
 
 import type {
-  MessageEnvelope,
   GlobalInitScope,
-  BifrostState,
-  MessageFilter
+  BifrostState
 } from '@/types/index.js'
 
 const LOG    = logger('node')
-const DOMAIN = CONST.SYMBOLS.DOMAIN.NODE
-const TOPIC  = CONST.SYMBOLS.TOPIC.NODE
+const DOMAIN = SYMBOLS.DOMAIN.NODE
+const TOPIC  = SYMBOLS.TOPIC.NODE
+
+const DEFAULT_STATE : () => BifrostState = () => {
+  return {
+    peers  : [],
+    pubkey : null,
+    status : 'loading'
+  }
+}
 
 export class BifrostController extends EventEmitter <{
   unlock : [ state : BifrostState ]
@@ -44,15 +56,168 @@ export class BifrostController extends EventEmitter <{
 }> {
   private readonly _global : GlobalController
 
-  private _client : BifrostNode | null = null
+  private _client : BifrostNode    | null = null
+  private _timer  : NodeJS.Timeout | null = null
+  private _reconnectTimer : NodeJS.Timeout | null = null
+  private _keepAliveTimer : NodeJS.Timeout | null = null
+  private _reconnectAttempts : number = 0
+  private _maxReconnectAttempts : number = 10
+  private _reconnectDelay : number = 1000 // Start with 1 second
+  private _keepAliveInterval : number = 30000 // 30 seconds
+  private _isVisible : boolean = true
 
   constructor (scope : GlobalInitScope) {
     super()
     this._global = GlobalController.fetch(scope)
+    // Set up page visibility handling
+    this._setupPageVisibilityHandling()
     LOG.debug('controller installed')
   }
 
-  get client () : BifrostNode | null {
+  private _setupPageVisibilityHandling() {
+    // Listen for page visibility changes
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', () => {
+        this._isVisible = !document.hidden
+        LOG.info(`page visibility changed: ${this._isVisible ? 'visible' : 'hidden'}`)
+        
+        if (this._isVisible) {
+          // Page became visible - check connection and reconnect if needed
+          this._handlePageVisible()
+        } else {
+          // Page became hidden - prepare for potential disconnection
+          this._handlePageHidden()
+        }
+      })
+    }
+  }
+
+  private _handlePageVisible() {
+    LOG.info('page became visible, checking connection health')
+    // Reset reconnection attempts when page becomes visible
+    this._reconnectAttempts = 0
+    
+    // If we have a client but it's not ready, try to reconnect
+    if (this._client && !this._client.is_ready) {
+      LOG.info('connection appears dead, attempting reconnection')
+      this._attemptReconnection()
+    } else if (!this._client && this.can_start) {
+      LOG.info('no client found, starting new connection')
+      this._start()
+    }
+    
+    // Resume keep-alive pings
+    this._startKeepAlive()
+  }
+
+  private _handlePageHidden() {
+    LOG.info('page became hidden, preparing for background mode')
+    // Don't immediately disconnect, but prepare for reconnection when visible again
+    // Keep the connection alive but reduce keep-alive frequency
+    this._stopKeepAlive()
+    
+    // Register background sync for when connection fails
+    this._registerBackgroundSync()
+  }
+
+  private _registerBackgroundSync() {
+    // Register background sync to help with reconnection
+    if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
+      navigator.serviceWorker.ready.then(registration => {
+        if ('sync' in registration) {
+          // @ts-ignore - sync types are not fully defined
+          registration.sync.register('keep-alive-sync').then(() => {
+            LOG.info('background sync registered for keep-alive')
+          }).catch((err: any) => {
+            LOG.warn('failed to register background sync:', err)
+          })
+        }
+      }).catch((err: any) => {
+        LOG.warn('service worker not ready for background sync:', err)
+      })
+    }
+  }
+
+  private _attemptReconnection() {
+    // Clear any existing reconnection timer
+    if (this._reconnectTimer) {
+      clearTimeout(this._reconnectTimer)
+      this._reconnectTimer = null
+    }
+
+    // Don't attempt reconnection if we've exceeded max attempts
+    if (this._reconnectAttempts >= this._maxReconnectAttempts) {
+      LOG.error('max reconnection attempts reached, giving up')
+      return
+    }
+
+    // Calculate delay with exponential backoff
+    const delay = Math.min(this._reconnectDelay * Math.pow(2, this._reconnectAttempts), 30000)
+    this._reconnectAttempts++
+
+    LOG.info(`attempting reconnection ${this._reconnectAttempts}/${this._maxReconnectAttempts} in ${delay}ms`)
+
+    this._reconnectTimer = setTimeout(() => {
+      if (this.can_start) {
+        try {
+          // Clean up existing client
+          if (this._client) {
+            this._client = null
+          }
+          
+          // Start new connection
+          this._start()
+          LOG.info('reconnection attempt initiated')
+        } catch (err) {
+          LOG.error('reconnection attempt failed:', err)
+          // Register background sync for potential recovery
+          this._onConnectionFailed()
+          // Try again after delay
+          this._attemptReconnection()
+        }
+      }
+    }, delay)
+  }
+
+  private _onConnectionFailed() {
+    // Register background sync when connection fails
+    this._registerBackgroundSync()
+  }
+
+  private _startKeepAlive() {
+    this._stopKeepAlive()
+    
+    if (!this._client || !this._client.is_ready) return
+
+    this._keepAliveTimer = setInterval(() => {
+      if (this._client && this._client.is_ready) {
+        // Send ping to all peers to keep connection alive
+        this._client.peers.forEach(peer => {
+          if (peer.status === 'online') {
+            this._client?.req.ping(peer.pubkey).catch(err => {
+              LOG.warn('keep-alive ping failed:', err)
+            })
+          }
+        })
+        LOG.debug('keep-alive pings sent')
+      }
+    }, this._keepAliveInterval)
+  }
+
+  private _stopKeepAlive() {
+    if (this._keepAliveTimer) {
+      clearInterval(this._keepAliveTimer)
+      this._keepAliveTimer = null
+    }
+  }
+
+  get can_start () : boolean {
+    const share = this.global.scope.private.share
+    return this.has_config && !!share
+  }
+
+  get client () : BifrostNode {
+    Assert.exists(this._client, 'node client called before start')
     return this._client
   }
 
@@ -68,76 +233,120 @@ export class BifrostController extends EventEmitter <{
     return !!this.global.scope.private.share
   }
 
-  get is_active () : boolean {
-    return this.client?.is_ready ?? false
-  }
-
   get is_ready () : boolean {
-    const share = this.global.scope.private.share
-    return this.has_config && !!share
+    return this._client?.is_ready ?? false
   }
 
   get state () : BifrostState {
-    return {
-      peers  : this.client?.peers ?? [],
-      pubkey : this.client?.pubkey ?? null,
-      status : this.status
-    }
+    return get_node_state(this)
   }
 
   get status () : string {
     return get_node_status(this)
   }
 
+  get isVisible () : boolean {
+    return this._isVisible
+  }
+
   set client (client : BifrostNode | null) {
     this._client = client
   }
 
-  _dispatch (payload : BifrostState) {
-    // Send a node status event.
-    this.global.mbus.publish({
-      domain  : DOMAIN,
-      topic   : TOPIC.EVENT,
-      payload : payload
-    })
+  // Public method to trigger reconnection
+  public attemptReconnection() {
+    this._attemptReconnection()
+  }
+
+  // Public method to start keep-alive
+  public startKeepAlive() {
+    this._startKeepAlive()
+  }
+
+  // Public method to stop keep-alive
+  public stopKeepAlive() {
+    this._stopKeepAlive()
+  }
+
+  // Public method to start the node connection
+  public start() {
+    this._start()
+  }
+
+  // Debug method to get connection info
+  public getConnectionInfo() {
+    return {
+      isVisible: this._isVisible,
+      isReady: this.is_ready,
+      canStart: this.can_start,
+      reconnectAttempts: this._reconnectAttempts,
+      maxReconnectAttempts: this._maxReconnectAttempts,
+      hasClient: !!this._client,
+      clientReady: this._client?.is_ready || false,
+      status: this.status,
+      peers: this._client?.peers || []
+    }
+  }
+
+  _dispatch () {
+    // If the timer is not null, clear it.
+    if (this._timer) clearTimeout(this._timer)
+    // Set the timer to dispatch the payload.
+    this._timer = setTimeout(() => {
+      // Send a node status event.
+      this.global.mbus.publish({
+        domain  : DOMAIN,
+        topic   : TOPIC.EVENT,
+        payload : this.state
+      })
+    }, DISPATCH_TIMEOUT)
   }
 
   _start () {
     // If the node is not ready, return.
-    if (!this.is_ready) return
+    if (!this.can_start) return
     // If the node is already initialized, return.
     LOG.info('starting bifrost node')
     try {
       // Initialize the node.
-      const node = start_bifrost_node(this)
+      this._client = start_bifrost_node(this)
       // Configure the ready event.
-      node.once('ready', () => {
+      this.client.once('ready', () => {
+        // Reset reconnection attempts on successful connection
+        this._reconnectAttempts = 0
         // Attach the listeners.
-        attach_listeners(this)
+        attach_hooks(this)
         // Attach the console.
         attach_console(this)
         // Attach the debugger.
         attach_debugger(this)
         // Ping the peers.
         ping_peers(this)
-        // Dispatch the new node state.
-        this._dispatch(this.state)
+        // Start keep-alive mechanism
+        this._startKeepAlive()
         // Emit the ready event.
         this.emit('ready')
         // Log the ready event.
         LOG.info('bifrost node ready')
       })
+      // Handle connection errors with reconnection
+      this.client.on('error', (err) => {
+        LOG.error('bifrost node error:', err)
+        if (this._isVisible) {
+          this._attemptReconnection()
+        }
+      })
       // Connect the node.
-      node.connect()
-      // Update the global state.
-      this.client = node
-      // Dispatch the new node state.
-      this._dispatch(this.state)
+      this.client.connect()
     } catch (err) {
       // Log the error.
       LOG.error('error during initialization:', err)
       // Emit the error event.
       this.emit('error', err)
+      // Attempt reconnection if page is visible
+      if (this._isVisible) {
+        this._attemptReconnection()
+      }
     }
   }
 
@@ -155,10 +364,18 @@ export class BifrostController extends EventEmitter <{
   }
 
   reset () {
+    // Clean up timers
+    if (this._reconnectTimer) {
+      clearTimeout(this._reconnectTimer)
+      this._reconnectTimer = null
+    }
+    this._stopKeepAlive()
+    
+    // Reset reconnection attempts
+    this._reconnectAttempts = 0
+    
     // Reset the node.
     this.client = null
-    // Dispatch the node state.
-    this._dispatch(this.state)
     // Emit the reset event.
     this.emit('reset', this.state)
     // Log the reset event.

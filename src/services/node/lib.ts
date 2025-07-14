@@ -1,11 +1,37 @@
 import { BifrostController } from './class.js'
 import { Test }              from '@vbyte/micro-lib/test'
 
-import type { AppSettings } from '@/types/index.js'
+import type {
+  AppSettings,
+  BifrostState
+} from '@/types/index.js'
+
+const DEFAULT_STATE : () => BifrostState = () => {
+  return {
+    peers  : [],
+    pubkey : null,
+    status : 'loading'
+  }
+}
+
+export function get_node_state (node : BifrostController) : BifrostState {
+  if (node.is_ready) {
+    return {
+      peers  : node.client.peers,
+      pubkey : node.client.pubkey,
+      status : node.status
+    }
+  } else {
+    return {
+      ...DEFAULT_STATE(),
+      status : node.status
+    }
+  }
+}
 
 export function get_node_status (node : BifrostController) : string {
   if (node.is_ready)         return 'online'
-  if (node.client)           return 'connecting'
+  if (node.can_start)        return 'offline'
   if (node.has_share)        return 'unlocked'
   if (has_node_config(node)) return 'locked'
   return 'loading'

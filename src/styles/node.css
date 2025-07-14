@@ -403,6 +403,7 @@
   align-items: center;
   justify-content: center;
   height: 1.5rem;
+  width: 1.5rem;
   margin-top: 0.125rem;
   transition: opacity 0.2s ease-in-out;
 }

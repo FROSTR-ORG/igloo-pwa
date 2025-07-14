@@ -1,10 +1,17 @@
-import { Assert, EventEmitter } from '@vbyte/micro-lib'
-import { GlobalController }     from '@/core/global.js'
-import * as CONST               from '@/const.js'
-import { logger }               from '@/logger.js'
+import { Assert, EventEmitter }   from '@vbyte/micro-lib'
+import { GlobalController }       from '@/core/global.js'
+import { logger }                 from '@/logger.js'
+import { handle_session_message } from './handler.js'
 
-import { handle_session_message }         from './handler.js'
-import { attach_console, register_hooks } from './startup.js'
+import {
+  SYMBOLS,
+  DISPATCH_TIMEOUT
+} from '@/const.js'
+
+import {
+  attach_console,
+  attach_hooks
+} from './startup.js'
 
 import type {
   GlobalInitScope,
@@ -19,8 +26,8 @@ import type {
 } from '@cmdcode/nostr-connect'
 
 const LOG    = logger('session')
-const DOMAIN = CONST.SYMBOLS.DOMAIN.SESSION
-const TOPIC  = CONST.SYMBOLS.TOPIC.SESSION
+const DOMAIN = SYMBOLS.DOMAIN.SESSION
+const TOPIC  = SYMBOLS.TOPIC.SESSION
 
 export class SessionController extends EventEmitter <{
   connect : [ session    : InviteToken ]
@@ -31,7 +38,8 @@ export class SessionController extends EventEmitter <{
 }> {
   private readonly _global : GlobalController
 
-  private _client : SignerClient | null = null
+  private _client : SignerClient   | null = null
+  private _timer  : NodeJS.Timeout | null = null
 
   constructor (scope : GlobalInitScope) {
     super()
@@ -60,12 +68,17 @@ export class SessionController extends EventEmitter <{
   }
 
   _dispatch () {
-    // Dispatch the session state.
-    this.global.mbus.publish({
-      domain  : DOMAIN,
-      topic   : TOPIC.EVENT,
-      payload : this.state
-    })
+    // If the timer is not null, clear it.
+    if (this._timer) clearTimeout(this._timer)
+    // Set the timer to dispatch the payload.
+    this._timer = setTimeout(() => {
+      // Send a node status event.
+      this.global.mbus.publish({
+        domain  : DOMAIN,
+        topic   : TOPIC.EVENT,
+        payload : this.state
+      })
+    }, DISPATCH_TIMEOUT)
   }
 
   _handler (msg : RequestMessage) {
@@ -81,11 +94,9 @@ export class SessionController extends EventEmitter <{
     // Start the rpc services.
     this._client = this.global.service.signer.client
     // Attach the hooks.
-    register_hooks(this)
+    attach_hooks(this)
     // Attach the console.
     attach_console(this)
-    // Dispatch the session state.
-    this._dispatch()
   }
 
   _update () {

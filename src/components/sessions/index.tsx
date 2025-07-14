@@ -1,6 +1,7 @@
 import { useState }            from 'react'
 import { InviteEncoder }       from '@cmdcode/nostr-connect'
 import { useSession }          from '@/hooks/useSession.js'
+import { useBifrostNode }      from '@/hooks/useNode.js'
 import { PermissionsDropdown } from '@/components/sessions/permissions.js'
 import { QRScanner }           from '@/components/util/scanner.js'
 
@@ -8,6 +9,7 @@ import type { PermissionPolicy } from '@cmdcode/nostr-connect'
 
 export function SessionsView() {
   const client = useSession()
+  const node = useBifrostNode()
 
   const [ connectStr, setConnectStr ] = useState('')
   const [ error, setError           ] = useState<string | null>(null)
@@ -16,6 +18,24 @@ export function SessionsView() {
   const [ newKind, setNewKind       ] = useState<Record<string, string>>({})
   const [ copied, setCopied         ] = useState<string | null>(null)
   const [ scannerActive, setScannerActive ] = useState(false)
+
+  // Show locked state if client is locked
+  if (node.data.status === 'locked') {
+    return (
+      <div className="sessions-container">
+        <p className="requests-error">🔒 Please unlock your client to view sessions</p>
+      </div>
+    )
+  }
+
+  // Show loading state if client is loading
+  if (node.data.status === 'loading') {
+    return (
+      <div className="sessions-container">
+        <p className="requests-empty">Loading...</p>
+      </div>
+    )
+  }
 
   const connect = async () => {
     try {
@@ -120,6 +140,11 @@ export function SessionsView() {
     }
   }
 
+  const closeScanner = () => {
+    setScannerActive(false)
+    setError(null)
+  }
+
   // Combine active and pending sessions
   const allSessions = [
     ...client.data.pending.map(s => ({ ...s, status: 'pending' as const })),
@@ -128,8 +153,6 @@ export function SessionsView() {
 
   return (
     <div className="sessions-container">
-      <h2 className="section-header">Client Sessions</h2>
-
       {/* Combined Active and Pending Sessions */}
       <div className="sessions-section">
         {allSessions.length === 0 ? (
@@ -241,7 +264,7 @@ export function SessionsView() {
                 "✕"
               ) : (
                 <img 
-                  src="/icons/qrcode.png" 
+                  src="./icons/qrcode.png" 
                   alt="QR Code" 
                   className="qr-button-icon"
                 />
@@ -249,16 +272,17 @@ export function SessionsView() {
             </button>
           </div>
         </div>
-        {scannerActive && (
-          <div className="scanner-wrapper">
-            <QRScanner
-              onResult={handleQRScanResult}
-              onError={handleQRScanError}
-            />
-          </div>
-        )}
         {error && <p className="session-error">{error}</p>}
       </div>
+
+      {/* QR Scanner Popup */}
+      {scannerActive && (
+        <QRScanner
+          onResult={handleQRScanResult}
+          onError={handleQRScanError}
+          onClose={closeScanner}
+        />
+      )}
     </div>
   )
 } 

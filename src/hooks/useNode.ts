@@ -26,6 +26,11 @@ export function useBifrostNode() {
   const ping = (pubkey : string) => {
     return bus.request({ domain: DOMAIN, topic: TOPIC.PING, params: pubkey })
   }
+
+  // Define the fetch method.
+  const fetch = () => {
+    return bus.request({ domain: DOMAIN, topic: TOPIC.FETCH })
+  }
   // Define the reset method.
   const reset = () => {
     return bus.request({ domain: DOMAIN, topic: TOPIC.RESET })
@@ -35,5 +40,5 @@ export function useBifrostNode() {
     return bus.request({ domain: DOMAIN, topic: TOPIC.UNLOCK, params: password })
   }
   // Return the data API and action methods.
-  return { data, isLoading, error, ping, reset, unlock }
+  return { data, isLoading, error, fetch, ping, reset, unlock }
 }

@@ -489,14 +489,6 @@
   padding: 0.2rem;
 }
 
-.scanner-wrapper {
-  margin-top: 1rem;
-  border-radius: 10px;
-  overflow: hidden;
-  background: #1a2233;
-  border: 1px solid #28344a;
-}
-
 /* Error Message */
 .session-error {
   margin-top: 0.7em;

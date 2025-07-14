@@ -3,17 +3,17 @@ import { Assert }             from '@vbyte/micro-lib/assert'
 import { sanitize_payload }   from '@/lib/message.js'
 import { BifrostController }  from './class.js'
 import { get_peer_configs }   from '@/lib/peers.js'
-import * as CONST             from '@/const.js'
+import { SYMBOLS }            from '@/const.js'
 import { logger }             from '@/logger.js'
 
 import type { LogType } from '@/types/console.js'
 
 const LOG    = logger('node')
-const DOMAIN = CONST.SYMBOLS.DOMAIN.NODE
+const DOMAIN = SYMBOLS.DOMAIN.NODE
 
 export function start_bifrost_node (self : BifrostController) {
   // If the node cannot be initialized, return an error.
-  Assert.ok(self.is_ready, 'node is not ready')
+  Assert.ok(self.can_start, 'node is not ready to start')
   // Get the share from the settings.
   const share = self.global.scope.private.share
   // If the share is not present, return an error.
@@ -28,25 +28,29 @@ export function start_bifrost_node (self : BifrostController) {
   return new BifrostNode(settings.group!, share, urls, { policies })
 }
 
-export function attach_listeners (self : BifrostController) {
+export function attach_hooks (self : BifrostController) {
   // If the node client is not initialized, return an error.
   Assert.exists(self.client, 'node client not initialized')
-  // Dispatch the node state.
+  // Update the node state on any event.
+  self.client.on('*', () => { self._dispatch() })
+  // Update the node state on changes to the settings.
+  self.global.service.settings.on('update', () => { self._dispatch() })
+  // Hook into the closed event with reconnection logic.
   self.client.on('closed', () => {
-    // Dispatch the node state.
-    self._dispatch(self.state)
     // Emit the closed event.
     self.emit('closed')
     // Log the node closed event.
     LOG.info('node closed')
+    // Attempt reconnection if page is visible
+    if (self.isVisible) {
+      LOG.info('attempting reconnection after close event')
+      self.attemptReconnection()
+    }
   })
-  self.client.on('/ping/handler/res', () => {
-    // Dispatch the node state.
-    self._dispatch(self.state)
-  })
-  self.client.on('/ping/sender/res', (payload) => {
-    // Dispatch the node state.
-    self._dispatch(self.state)
+  // Hook into connection errors
+  self.client.on('error', (err) => {
+    LOG.error('node connection error:', err)
+    // Let the main _start() method handle this
   })
 }
 

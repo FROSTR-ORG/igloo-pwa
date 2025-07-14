@@ -15,17 +15,19 @@ export const DB_VERSION  = 2
 export const BUS_TIMEOUT = 5000
 export const LOG_LIMIT   = 100
 
+export const DISPATCH_TIMEOUT = 100
+
 export const APP_CACHE : AppCache = {
   sessions : []
 }
 
 export const APP_SETTINGS : AppSettings = {
-  flags    : { notifications : true },
-  group    : null,
-  peers    : [],
-  pubkey   : null,
-  relays   : [],
-  share    : null
+  group         : null,
+  notifications : false,
+  peers         : [],
+  pubkey        : null,
+  relays        : [],
+  share         : null
 }
 
 export const GLOBAL_SERVICES : GlobalServicesInit = {

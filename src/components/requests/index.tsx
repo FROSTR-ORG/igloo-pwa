@@ -22,7 +22,6 @@ export function RequestsView() {
   if (node.data.status === 'locked') {
     return (
       <div className="requests-container">
-        <h2 className="section-header">Permission Requests</h2>
         <p className="requests-error">🔒 Please unlock your client to view permission requests</p>
       </div>
     )
@@ -32,7 +31,6 @@ export function RequestsView() {
   if (isLoading) {
     return (
       <div className="requests-container">
-        <h2 className="section-header">Permission Requests</h2>
         <p className="requests-empty">Loading...</p>
       </div>
     )
@@ -40,10 +38,8 @@ export function RequestsView() {
 
   return (
     <div className="requests-container">
-      <h2 className="section-header">Permission Requests</h2>
-      
       {/* Show notification status */}
-      {settings.data.flags.notifications && (
+      {settings.data.notifications && (
         <div style={{ 
           backgroundColor: '#4CAF50', 
           color: '#fff', 

@@ -27,13 +27,12 @@ export interface AppFlags {
   notifications : boolean
 }
 
-export interface AppSettings {
-  flags    : AppFlags
-  group    : GroupPackage | null
-  peers    : PeerConfig[]
-  pubkey   : string | null
-  relays   : RelayPolicy[]
-  share    : string | null
+export interface AppSettings extends AppFlags {
+  group  : GroupPackage | null
+  peers  : PeerConfig[]
+  pubkey : string | null
+  relays : RelayPolicy[]
+  share  : string | null
 }
 
 export interface PrivateCache {

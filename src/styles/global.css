@@ -114,6 +114,11 @@ input[type="text"], input[type="password"], input[type="email"], input[type="url
 }
 input:focus { border-color: #4a90e2; box-shadow: 0 0 0 2px rgba(74, 144, 226, 0.3); outline: none; }
 
+/* Password masking utility class */
+.password-masked {
+  -webkit-text-security: disc;
+}
+
 select {
   height: 36px;
   padding: 0 10px;

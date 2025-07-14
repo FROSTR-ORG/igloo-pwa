@@ -1,10 +1,14 @@
 import { Assert, EventEmitter } from '@vbyte/micro-lib'
 import { GlobalController }     from '@/core/global.js'
-import * as CONST               from '@/const.js'
 import { logger }               from '@/logger.js'
 
 import { handle_request_message }         from './handler.js'
-import { attach_console, register_hooks } from './startup.js'
+import { attach_console, attach_hooks } from './startup.js'
+
+import {
+  SYMBOLS,
+  DISPATCH_TIMEOUT
+} from '@/const.js'
 
 import type {
   GlobalInitScope,
@@ -19,10 +23,9 @@ import type {
   SignerSession
 } from '@cmdcode/nostr-connect'
 
-const LOG = logger('request')
-
-const REQUEST_DOMAIN = CONST.SYMBOLS.DOMAIN.REQUEST
-const REQUEST_TOPIC  = CONST.SYMBOLS.TOPIC.REQUEST
+const LOG    = logger('request')
+const DOMAIN = SYMBOLS.DOMAIN.REQUEST
+const TOPIC  = SYMBOLS.TOPIC.REQUEST
 
 export class RequestController extends EventEmitter <{
   approve : [ req : PermissionRequest ]
@@ -30,7 +33,8 @@ export class RequestController extends EventEmitter <{
 }> {
   private readonly _global : GlobalController
 
-  private _client : SignerClient | null = null
+  private _client : SignerClient   | null = null
+  private _timer  : NodeJS.Timeout | null = null
 
   constructor (scope : GlobalInitScope) {
     super()
@@ -56,17 +60,22 @@ export class RequestController extends EventEmitter <{
   }
 
   _dispatch () {
-    // Dispatch the session state.
-    this.global.mbus.publish({
-      domain  : REQUEST_DOMAIN,
-      topic   : REQUEST_TOPIC.EVENT,
-      payload : this.state
-    })
+    // If the timer is not null, clear it.
+    if (this._timer) clearTimeout(this._timer)
+    // Set the timer to dispatch the payload.
+    this._timer = setTimeout(() => {
+      // Send a node status event.
+      this.global.mbus.publish({
+        domain  : DOMAIN,
+        topic   : TOPIC.EVENT,
+        payload : this.state
+      })
+    }, DISPATCH_TIMEOUT)
   }
 
   _handler (msg : RequestMessage) {
     // If the message is not a session message, return.
-    if (msg.domain !== REQUEST_DOMAIN) return
+    if (msg.domain !== DOMAIN) return
     // Handle the session message.
     handle_request_message(this, msg)
   }
@@ -77,11 +86,9 @@ export class RequestController extends EventEmitter <{
     // Start the rpc services.
     this._client = this.global.service.signer.client
     // Attach the hooks.
-    register_hooks(this)
+    attach_hooks(this)
     // Attach the console.
     attach_console(this)
-    // Dispatch the request state.
-    this._dispatch()
   }
 
   _update (sessions? : SignerSession[]) {
@@ -112,8 +119,6 @@ export class RequestController extends EventEmitter <{
     LOG.info('approving request:', req)
     // Approve the request.
     this.client.request.approve(req, changes)
-    // Dispatch the request state.
-    this._dispatch()
     // Emit the approve event.
     this.emit('approve', req)
   }
@@ -129,8 +134,6 @@ export class RequestController extends EventEmitter <{
     LOG.info('denying request:', req)
     // Deny the request.
     this.client.request.deny(req, reason, changes)
-    // Dispatch the request state.
-    this._dispatch()
     // Emit the deny event.
     this.emit('deny', req, reason)
   }

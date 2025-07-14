@@ -144,11 +144,12 @@ export function ShareConfigField() {
 
         <div className="input-with-button">
           <input
-            type="password"
+            type="text"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             placeholder="enter a password to encrypt your share"
-            className="nsec-input flex-input"
+            className="nsec-input flex-input password-masked"
+            autoComplete="off"
           />
         </div>
         
@@ -205,6 +206,7 @@ function is_share_string(input : string) {
  */
 function get_share_json(input : string) {
   try {
+    if (!is_share_string(input)) return null
     const share = decode_share(input)
     if (share === null) return null
     return JSON.stringify(share, null, 2)

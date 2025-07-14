@@ -18,6 +18,10 @@ export function create_client (self : SignerController) {
   })
 }
 
+export function attach_hooks (self : SignerController) {
+  self.client.on('*', () => { self._dispatch() })
+}
+
 export function attach_debugger (self : SignerController) {
   self.client.on('*', (event : string, ...args : unknown[]) => {
     console.log('[ signer ]', event, args)

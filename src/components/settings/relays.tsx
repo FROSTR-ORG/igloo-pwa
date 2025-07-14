@@ -121,6 +121,10 @@ export function RelayConfigField() {
           onChange={(e) => setUrl(e.target.value)}
           placeholder="wss://relay.example.com"
           className="relay-input"
+          autoComplete="off"
+          autoCorrect="off"
+          spellCheck="false"
+          autoCapitalize="off"
         />
         <button onClick={add_relay} className="button add-relay-button">
           Add Relay

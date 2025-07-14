@@ -59,6 +59,6 @@ export async function handle_session_message (
     // Reject the message.
     self.global.mbus.reject(msg.id, reason)
     // Log the error.
-    LOG.error('session request error:', reason)
+    LOG.error('error handling session message:', err)
   }
 }

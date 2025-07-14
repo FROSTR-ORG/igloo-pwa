@@ -48,7 +48,7 @@ export async function handle_request_message (
     // Reject the message.
     self.global.mbus.reject(msg.id, reason)
     // Log the error.
-    LOG.error('error handling message:', err)
+    LOG.error('error handling permission request:', err)
   }
 }
 
@@ -57,7 +57,6 @@ export async function handle_approved_request (
   req  : PermissionRequest
 ) {
   const client = self.global.service.signer.client
-  console.log('handle_approved_request', req)
   try {
   // Handle the request message.
     switch (req.method) {
@@ -105,6 +104,6 @@ export async function handle_approved_request (
     // Reject the message.
     self.global.mbus.reject(req.id, reason)
     // Log the error.
-    LOG.error('error handling request:', err)
+    LOG.error('error handling signing device:', err)
   }
 }
