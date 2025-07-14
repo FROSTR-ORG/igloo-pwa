@@ -456,6 +456,47 @@
   box-shadow: 0 4px 16px 0 rgba(52,152,219,0.18);
 }
 
+.session-btn-primary:disabled {
+  background: #5a7a8a;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+.session-buttons-container {
+  display: flex;
+  gap: 0.5rem;
+  align-items: stretch;
+  width: 100%;
+}
+
+.session-btn-qr {
+  width: 3.5rem !important;
+  min-width: 3.5rem;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.2rem;
+  padding: 0 !important;
+}
+
+.qr-button-icon {
+  width: 2.2rem;
+  height: 2.2rem;
+  object-fit: contain;
+  background: white;
+  border-radius: 4px;
+  padding: 0.2rem;
+}
+
+.scanner-wrapper {
+  margin-top: 1rem;
+  border-radius: 10px;
+  overflow: hidden;
+  background: #1a2233;
+  border: 1px solid #28344a;
+}
+
 /* Error Message */
 .session-error {
   margin-top: 0.7em;

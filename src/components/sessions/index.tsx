@@ -2,6 +2,7 @@ import { useState }            from 'react'
 import { InviteEncoder }       from '@cmdcode/nostr-connect'
 import { useSession }          from '@/hooks/useSession.js'
 import { PermissionsDropdown } from '@/components/sessions/permissions.js'
+import { QRScanner }           from '@/components/util/scanner.js'
 
 import type { PermissionPolicy } from '@cmdcode/nostr-connect'
 
@@ -14,6 +15,7 @@ export function SessionsView() {
   const [ editing, setEditing       ] = useState<Record<string, PermissionPolicy>>({})
   const [ newKind, setNewKind       ] = useState<Record<string, string>>({})
   const [ copied, setCopied         ] = useState<string | null>(null)
+  const [ scannerActive, setScannerActive ] = useState(false)
 
   const connect = async () => {
     try {
@@ -98,6 +100,24 @@ export function SessionsView() {
     navigator.clipboard.writeText(text)
     setCopied(text)
     setTimeout(() => setCopied(null), 2000) // Reset after 2 seconds
+  }
+
+  const handleQRScanResult = (result: string) => {
+    setConnectStr(result)
+    setScannerActive(false)
+    setError(null)
+  }
+
+  const handleQRScanError = (error: Error) => {
+    setError(`QR Scanner Error: ${error.message}`)
+    setScannerActive(false)
+  }
+
+  const toggleScanner = () => {
+    setScannerActive(!scannerActive)
+    if (!scannerActive) {
+      setError(null) // Clear any existing errors when opening scanner
+    }
   }
 
   // Combine active and pending sessions
@@ -204,13 +224,39 @@ export function SessionsView() {
             placeholder="Paste nostrconnect:// string here"
             className="session-input"
           />
-          <button
-            onClick={connect}
-            className="session-btn-primary"
-          >
-            Connect
-          </button>
+          <div className="session-buttons-container">
+            <button
+              onClick={connect}
+              className="session-btn-primary"
+              disabled={scannerActive}
+            >
+              Connect
+            </button>
+            <button
+              onClick={toggleScanner}
+              className="session-btn-primary session-btn-qr"
+              title={scannerActive ? "Close QR Scanner" : "Scan QR Code"}
+            >
+              {scannerActive ? (
+                "✕"
+              ) : (
+                <img 
+                  src="/icons/qrcode.png" 
+                  alt="QR Code" 
+                  className="qr-button-icon"
+                />
+              )}
+            </button>
+          </div>
         </div>
+        {scannerActive && (
+          <div className="scanner-wrapper">
+            <QRScanner
+              onResult={handleQRScanResult}
+              onError={handleQRScanError}
+            />
+          </div>
+        )}
         {error && <p className="session-error">{error}</p>}
       </div>
     </div>
