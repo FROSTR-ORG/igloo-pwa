@@ -1,46 +1,48 @@
-import * as CONST from '@/const.js'
+import { handle_approved_request } from './handler.js'
+import * as CONST                  from '@/const.js'
 
-import type { SignerSession }     from '@cmdcode/nostr-connect'
+import type { PermissionRequest } from '@cmdcode/nostr-connect'
 import type { RequestController } from './class.js'
 
 export function register_hooks (self : RequestController) {
   // Attach the session state handler.
-  self.client.session.on('activated', () => {
-    // Update the session in the cache.
-    self.global.cache.update({
-      sessions : self.client.session.active
-    })
-    // Dispatch the session state.
+  self.client.request.on('prompt', () => { self._dispatch() })
+
+  self.client.request.on('approve', (req : PermissionRequest) => {
+    handle_approved_request(self, req)
     self._dispatch()
   })
+
+  self.client.request.on('deny', () => { self._dispatch() })
 }
 
 export function attach_console (self : RequestController) {
   const console = self.global.service.console
   const domain  = CONST.SYMBOLS.DOMAIN.REQUEST
 
-  self.client.session.on('activated', (session : SignerSession) => {
+  self.client.request.on('prompt', (request : PermissionRequest) => {
     console.add({
       domain,
-      message : 'session activated',
-      payload : session,
+      message : 'request recieved',
+      payload : request,
       type    : 'info'
     })
   })
 
-  self.client.session.on('revoked', (session : string) => {
+  self.client.request.on('approve', (request : PermissionRequest) => {
     console.add({
       domain,
-      message : 'session revoked',
-      payload : session,
+      message : 'request approved',
+      payload : request,
       type    : 'info'
     })
   })
 
-  self.client.session.on('cleared', () => {
+  self.client.request.on('deny', (request : PermissionRequest, reason : string) => {
     console.add({
       domain,
-      message : 'session cleared',
+      message : 'request denied: ' + reason,
+      payload : request,
       type    : 'info'
     })
   })

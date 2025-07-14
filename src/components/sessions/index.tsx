@@ -126,16 +126,16 @@ export function SessionsView() {
                   <div className="session-header">
                     <div className="session-info">
                       <div className="session-name-container">
-                        {session.profile.image && (
+                        {session.profile?.image && (
                           <img 
                             src={session.profile.image} 
                             alt={`${session.profile.name || 'Unknown'} icon`}
                             className="session-icon"
                           />
                         )}
-                        <span className="session-name">{session.profile.name ?? 'unknown'}</span>
+                        <span className="session-name">{session.profile?.name ?? 'unknown'}</span>
                       </div>
-                      {session.profile.url && (
+                      {session.profile?.url && (
                         <a 
                           href={session.profile.url} 
                           target="_blank" 

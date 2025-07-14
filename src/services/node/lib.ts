@@ -13,7 +13,7 @@ export function get_node_status (node : BifrostController) : string {
 
 export function has_node_config (ctrl : BifrostController) : boolean {
   // Get the settings cache.
-  const settings = ctrl.global.scope.settings.data
+  const settings = ctrl.global.service.settings.data
   // Unpack store object.
   const { group, relays, share } = settings
   // Test if the store has the required data to initialize.

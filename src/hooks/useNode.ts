@@ -4,7 +4,8 @@ import * as CONST from '@/const.js'
 
 import type { BifrostState } from '@/types/index.js'
 
-const TOPIC   = CONST.SYMBOLS.TOPIC.NODE
+const DOMAIN = CONST.SYMBOLS.DOMAIN.NODE
+const TOPIC  = CONST.SYMBOLS.TOPIC.NODE
 
 const DEFAULTS = {
   peers  : [],
@@ -20,18 +21,18 @@ export function useBifrostNode() {
     data = DEFAULTS,
     isLoading,
     error
-  } = useMessageQuery<BifrostState>(TOPIC.FETCH, TOPIC.EVENT)
+  } = useMessageQuery<BifrostState>(DOMAIN, TOPIC.FETCH, TOPIC.EVENT)
   // Define the ping method.
   const ping = (pubkey : string) => {
-    return bus.request({ domain: TOPIC.PING, topic: TOPIC.PING, params: pubkey })
+    return bus.request({ domain: DOMAIN, topic: TOPIC.PING, params: pubkey })
   }
   // Define the reset method.
   const reset = () => {
-    return bus.request({ domain: TOPIC.RESET, topic: TOPIC.RESET })
+    return bus.request({ domain: DOMAIN, topic: TOPIC.RESET })
   }
   // Define the unlock method.
   const unlock = (password : string) => {
-    return bus.request({ domain: TOPIC.UNLOCK, topic: TOPIC.UNLOCK, params: password })
+    return bus.request({ domain: DOMAIN, topic: TOPIC.UNLOCK, params: password })
   }
   // Return the data API and action methods.
   return { data, isLoading, error, ping, reset, unlock }

@@ -50,10 +50,9 @@ export class RequestController extends EventEmitter <{
     return this.global.service.signer.is_ready
   }
 
-  get state () : RequestState {
-    return {
-      queue : this.client.request.queue
-    }
+  get state () : RequestState | null {
+    if (!this.is_ready) return null
+    return { queue : this.client.request.queue }
   }
 
   _dispatch () {
@@ -89,7 +88,7 @@ export class RequestController extends EventEmitter <{
     // If the session is not found, return.
     if (!sessions && this.client.session.active.length === 0) return
     // Update the session in the cache.
-    this.global.cache.update({
+    this.global.service.cache.update({
       sessions: sessions ?? this.client.session.active
     })
   }

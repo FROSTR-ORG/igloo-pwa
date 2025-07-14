@@ -102,15 +102,11 @@ export class BifrostController extends EventEmitter <{
     })
   }
 
-  _handler (msg : MessageEnvelope) {
-    if (msg.type !== 'request') return
-    handle_node_message(this, msg)
-  }
-
   _start () {
     // If the node is not ready, return.
     if (!this.is_ready) return
     // If the node is already initialized, return.
+    LOG.info('starting bifrost node')
     try {
       // Initialize the node.
       const node = start_bifrost_node(this)
@@ -129,7 +125,7 @@ export class BifrostController extends EventEmitter <{
         // Emit the ready event.
         this.emit('ready')
         // Log the ready event.
-        LOG.info('node ready')
+        LOG.info('bifrost node ready')
       })
       // Connect the node.
       node.connect()
@@ -146,12 +142,12 @@ export class BifrostController extends EventEmitter <{
   }
 
   init () {
-    // Define a filter for the message bus.
-    const filter : MessageFilter = { domain : DOMAIN }
+    // Log the initialization.
+    LOG.info('service initializing')
     // Subscribe to node messages.
-    this.global.mbus.subscribe((msg) => handle_node_message(this, msg), filter)
+    this.global.mbus.subscribe((msg) => handle_node_message(this, msg))
     // Subscribe to settings updates.
-    this.global.settings.on('update', (current, updated) => {
+    this.global.service.settings.on('update', (current, updated) => {
       handle_settings_updates(this, current, updated)
     })
     // Log the initialization.
@@ -175,7 +171,7 @@ export class BifrostController extends EventEmitter <{
     // If password is not a string, return error.
     if (typeof password !== 'string') return 'password is not a string'
     // Get the share from the settings.
-    const share = this.global.settings.data.share
+    const share = this.global.service.settings.data.share
     // If the share is not present, return error.
     if (!share) return 'share not present'
     // Try to decrypt the secret share.

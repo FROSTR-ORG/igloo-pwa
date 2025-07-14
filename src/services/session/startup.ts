@@ -6,23 +6,29 @@ import type { SessionController } from './class.js'
 const DOMAIN = CONST.SYMBOLS.DOMAIN.SESSION
 
 export function register_hooks (self : SessionController) {
-  // Attach the session state handler.
-  self.client.session.on('activated', () => {
-    // Update the session in the cache.
-    self.global.cache.update({
-      sessions : self.client.session.active
-    })
-    // Dispatch the session state.
+  self.client.session.on('pending', () => { self._dispatch() })
+
+  self.client.session.on('revoked', () => {
+    console.log('this ran')
+    self._update()
+    self._dispatch()
+  })
+
+  self.client.session.on('active', () => {
+    self._update()
+    self._dispatch()
+  })
+
+  self.client.session.on('cleared', () => {
+    self._update()
     self._dispatch()
   })
 }
 
 export function attach_console (self : SessionController) {
-  const console = self.global.service.console
-  
 
-  self.client.session.on('activated', (session : SignerSession) => {
-    console.add({
+  self.client.session.on('active', (session : SignerSession) => {
+    self.global.service.console.add({
       domain  : DOMAIN,
       message : 'session activated',
       payload : session,
@@ -31,7 +37,7 @@ export function attach_console (self : SessionController) {
   })
 
   self.client.session.on('revoked', (session : string) => {
-    console.add({
+    self.global.service.console.add({
       domain  : DOMAIN,
       message : 'session revoked',
       payload : session,
@@ -40,7 +46,7 @@ export function attach_console (self : SessionController) {
   })
 
   self.client.session.on('cleared', () => {
-    console.add({
+    self.global.service.console.add({
       domain  : DOMAIN,
       message : 'session cleared',
       type    : 'info'

@@ -8,15 +8,14 @@ import type {
   LogEntry,
   LogFilter,
   LogTemplate,
-  MessageEnvelope,
-  MessageFilter
+  RequestMessage
 } from '@/types/index.js'
 
 const LOG    = logger('console')
 const DOMAIN = CONST.SYMBOLS.DOMAIN.CONSOLE
 const TOPIC  = CONST.SYMBOLS.TOPIC.CONSOLE
 
-const LOG_LIMIT  = 100
+const LOG_LIMIT = 100
 
 export class ConsoleController {
   private readonly _global : GlobalController
@@ -41,8 +40,8 @@ export class ConsoleController {
     })
   }
 
-  _handler (message : MessageEnvelope) {
-    if (message.type !== 'request') return
+  _handler (message : RequestMessage) {
+    if (message.domain !== DOMAIN) return
     switch (message.topic) {
       case TOPIC.FETCH:
         const filter = message.params as LogFilter
@@ -57,12 +56,8 @@ export class ConsoleController {
   }
 
   init () {
-    // Define a filter for the message bus.
-    const filter : MessageFilter = { domain : DOMAIN }
     // Subscribe to the message bus.
-    this.global.mbus.subscribe(this._handler.bind(this), filter)
-    // Log the subscription.
-    LOG.info('subscribed')
+    this.global.mbus.subscribe(this._handler.bind(this))
     // Log the activation.
     LOG.info('service activated')
   }

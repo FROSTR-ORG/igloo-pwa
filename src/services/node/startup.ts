@@ -19,7 +19,7 @@ export function start_bifrost_node (self : BifrostController) {
   // If the share is not present, return an error.
   Assert.exists(share, 'share not present')
   // Get the settings cache.
-  const settings = self.global.scope.settings.data
+  const settings = self.global.service.settings.data
   // Extract the urls from the relay policies.
   const urls = settings.relays.map(e => e.url)
   // Get the peer policies.
@@ -68,6 +68,8 @@ export function attach_debugger (self : BifrostController) {
 export function attach_console (self : BifrostController) {
   // If the node client is not initialized, return an error.
   Assert.exists(self.client, 'node client not initialized')
+  // Get the console service.
+  const console = self.global.service.console
   // Listen for node events.
   self.client.on('*', (event, data) => {
     // Initialize variables for the log entry.
@@ -107,7 +109,7 @@ export function attach_console (self : BifrostController) {
       payload = sanitize_payload(payload)
     }
     // Add the log entry.
-    self.global.service.console.add({
+    console.add({
       domain  : DOMAIN,
       message : message,
       payload : payload,

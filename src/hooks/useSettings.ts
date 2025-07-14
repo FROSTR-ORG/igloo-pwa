@@ -17,7 +17,7 @@ export function useSettings() {
     data = DEFAULTS,
     isLoading,
     error
-  } = useMessageQuery<AppSettings>(STORE_TOPIC.FETCH, STORE_TOPIC.EVENT)
+  } = useMessageQuery<AppSettings>(STORE_KEY, STORE_TOPIC.FETCH, STORE_TOPIC.EVENT)
   // Define the reset method.
   const reset = () => {
     return bus.request({ domain: STORE_KEY, topic: STORE_TOPIC.RESET })

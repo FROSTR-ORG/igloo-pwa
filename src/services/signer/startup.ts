@@ -11,10 +11,25 @@ export function create_client (self : SignerController) {
   // If the node is not initialized, return an error.
   if (!node) throw new Error('bifrost node not initialized')
   // Create a new signer.
-  const signer  = new BifrostSignDevice(node)
+  const signer = new BifrostSignDevice(node)
   // Create a new client.
   return new SignerClient(signer, {
-    sessions : self.global.cache.data.sessions,
+    sessions : self.global.service.cache.data.sessions
+  })
+}
+
+export function attach_debugger (self : SignerController) {
+  self.client.on('*', (event : string, ...args : unknown[]) => {
+    console.log('[ signer ]', event, args)
+  })
+  self.client.socket.on('*', (event : string, ...args : unknown[]) => {
+    console.log('[ socket ]', event, args)
+  })
+  self.client.session.on('*', (event : string, ...args : unknown[]) => {
+    console.log('[ session ]', event, args)
+  })
+  self.client.request.on('*', (event : string, ...args : unknown[]) => {
+    console.log('[ request ]', event, args)
   })
 }
 

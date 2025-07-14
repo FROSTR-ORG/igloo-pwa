@@ -9,6 +9,7 @@ import type { SignerClient } from '@cmdcode/nostr-connect'
 
 import {
   attach_console,
+  attach_debugger,
   create_client,
 } from './startup.js'
 
@@ -55,7 +56,8 @@ export class SignerController extends EventEmitter <{
     return this._client
   }
 
-  get state () : SignerState {
+  get state () : SignerState | null {
+    if (!this.is_ready) return null
     return { status : this.status }
   }
 
@@ -79,23 +81,22 @@ export class SignerController extends EventEmitter <{
     try {
       // If the bifrost node is not ready, return.
       if (!this.can_start) return
+      // Log the start event.
+      LOG.info('starting signer')
       // Start the rpc services.
-      const client = create_client(this)
-      // Attach the event listeners.
-      client.on('ready', () => {
-        // Attach the console.
-        attach_console(this)  
-        // Dispatch the session state.
-        this._dispatch()
-        // Emit the ready event.
-        this.emit('ready')
-        // Log the ready event.
-        LOG.info('signer ready')
-      })
-      // Update the global state.
-      this._client  = client
+      this._client = create_client(this)
+      // Attach the console.
+      attach_console(this)
+      // Attach the debugger.
+      attach_debugger(this)
+      // Connect to existing relays.
+      this.client.connect()
       // Dispatch the signer state.
       this._dispatch()
+      // Emit the ready event.
+      this.emit('ready')
+      // Log the ready event.
+      LOG.info('signer ready')
     } catch (err) {
       // Log the error.
       LOG.error('error during initialization:', err)

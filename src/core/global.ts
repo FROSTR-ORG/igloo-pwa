@@ -4,7 +4,6 @@ import { DBController }        from './db.js'
 import { MessageBus }          from './mbus.js'
 
 import type { GlobalInitScope } from '@/types/index.js'
-import { ConsoleController } from '../services/console.js'
 
 const LOG = logger('global')
 
@@ -27,10 +26,6 @@ export class GlobalController {
     LOG.debug('controller installed')
   }
 
-  get cache () {
-    return this.scope.cache
-  }
-
   get db () {
     return this._db
   }
@@ -49,15 +44,7 @@ export class GlobalController {
   }
 
   get service () {
-    return {
-      console : this.scope.console,
-      node    : this.scope.node,
-      signer  : this.scope.signer,
-    }
-  }
-
-  get settings () {
-    return this.scope.settings
+    return this.scope.service
   }
 
 }

@@ -1,7 +1,7 @@
 import type {
   AppCache,
   AppSettings,
-  GlobalData,
+  GlobalInitState,
   GlobalServicesInit
 } from '@/types/index.js'
 
@@ -31,7 +31,6 @@ export const APP_SETTINGS : AppSettings = {
 export const GLOBAL_SERVICES : GlobalServicesInit = {
   cache    : null,
   console  : null,
-  global   : null,
   node     : null,
   request  : null,
   session  : null,
@@ -39,7 +38,9 @@ export const GLOBAL_SERVICES : GlobalServicesInit = {
   signer   : null
 }
 
-export const GLOBAL_DATA : GlobalData = {
+export const GLOBAL_INIT_STATE : GlobalInitState = {
   flags   : { debug : false, verbose : true },
-  private : { share : null }
+  global  : null,
+  private : { share : null },
+  service : GLOBAL_SERVICES
 }

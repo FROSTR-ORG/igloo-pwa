@@ -17,7 +17,7 @@ export function useCache() {
     data = DEFAULTS,
     isLoading,
     error
-  } = useMessageQuery<AppCache>(STORE_TOPIC.FETCH, STORE_TOPIC.EVENT)
+  } = useMessageQuery<AppCache>(STORE_KEY, STORE_TOPIC.FETCH, STORE_TOPIC.EVENT)
   // Define the reset method.
   const reset = () => {
     return bus.request({ domain: STORE_KEY, topic: STORE_TOPIC.RESET })

@@ -22,7 +22,7 @@ export function useRequest() {
     data = DEFAULTS,
     isLoading,
     error
-  } = useMessageQuery<RequestState>(TOPIC.FETCH, TOPIC.EVENT)
+  } = useMessageQuery<RequestState>(DOMAIN, TOPIC.FETCH, TOPIC.EVENT)
   // Define the connect method.
   const approve = (
     req      : PermissionRequest,

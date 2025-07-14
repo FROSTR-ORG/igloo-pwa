@@ -48,7 +48,7 @@ export async function handle_request_message (
     // Reject the message.
     self.global.mbus.reject(msg.id, reason)
     // Log the error.
-    LOG.error('session request error:', reason)
+    LOG.error('error handling message:', err)
   }
 }
 
@@ -57,42 +57,54 @@ export async function handle_approved_request (
   req  : PermissionRequest
 ) {
   const client = self.global.service.signer.client
+  console.log('handle_approved_request', req)
+  try {
   // Handle the request message.
-  switch (req.method) {
-    case 'sign_event': {
-      const event  = req.params as unknown as EventTemplate
-      const signed = await client.signer.sign_event(event)
-      const result = JSON.stringify(signed)
-      client.request.resolve(req, result)
-      break
+    switch (req.method) {
+      case 'sign_event': {
+        const event  = JSON.parse(req.params?.at(0) as string)
+        console.log('event', event)
+        const signed = await client.signer.sign_event(event)
+        console.log('signed', signed)
+        const result = JSON.stringify(signed)
+        client.request.resolve(req, result)
+        break
+      }
+      case 'nip04_encrypt': {
+        const [ pubkey, plaintext ] = req.params as [ string, string ]
+        const result = await client.signer.nip04_encrypt(pubkey, plaintext)
+        client.request.resolve(req, result)
+        break
+      }
+      case 'nip04_decrypt': {
+        const [ pubkey, ciphertext ] = req.params as [ string, string ]
+        const result = await client.signer.nip04_decrypt(pubkey, ciphertext)
+        client.request.resolve(req, result)
+        break
+      }
+      case 'nip44_encrypt': {
+        const [ pubkey, plaintext ] = req.params as [ string, string ]
+        const result = await client.signer.nip44_encrypt(pubkey, plaintext)
+        client.request.resolve(req, result)
+        break
+      }
+      case 'nip44_decrypt': {
+        const [ pubkey, ciphertext ] = req.params as [ string, string ]
+        const result = await client.signer.nip44_decrypt(pubkey, ciphertext)
+        client.request.resolve(req, result)
+        break
+      }
+      default: {
+        client.request.reject(req, 'unsupported method')
+        break
+      }
     }
-    case 'nip04_encrypt': {
-      const [ pubkey, plaintext ] = req.params as [ string, string ]
-      const result = await client.signer.nip04_encrypt(pubkey, plaintext)
-      client.request.resolve(req, result)
-      break
-    }
-    case 'nip04_decrypt': {
-      const [ pubkey, ciphertext ] = req.params as [ string, string ]
-      const result = await client.signer.nip04_decrypt(pubkey, ciphertext)
-      client.request.resolve(req, result)
-      break
-    }
-    case 'nip44_encrypt': {
-      const [ pubkey, plaintext ] = req.params as [ string, string ]
-      const result = await client.signer.nip44_encrypt(pubkey, plaintext)
-      client.request.resolve(req, result)
-      break
-    }
-    case 'nip44_decrypt': {
-      const [ pubkey, ciphertext ] = req.params as [ string, string ]
-      const result = await client.signer.nip44_decrypt(pubkey, ciphertext)
-      client.request.resolve(req, result)
-      break
-    }
-    default: {
-      client.request.reject(req, 'unsupported method')
-      break
-    }
+  } catch (err) {
+    // If the error is not a string, parse it.
+    const reason = parse_error(err)
+    // Reject the message.
+    self.global.mbus.reject(req.id, reason)
+    // Log the error.
+    LOG.error('error handling request:', err)
   }
 }

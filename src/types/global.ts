@@ -16,9 +16,6 @@ export type GlobalInitScope    = ServiceWorkerGlobalScope & GlobalInitState
 export type GlobalReadyScope   = ServiceWorkerGlobalScope & GlobalReadyState
 export type GlobalStateKey     = keyof GlobalInitState
 
-export type GlobalInitState    = GlobalServicesInit  & GlobalData
-export type GlobalReadyState   = GlobalServicesReady & GlobalData
-
 export type CacheController    = StoreController<AppCache>
 export type SettingsController = StoreController<AppSettings>
 
@@ -27,29 +24,34 @@ export interface GlobalFlags {
   verbose : boolean
 }
 
-export interface GlobalData {
+export interface GlobalInitState {
   flags   : GlobalFlags,
-  private : PrivateCache
+  global  : GlobalController | null,
+  private : PrivateCache,
+  service : GlobalServicesInit,
+}
+
+export interface GlobalReadyState extends GlobalInitState {
+  global  : GlobalController,
+  service : GlobalServicesReady,
 }
 
 export interface GlobalServicesInit {
   cache    : CacheController    | null
   console  : ConsoleController  | null
-  global   : GlobalController   | null
   node     : BifrostController  | null
   request  : RequestController  | null
   session  : SessionController  | null
-  settings : SettingsController | null
   signer   : SignerController   | null
+  settings : SettingsController | null
 }
 
 export interface GlobalServicesReady {
   cache    : CacheController
   console  : ConsoleController
-  global   : GlobalController
   node     : BifrostController
   request  : RequestController
   session  : SessionController
-  settings : SettingsController
   signer   : SignerController
+  settings : SettingsController
 }

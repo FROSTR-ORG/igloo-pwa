@@ -23,8 +23,9 @@ const DOMAIN = CONST.SYMBOLS.DOMAIN.SESSION
 const TOPIC  = CONST.SYMBOLS.TOPIC.SESSION
 
 export class SessionController extends EventEmitter <{
-  connect : [ session : InviteToken ]
-  revoke  : [ session_id : string ]
+  connect : [ session    : InviteToken ]
+  active  : [ session    : SignerSession ]
+  revoked : [ pubkey     : string ]
   update  : [ session    : SignerSession ]
   clear   : []
 }> {
@@ -50,7 +51,8 @@ export class SessionController extends EventEmitter <{
     return this.global.service.signer.is_ready
   }
 
-  get state () : SessionState {
+  get state () : SessionState | null {
+    if (!this.is_ready) return null
     return {
       active  : this.client.session.active,
       pending : this.client.session.pending
@@ -86,13 +88,13 @@ export class SessionController extends EventEmitter <{
     this._dispatch()
   }
 
-  _update (sessions? : SignerSession[]) {
-    // If the session is not found, return.
-    if (!sessions && this.client.session.active.length === 0) return
+  _update () {
+    // If the session is not found, throw an error.
+    Assert.ok(this.state, 'tried to update sessions before ready')
+    // Log the update event.
+    LOG.info('updating session cache')
     // Update the session in the cache.
-    this.global.cache.update({
-      sessions: sessions ?? this.client.session.active
-    })
+    this.global.service.cache.update({ sessions: this.state.active })
   }
 
   init () {
@@ -111,8 +113,6 @@ export class SessionController extends EventEmitter <{
     LOG.info('connecting to session:', session)
     // Connect to the session.
     this.client.session.connect(session)
-    // Dispatch the signer state.
-    this._dispatch()
     // Emit the connect event.
     this.emit('connect', session)
   }
@@ -124,27 +124,25 @@ export class SessionController extends EventEmitter <{
     LOG.info('clearing sessions')
     // Clear the sessions.
     this.client.session.reset()
-    // Update the session in the cache.
-    this._update([])
-    // Dispatch the session state.
-    this._dispatch()
     // Emit the clear event.
     this.emit('clear')
   }
 
-  async revoke (session_id : string) : Promise<void> {
+  async revoke (pubkey : string) : Promise<void> {
     // If the session is not found, throw an error.
     Assert.ok(this.is_ready, 'tried to revoke a session before ready')
     // Log the revoke event.
-    LOG.info('revoking session:', session_id)
-    // Revoke the session.
-    this.client.session.revoke(session_id)
-    // Update the session in the cache.
-    this._update([])
-    // Dispatch the session state.
-    this._dispatch()
-    // Emit the revoke event.
-    this.emit('revoke', session_id)
+    LOG.info('revoking session:', pubkey)
+    try {
+      // Revoke the session.
+      this.client.session.revoke(pubkey)
+      console.log('session state:', this.state)
+      // Emit the revoke event.
+      this.emit('revoked', pubkey)
+    } catch (err) {
+      // Log the error.
+      LOG.error('error during revoke:', err)
+    }
   }
 
   async update (session : SignerSession) : Promise<void> {
@@ -154,10 +152,6 @@ export class SessionController extends EventEmitter <{
     LOG.info('updating session:', session)
     // Update the session.
     this.client.session.update(session)
-    // Update the session in the cache.
-    this._update()
-    // Dispatch the session state.
-    this._dispatch()
     // Emit the update event.
     this.emit('update', session)
   }

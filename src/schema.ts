@@ -14,6 +14,7 @@ import {
 import { ConsoleController } from './services/console'
 
 export const event_message = z.object({
+  domain  : z.string(),
   id      : z.string(),
   payload : z.unknown(),
   topic   : z.string(),
@@ -21,6 +22,7 @@ export const event_message = z.object({
 })
 
 export const request_message = z.object({
+  domain : z.string(),
   id     : z.string(),
   params : z.unknown().optional(),
   topic  : z.string(),

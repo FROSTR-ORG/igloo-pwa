@@ -1,4 +1,7 @@
-import * as CONST from '@/const.js'
+import {
+  GLOBAL_INIT_STATE,
+  GLOBAL_SERVICES
+} from '@/const.js'
 
 import type {
   GlobalInitState,
@@ -6,17 +9,13 @@ import type {
   GlobalServicesInit,
 } from '@/types/index.js'
 
-const GLOBAL_DATA     = CONST.GLOBAL_DATA
-const GLOBAL_SERVICES = CONST.GLOBAL_SERVICES
-const GLOBAL_STATE    = { ...GLOBAL_DATA, ...GLOBAL_SERVICES }
-
 export function is_global_ready (
-  global : any
-) : global is GlobalReadyState {
+  scope : any
+) : scope is GlobalReadyState {
   // For each key in the global state,
-  for (const key in GLOBAL_STATE) {
+  for (const key in GLOBAL_INIT_STATE) {
     // If the key is not initialized,
-    if (global[key] === undefined) {
+    if (scope[key] === undefined) {
       // Return false.
       return false
     }
@@ -25,9 +24,9 @@ export function is_global_ready (
   for (const key in GLOBAL_SERVICES) {
     // If the key is not in the proper state,
     if (
-      global[key] === undefined ||
-      global[key] === null      ||
-      typeof global[key] !== 'object'
+      scope.service[key] === undefined ||
+      scope.service[key] === null      ||
+      typeof scope.service[key] !== 'object'
     ) {
       // Return false.
       return false
@@ -55,7 +54,7 @@ export function print_global_report (global : any) {
 export function print_global_state (self : GlobalInitState) {
   console.log('[ global ] current state:')
   // For each key in the global defaults,
-  for (const key in GLOBAL_STATE) {
+  for (const key in GLOBAL_INIT_STATE) {
     // Set the key to the default value.
     console.log(`${key}:`, self[key as keyof GlobalInitState])
   }

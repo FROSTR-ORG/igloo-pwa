@@ -27,7 +27,7 @@ export function useSession() {
     data = DEFAULTS,
     isLoading,
     error
-  } = useMessageQuery<SessionState>(TOPIC.FETCH, TOPIC.EVENT)
+  } = useMessageQuery<SessionState>(DOMAIN, TOPIC.FETCH, TOPIC.EVENT)
   // Define the connect method.
   const connect = (token : InviteToken) => {
     bus.request({ domain: DOMAIN, topic: TOPIC.CONNECT, params: token })
