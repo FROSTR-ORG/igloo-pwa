@@ -1,5 +1,6 @@
 {
   "DOMAIN": {
+    "APP"    : "app",
     "CONSOLE": "console",
     "GLOBAL" : "global",
     "NODE"   : "node",
@@ -13,6 +14,9 @@
     "SETTINGS" : "settings"
   },
   "TOPIC": {
+    "APP"    : {
+      "INIT" : "app.action.init"
+    },
     "CONSOLE": {
       "EVENT" : "console.event.state",
       "FETCH" : "console.action.fetch",

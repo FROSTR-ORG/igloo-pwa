@@ -43,6 +43,11 @@ self.addEventListener('activate', (_event) => {
 })
 
 self.addEventListener('message', async (event) => {
+  if (self.global === undefined) {
+    init_global_state(self)
+    init_global_services(self)
+    start_global_services(self)
+  }
   Assert.exists(self.global, 'message received before global is initialized')
   self.global.mbus.handler(event)
 })
