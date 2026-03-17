@@ -1,0 +1,35 @@
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const pwaRoot = path.resolve(__dirname, '..');
+const sharedRoot = path.resolve(pwaRoot, '../igloo-shared');
+const sourceDir = path.resolve(sharedRoot, 'public/wasm');
+const targetDir = path.resolve(pwaRoot, 'public/wasm');
+const expectedArtifacts = [
+  'bifrost_bridge_wasm.js',
+  'bifrost_bridge_wasm.d.ts',
+  'bifrost_bridge_wasm_bg.wasm'
+];
+
+for (const artifact of expectedArtifacts) {
+  const artifactPath = path.join(sourceDir, artifact);
+  try {
+    await fs.access(artifactPath);
+  } catch {
+    throw new Error(
+      `Missing shared bridge artifact ${artifactPath}. Build igloo-shared first or use scripts/run-browser-app.sh.`
+    );
+  }
+}
+
+await fs.mkdir(targetDir, { recursive: true });
+
+for (const entry of await fs.readdir(sourceDir)) {
+  const sourcePath = path.join(sourceDir, entry);
+  const targetPath = path.join(targetDir, entry);
+  await fs.copyFile(sourcePath, targetPath);
+}
+
+console.log(`ok: synced bridge wasm assets to ${targetDir}`);

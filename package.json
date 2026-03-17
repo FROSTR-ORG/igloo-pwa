@@ -1,0 +1,34 @@
+{
+  "name": "igloo-pwa",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build:ui": "npm --prefix ../igloo-ui run build",
+    "build:bridge-wasm": "node ./scripts/sync-bridge-wasm.mjs",
+    "dev": "npm run build:ui && npm run build:bridge-wasm && vite --host 0.0.0.0 --port 1430 --strictPort",
+    "build": "npm run build:ui && npm run build:bridge-wasm && tsc && vite build",
+    "preview": "vite preview --host 0.0.0.0 --port 4174",
+    "test:unit": "vitest run",
+    "test:e2e": "npm --prefix ../../test run test:e2e:igloo-pwa",
+    "test": "npm run test:unit"
+  },
+  "dependencies": {
+    "igloo-shared": "file:../igloo-shared",
+    "igloo-ui": "file:../igloo-ui",
+    "nostr-tools": "^2.17.2",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@testing-library/jest-dom": "^6.8.0",
+    "@testing-library/react": "^16.1.0",
+    "@types/react": "^18.3.5",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.1",
+    "jsdom": "^25.0.1",
+    "typescript": "^5.6.3",
+    "vite": "^5.4.8",
+    "vitest": "^2.1.3"
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "name": "Igloo PWA",
+  "short_name": "Igloo",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#020617",
+  "theme_color": "#020617",
+  "description": "Installable browser workspace for FROSTR V2.",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
