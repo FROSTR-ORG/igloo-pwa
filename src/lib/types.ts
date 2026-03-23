@@ -6,6 +6,7 @@ import type {
 
 export type PwaView =
   | 'landing'
+  | 'create-choice'
   | 'create-generate'
   | 'create-profile'
   | 'create-confirm'
@@ -16,6 +17,8 @@ export type PwaView =
   | 'load-confirm'
   | 'onboard-connect'
   | 'onboard-save'
+  | 'rotate-connect'
+  | 'rotate-save'
   | 'dashboard'
   | 'settings';
 
@@ -158,16 +161,10 @@ export type PwaOnboardConnection = {
 
 export type PwaDistributionActionResult =
   | {
-      kind: 'copied' | 'qr';
+      kind: 'copied' | 'qr' | 'saved';
       member_idx: number;
       label: string;
       package_text: string;
-    }
-  | {
-      kind: 'saved';
-      member_idx: number;
-      label: string;
-      saved_profile_id: string;
     };
 
 export type PwaDistributionSession = {
@@ -180,9 +177,14 @@ export type PwaDistributionSession = {
 
 export type PwaDraftState = {
   createForm: {
+    mode: 'new' | 'rotate';
     keysetName: string;
     threshold: string;
     count: string;
+  };
+  rotationForm: {
+    sourceProfileId: string;
+    sources: Array<{ packageText: string; password: string }>;
   };
   profileForm: {
     label: string;
@@ -208,6 +210,10 @@ export type PwaDraftState = {
     password: string;
     confirmPassword: string;
   };
+  rotateConnectForm: {
+    packageText: string;
+    password: string;
+  };
 };
 
 export type PwaPersistedState = {
@@ -221,6 +227,7 @@ export type PwaPersistedState = {
   selectedGeneratedShareIdx: number | null;
   pendingLoadConfirmation: PwaLoadConfirmation | null;
   pendingOnboardConnection: PwaOnboardConnection | null;
+  pendingRotationConnection: PwaOnboardConnection | null;
   distributionSession: PwaDistributionSession | null;
   runtimeSnapshot: PwaRuntimeSnapshot | null;
   settings: PwaSettings;

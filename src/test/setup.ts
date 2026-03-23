@@ -182,6 +182,28 @@ beforeEach(() => {
           { idx: 3, seckey: '13'.repeat(32) },
         ],
       }),
+    rotate_keyset_bundle: (_inputJson) =>
+      JSON.stringify({
+        previous_group_id: 'aa'.repeat(32),
+        next_group_id: 'bb'.repeat(32),
+        next: {
+          group: {
+            group_pk: '22'.repeat(32),
+            threshold: 2,
+            members: [
+              { idx: 1, pubkey: `02${'63'.repeat(32)}` },
+              { idx: 2, pubkey: `02${'64'.repeat(32)}` },
+              { idx: 3, pubkey: `02${'65'.repeat(32)}` },
+            ],
+          },
+          shares: [
+            { idx: 1, seckey: '21'.repeat(32) },
+            { idx: 2, seckey: '22'.repeat(32) },
+            { idx: 3, seckey: '23'.repeat(32) },
+          ],
+        },
+      }),
+    derive_group_id: (_groupJson) => 'aa'.repeat(32),
   });
   setBrowserRuntimeTestHooks({
     async connectOnboardingPackageAndCaptureProfile() {

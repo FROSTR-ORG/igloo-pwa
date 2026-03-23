@@ -24,14 +24,14 @@ describe('igloo-pwa app shell', () => {
   it('renders the landing page by default', () => {
     renderApp();
     expect(screen.getByText('Choose one path to initialize this browser workspace.')).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Create Keyset' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Create / Rotate Keyset' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Load Profile' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Onboard Device' })).toBeInTheDocument();
   });
 
   it('opens the create flow and generates a review workspace', async () => {
     renderApp();
-    fireEvent.click(screen.getAllByRole('button', { name: 'Start Creating' })[0]);
+    fireEvent.click(screen.getByRole('button', { name: 'Start' }));
     fireEvent.change(screen.getByLabelText('Keyset Name'), { target: { value: 'Playwright Treasury' } });
     fireEvent.click(screen.getByRole('button', { name: 'Generate Keyset' }));
     await waitFor(() => {

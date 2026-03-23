@@ -22,7 +22,17 @@ type AppState = PwaPersistedState & {
   setDashboardTab: (tab: PwaDashboardTab) => void;
   setUnlockPhrase: (value: string) => void;
   selectProfile: (profileId: string) => void;
+  loadStoredProfile: (profileId: string) => Promise<void>;
+  startCreateChoice: () => void;
   updateCreateForm: (field: keyof PwaDraftState['createForm'], value: string) => void;
+  updateRotationForm: (field: keyof PwaDraftState['rotationForm'], value: string) => void;
+  updateRotationSource: (
+    index: number,
+    field: keyof PwaDraftState['rotationForm']['sources'][number],
+    value: string,
+  ) => void;
+  addRotationSource: () => void;
+  removeRotationSource: (index: number) => void;
   generateKeyset: () => Promise<void>;
   selectGeneratedShare: (memberIdx: number) => void;
   updateProfileForm: (field: keyof PwaDraftState['profileForm'], value: string) => void;
@@ -48,6 +58,10 @@ type AppState = PwaPersistedState & {
   connectOnboardingPackage: () => Promise<void>;
   updateOnboardSaveForm: (field: keyof PwaDraftState['onboardSaveForm'], value: string) => void;
   finalizeOnboardedDevice: () => Promise<void>;
+  startRotateKey: () => void;
+  updateRotateConnectForm: (field: keyof PwaDraftState['rotateConnectForm'], value: string) => void;
+  connectRotationPackage: () => Promise<void>;
+  finalizeRotationUpdate: () => Promise<void>;
   exportProfile: (profileId: string) => Promise<void>;
   deleteProfile: (profileId: string) => void;
   updatePeerPolicy: (
@@ -73,9 +87,14 @@ const AppStore = React.createContext<AppState | null>(null);
 
 const defaultDrafts: PwaDraftState = {
   createForm: {
+    mode: 'new',
     keysetName: '',
     threshold: '2',
     count: '3',
+  },
+  rotationForm: {
+    sourceProfileId: '',
+    sources: [{ packageText: '', password: '' }],
   },
   profileForm: {
     label: '',
@@ -101,6 +120,10 @@ const defaultDrafts: PwaDraftState = {
     password: '',
     confirmPassword: '',
   },
+  rotateConnectForm: {
+    packageText: '',
+    password: '',
+  },
 };
 
 const defaultSettings: PwaSettings = {
@@ -121,6 +144,7 @@ function createDefaultState(): PwaPersistedState {
     selectedGeneratedShareIdx: null,
     pendingLoadConfirmation: null,
     pendingOnboardConnection: null,
+    pendingRotationConnection: null,
     distributionSession: null,
     runtimeSnapshot: null,
     settings: defaultSettings,
@@ -156,6 +180,14 @@ function normalizeLoadedState(): PwaPersistedState {
       ...defaultDrafts,
       ...loaded.drafts,
       createForm: { ...defaultDrafts.createForm, ...loaded.drafts?.createForm },
+      rotationForm: {
+        ...defaultDrafts.rotationForm,
+        ...loaded.drafts?.rotationForm,
+        sources:
+          loaded.drafts?.rotationForm?.sources?.length
+            ? loaded.drafts.rotationForm.sources
+            : defaultDrafts.rotationForm.sources,
+      },
       profileForm: { ...defaultDrafts.profileForm, ...loaded.drafts?.profileForm },
       distributionForms: loaded.drafts?.distributionForms ?? {},
       importProfileForm: {
@@ -174,6 +206,10 @@ function normalizeLoadedState(): PwaPersistedState {
         ...defaultDrafts.onboardSaveForm,
         ...loaded.drafts?.onboardSaveForm,
       },
+      rotateConnectForm: {
+        ...defaultDrafts.rotateConnectForm,
+        ...loaded.drafts?.rotateConnectForm,
+      },
     },
   };
 
@@ -183,23 +219,6 @@ function normalizeLoadedState(): PwaPersistedState {
 
   if (loadedActiveView === 'onboard-confirm') {
     normalized.activeView = normalized.pendingOnboardConnection ? 'onboard-save' : 'onboard-connect';
-  }
-
-  if (
-    normalized.profiles.length &&
-    (normalized.activeView === 'landing' ||
-      normalized.activeView === 'create-generate' ||
-      normalized.activeView === 'create-profile' ||
-      normalized.activeView === 'create-confirm' ||
-      normalized.activeView === 'create-distribute' ||
-      normalized.activeView === 'load-choice' ||
-      normalized.activeView === 'load-import' ||
-      normalized.activeView === 'load-recover' ||
-      normalized.activeView === 'load-confirm' ||
-      normalized.activeView === 'onboard-connect' ||
-      normalized.activeView === 'onboard-save')
-  ) {
-    normalized.activeView = 'dashboard';
   }
 
   return normalized;
@@ -295,25 +314,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     () => ({
       ...state,
       setActiveView(view) {
-        setState((current) => {
-          if (
-            current.profiles.length &&
-            (view === 'landing' ||
-              view === 'create-generate' ||
-              view === 'create-profile' ||
-              view === 'create-confirm' ||
-              view === 'create-distribute' ||
-              view === 'load-choice' ||
-              view === 'load-import' ||
-              view === 'load-recover' ||
-              view === 'load-confirm' ||
-              view === 'onboard-connect' ||
-              view === 'onboard-save')
-          ) {
-            return { ...current, activeView: 'dashboard', activeDashboardTab: current.activeDashboardTab };
-          }
-          return { ...current, activeView: view };
-        });
+        setState((current) => ({ ...current, activeView: view }));
       },
       setDashboardTab(tab) {
         setState((current) => ({ ...current, activeDashboardTab: tab, activeView: 'dashboard' }));
@@ -323,6 +324,29 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       },
       selectProfile(profileId) {
         setState((current) => ({ ...current, selectedProfileId: profileId }));
+      },
+      async loadStoredProfile(profileId) {
+        const profile = state.profiles.find((entry) => entry.id === profileId);
+        if (!profile) {
+          throw new Error('Profile not found.');
+        }
+        const runtimeSnapshot = await adapter.startSession(profile, profile.stored_password);
+        setState((current) => ({
+          ...current,
+          selectedProfileId: profile.id,
+          activeView: 'dashboard',
+          activeDashboardTab: 'signer',
+          unlockPhrase: profile.stored_password,
+          runtimeSnapshot,
+          peerPermissionStates:
+            runtimeSnapshot.peer_permission_states ?? adapter.defaultPeerPermissionStates(),
+          profiles: current.profiles.map((entry) =>
+            entry.id === profile.id && runtimeSnapshot.profile ? runtimeSnapshot.profile : entry,
+          ),
+        }));
+      },
+      startCreateChoice() {
+        setState((current) => ({ ...current, activeView: 'create-choice' }));
       },
       updateCreateForm(field, value) {
         setState((current) => ({
@@ -336,13 +360,93 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           },
         }));
       },
+      updateRotationForm(field, value) {
+        setState((current) => ({
+          ...current,
+          drafts: {
+            ...current.drafts,
+            rotationForm: {
+              ...current.drafts.rotationForm,
+              [field]: value,
+            },
+          },
+        }));
+      },
+      updateRotationSource(index, field, value) {
+        setState((current) => ({
+          ...current,
+          drafts: {
+            ...current.drafts,
+            rotationForm: {
+              ...current.drafts.rotationForm,
+              sources: current.drafts.rotationForm.sources.map((entry, sourceIndex) =>
+                sourceIndex === index ? { ...entry, [field]: value } : entry,
+              ),
+            },
+          },
+        }));
+      },
+      addRotationSource() {
+        setState((current) => ({
+          ...current,
+          drafts: {
+            ...current.drafts,
+            rotationForm: {
+              ...current.drafts.rotationForm,
+              sources: [...current.drafts.rotationForm.sources, { packageText: '', password: '' }],
+            },
+          },
+        }));
+      },
+      removeRotationSource(index) {
+        setState((current) => ({
+          ...current,
+          drafts: {
+            ...current.drafts,
+            rotationForm: {
+              ...current.drafts.rotationForm,
+              sources:
+                current.drafts.rotationForm.sources.length > 1
+                  ? current.drafts.rotationForm.sources.filter((_, sourceIndex) => sourceIndex !== index)
+                  : current.drafts.rotationForm.sources,
+            },
+          },
+        }));
+      },
       async generateKeyset() {
-        const keyset = await adapter.createGeneratedKeyset({
-          keysetName: state.drafts.createForm.keysetName,
-          threshold: Number.parseInt(state.drafts.createForm.threshold, 10),
-          count: Number.parseInt(state.drafts.createForm.count, 10),
-        });
-        const selectedShare = keyset.shares[0];
+        const threshold = Number.parseInt(state.drafts.createForm.threshold, 10);
+        const count = Number.parseInt(state.drafts.createForm.count, 10);
+        const sourceProfile =
+          state.drafts.createForm.mode === 'rotate'
+            ? state.profiles.find((profile) => profile.id === state.drafts.rotationForm.sourceProfileId) ?? null
+            : null;
+        const keyset =
+          state.drafts.createForm.mode === 'rotate'
+            ? await adapter.createRotatedKeyset({
+                keysetName: state.drafts.createForm.keysetName,
+                threshold,
+                count,
+                sources: state.drafts.rotationForm.sources
+                  .map((source) => ({
+                    packageText: source.packageText.trim(),
+                    password: source.password,
+                  }))
+                  .filter((source) => source.packageText && source.password),
+              })
+            : await adapter.createGeneratedKeyset({
+                keysetName: state.drafts.createForm.keysetName,
+                threshold,
+                count,
+              });
+        const preferredMemberIdx =
+          sourceProfile && typeof sourceProfile.share_package_json === 'string'
+            ? Number.parseInt(
+                String((JSON.parse(sourceProfile.share_package_json) as { idx?: number | string }).idx ?? ''),
+                10,
+              )
+            : NaN;
+        const selectedShare =
+          keyset.shares.find((share) => share.member_idx === preferredMemberIdx) ?? keyset.shares[0];
         setState((current) => ({
           ...current,
           generatedKeyset: keyset,
@@ -352,7 +456,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
             ...current.drafts,
             profileForm: {
               ...current.drafts.profileForm,
-              label: selectedShare?.name ?? `${keyset.keyset_name} Device`,
+              label: sourceProfile?.label ?? selectedShare?.name ?? `${keyset.keyset_name} Device`,
+              relayUrls: sourceProfile?.relays?.join('\n') ?? current.drafts.profileForm.relayUrls,
             },
           },
         }));
@@ -496,40 +601,6 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           throw new Error('Share name is required.');
         }
 
-        if (kind === 'save') {
-          const result = await adapter.saveDeviceProfileFromGeneratedShare({
-            keyset: state.generatedKeyset,
-            shareMemberIdx: memberIdx,
-            label: form.label,
-            password: form.password,
-            relayUrls: selectedProfile.relays.join('\n'),
-            existingProfileIds: state.profiles.map((entry) => entry.id),
-          });
-          downloadText(
-            buildProfileDownloadFilename(result.profile.label, result.profile.id, 'bfprofile.txt'),
-            result.download_text,
-          );
-          setState((current) => ({
-            ...current,
-            profiles: [result.profile, ...current.profiles.filter((entry) => entry.id !== result.profile.id)],
-            distributionSession: current.distributionSession
-              ? {
-                  ...current.distributionSession,
-                  results: {
-                    ...current.distributionSession.results,
-                    [memberIdx]: {
-                      kind: 'saved',
-                      member_idx: memberIdx,
-                      label: form.label,
-                      saved_profile_id: result.profile.id,
-                    },
-                  },
-                }
-              : current.distributionSession,
-          }));
-          return;
-        }
-
         const result = await adapter.createOnboardingPackageForShare({
           keyset: state.generatedKeyset,
           shareMemberIdx: memberIdx,
@@ -542,6 +613,12 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         if (kind === 'copy' && navigator.clipboard?.writeText) {
           await navigator.clipboard.writeText(result.package_text);
         }
+        if (kind === 'save') {
+          downloadText(
+            buildProfileDownloadFilename(form.label, result.preview.share_public_key, 'bfonboard.txt'),
+            result.package_text,
+          );
+        }
 
         setState((current) => ({
           ...current,
@@ -551,7 +628,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
                 results: {
                   ...current.distributionSession.results,
                   [memberIdx]: {
-                    kind: kind === 'copy' ? 'copied' : 'qr',
+                    kind: kind === 'copy' ? 'copied' : kind === 'save' ? 'saved' : 'qr',
                     member_idx: memberIdx,
                     label: form.label,
                     package_text: result.package_text,
@@ -707,10 +784,88 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         setState((current) => ({
           ...current,
           pendingOnboardConnection: null,
+          pendingRotationConnection: null,
           peerPermissionStates:
             current.peerPermissionStates.length
               ? current.peerPermissionStates
               : adapter.defaultPeerPermissionStates(),
+        }));
+      },
+      startRotateKey() {
+        if (!selectedProfile) {
+          throw new Error('Select a profile first.');
+        }
+        setState((current) => ({
+          ...current,
+          activeView: 'rotate-connect',
+          drafts: {
+            ...current.drafts,
+            rotateConnectForm: {
+              packageText: '',
+              password: '',
+            },
+          },
+        }));
+      },
+      updateRotateConnectForm(field, value) {
+        setState((current) => ({
+          ...current,
+          drafts: {
+            ...current.drafts,
+            rotateConnectForm: {
+              ...current.drafts.rotateConnectForm,
+              [field]: value,
+            },
+          },
+        }));
+      },
+      async connectRotationPackage() {
+        if (!selectedProfile) {
+          throw new Error('Select a profile first.');
+        }
+        const connection = await adapter.connectOnboardingPackage({
+          packageText: state.drafts.rotateConnectForm.packageText,
+          password: state.drafts.rotateConnectForm.password,
+        });
+        if (connection.profile_payload?.group.groupPublicKey !== selectedProfile.group_public_key) {
+          throw new Error('Rotation package does not match the selected profile group public key.');
+        }
+        if (connection.profile_payload?.profileId === selectedProfile.id) {
+          throw new Error('Rotation package did not produce a new device profile id.');
+        }
+        setState((current) => ({
+          ...current,
+          pendingRotationConnection: connection,
+          activeView: 'rotate-save',
+        }));
+      },
+      async finalizeRotationUpdate() {
+        if (!selectedProfile || !state.pendingRotationConnection) {
+          throw new Error('Connect a rotation package first.');
+        }
+        if (state.runtimeSnapshot?.active) {
+          await adapter.stopSession(state.runtimeSnapshot);
+        }
+        const profile = await adapter.finalizeRotationUpdateFromConnection({
+          targetProfile: selectedProfile,
+          connection: state.pendingRotationConnection,
+          existingProfileIds: state.profiles.map((entry) => entry.id),
+        });
+        const runtimeSnapshot = await adapter.startSession(profile, profile.stored_password);
+        setState((current) => ({
+          ...current,
+          profiles: [
+            profile,
+            ...current.profiles.filter((entry) => entry.id !== selectedProfile.id && entry.id !== profile.id),
+          ],
+          selectedProfileId: profile.id,
+          activeView: 'dashboard',
+          activeDashboardTab: 'signer',
+          runtimeSnapshot,
+          unlockPhrase: profile.stored_password,
+          pendingRotationConnection: null,
+          peerPermissionStates:
+            runtimeSnapshot.peer_permission_states ?? adapter.defaultPeerPermissionStates(),
         }));
       },
       async exportProfile(profileId) {

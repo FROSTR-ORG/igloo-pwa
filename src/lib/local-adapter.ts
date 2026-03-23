@@ -11,6 +11,7 @@ import type {
   PwaSignerSettings,
 } from './types';
 import {
+  buildRotationDraftFromBfshares,
   connectOnboardingPackageAndCaptureProfile,
   createEncryptedProfileBackup,
   createProfilePackagePair,
@@ -629,6 +630,56 @@ export async function createGeneratedKeyset(input: GeneratedKeysetInput): Promis
   };
 }
 
+export async function createRotatedKeyset(input: {
+  keysetName: string;
+  threshold: number;
+  count: number;
+  sources: Array<{ packageText: string; password: string }>;
+}): Promise<PwaGeneratedKeyset> {
+  if (!input.keysetName.trim()) {
+    throw new Error('Keyset name is required.');
+  }
+  const draft = await buildRotationDraftFromBfshares({
+    sources: input.sources,
+    threshold: input.threshold,
+    count: input.count,
+    keysetName: input.keysetName.trim(),
+  });
+  const groupPackageJson = JSON.stringify(
+    {
+      group_pk: draft.groupPublicKey,
+      threshold: draft.threshold,
+      members: draft.members.map((member) => ({
+        idx: member.index,
+        pubkey: `02${member.sharePublicKey}`,
+      })),
+    },
+    null,
+    2,
+  );
+  const shares = draft.shares.map((share) => ({
+    name: `${draft.keysetName} Device ${share.memberIndex}`,
+    member_idx: share.memberIndex,
+    share_public_key: share.sharePublicKey,
+    share_package_json: JSON.stringify(
+      {
+        idx: share.memberIndex,
+        seckey: share.shareSecret,
+      },
+      null,
+      2,
+    ),
+  }));
+  return {
+    keyset_name: draft.keysetName,
+    threshold: draft.threshold,
+    count: draft.count,
+    group_public_key: draft.groupPublicKey,
+    group_package_json: groupPackageJson,
+    shares,
+  };
+}
+
 export async function createDeviceProfileFromGeneratedShare(
   input: GeneratedProfileInput,
 ): Promise<PwaProfile> {
@@ -745,6 +796,78 @@ export async function finalizeLoadedProfile(
     runtimeSnapshotJson: input.runtime_snapshot_json ?? null,
     peerPubkey: input.peer_pubkey ?? null,
   });
+}
+
+function profilePayloadFromStoredProfile(profile: PwaProfile): BrowserProfilePackagePayload {
+  const group = parseJsonObject(profile.group_package_json, 'group package JSON');
+  const share = parseJsonObject(profile.share_package_json, 'share package JSON');
+  return {
+    profileId: profile.id,
+    version: 1,
+    device: {
+      name: profile.label,
+      shareSecret: normalizeHex32(typeof share.seckey === 'string' ? share.seckey : '', 'share secret'),
+      manualPeerPolicyOverrides: profile.manual_peer_policy_overrides ?? [],
+      remotePeerPolicyObservations: profile.remote_peer_policy_observations ?? [],
+      relays: profile.relays,
+    },
+    group: {
+      keysetName: profile.label,
+      groupPublicKey: normalizeHex32(typeof group.group_pk === 'string' ? group.group_pk : '', 'group public key'),
+      threshold: Math.trunc(typeof group.threshold === 'number' ? group.threshold : 0),
+      totalCount: Array.isArray(group.members) ? group.members.length : 0,
+      members: Array.isArray(group.members)
+        ? group.members.map((member) => ({
+            index: Math.trunc(typeof member?.idx === 'number' ? member.idx : 0),
+            sharePublicKey: normalizeGroupMemberSharePublicKey(typeof member?.pubkey === 'string' ? member.pubkey : ''),
+          }))
+        : [],
+    },
+  };
+}
+
+export async function finalizeRotationUpdateFromConnection(input: {
+  targetProfile: PwaProfile;
+  connection: PwaOnboardConnection;
+  existingProfileIds?: string[];
+}) {
+  if (!input.connection.profile_payload) {
+    throw new Error('Missing canonical rotated profile payload.');
+  }
+  const payload = {
+    ...input.connection.profile_payload,
+    device: {
+      ...input.connection.profile_payload.device,
+      name: input.targetProfile.label,
+    },
+  } satisfies BrowserProfilePackagePayload;
+  const targetPayload = profilePayloadFromStoredProfile(input.targetProfile);
+  if (payload.group.groupPublicKey !== targetPayload.group.groupPublicKey) {
+    throw new Error('Rotation package does not match the selected profile group public key.');
+  }
+  if (payload.profileId === targetPayload.profileId) {
+    throw new Error('Rotation package did not produce a new device profile id.');
+  }
+  const next = await createStoredProfileFromPayload({
+    payload: {
+      ...payload,
+      device: {
+        ...payload.device,
+        name: input.targetProfile.label,
+      },
+    },
+    password: input.targetProfile.stored_password,
+    source: 'bfonboard',
+    existingProfileIds: (input.existingProfileIds ?? []).filter((profileId) => profileId !== input.targetProfile.id),
+    onboardingPackage: input.connection.package_text.trim(),
+    runtimeSnapshotJson: input.connection.runtime_snapshot_json,
+    peerPubkey: input.connection.peer_pubkey ?? input.targetProfile.peer_pubkey ?? null,
+  });
+  return {
+    ...next,
+    signer_settings: input.targetProfile.signer_settings,
+    relay_profile: input.targetProfile.relay_profile,
+  } satisfies PwaProfile;
 }
 
 export async function connectOnboardingPackage(input: OnboardConnectInput): Promise<PwaOnboardConnection> {

@@ -353,15 +353,42 @@ function AppShell() {
         <section className="igloo-flow-root igloo-pwa-entry-shell">
           <div className="igloo-pwa-entry-intro">
             <p className="igloo-pwa-entry-lead">
-              Start fresh, load an existing profile, or finish onboarding a device from an accepted package.
+              Create or rotate a keyset, load an existing profile, or finish onboarding a device from an accepted package.
             </p>
           </div>
+          {store.profiles.length ? (
+            <Card>
+              <CardHeader>
+                <CardTitle>Stored Profiles</CardTitle>
+                <CardDescription>Profiles remain available while logged out. Only label and short id are shown here.</CardDescription>
+              </CardHeader>
+              <CardContent className="igloo-stack">
+                {store.profiles.map((profile) => (
+                  <div key={profile.id} className="igloo-flow-card">
+                    <div className="flex items-center justify-between gap-4">
+                      <div className="min-w-0">
+                        <strong>{profile.label || 'Unnamed device'}</strong>
+                        <div className="text-xs text-slate-400">{shortProfileId(profile.id)}</div>
+                      </div>
+                      <Button
+                        type="button"
+                        size="sm"
+                        onClick={() => void run(() => store.loadStoredProfile(profile.id))}
+                      >
+                        Load Profile
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </CardContent>
+            </Card>
+          ) : null}
           <div className="igloo-pwa-entry-grid">
             <EntryTile
               kicker="Fresh Setup"
-              title="Create Keyset"
-              description="Generate a new FROSTR V2 keyset, create one local device profile, and distribute the remaining shares."
-              actionLabel="Start Creating"
+              title="Create / Rotate Keyset"
+              description="Generate a new keyset or rotate an existing one, create one local device profile, and distribute the remaining shares."
+              actionLabel="Start"
               tone="primary"
               onAction={() => store.setActiveView('create-generate')}
               icon={(
@@ -406,27 +433,45 @@ function AppShell() {
   function renderCreateGenerate() {
     return (
       <FlowShell
-        title="Create Keyset"
-        description="Step 1 of 3 · generate the keyset you want to split across devices."
+        title="Create / Rotate Keyset"
+        description="Step 1 of 4 · create a new keyset or rotate an existing one before selecting the local device share."
         onBack={goToLanding}
         backTooltip="Back to landing"
       >
         <section className="igloo-flow-root igloo-stack">
           <StepProgress steps={['Generate', 'Create profile', 'Review', 'Distribute']} active={0} />
           <section className="igloo-task-banner">
-            <span className="igloo-task-kicker">Generate the Keyset</span>
-            <p>Provide a keyset name and the threshold geometry for the group.</p>
+            <span className="igloo-task-kicker">Create or Rotate</span>
+            <p>Provide the keyset name and threshold geometry, then either create fresh shares or rebuild from threshold bfshare inputs.</p>
             <div className="igloo-task-points">
               <span>Threshold defaults to 2, total keys defaults to 3.</span>
-              <span>Generate the keyset before moving on to the device profile step.</span>
+              <span>Rotation preserves the same group public key and issues fresh device shares.</span>
             </div>
           </section>
           <Card>
             <CardHeader>
-              <CardTitle>Keyset Generation</CardTitle>
-              <CardDescription>All fields are required before the keyset can be created.</CardDescription>
+              <CardTitle>Create or Rotate</CardTitle>
+              <CardDescription>Choose the source mode, then provide the target threshold geometry.</CardDescription>
             </CardHeader>
             <CardContent className="igloo-stack">
+              <div className="igloo-button-row">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={store.drafts.createForm.mode === 'new' ? 'default' : 'secondary'}
+                  onClick={() => store.updateCreateForm('mode', 'new')}
+                >
+                  Create New Keyset
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={store.drafts.createForm.mode === 'rotate' ? 'default' : 'secondary'}
+                  onClick={() => store.updateCreateForm('mode', 'rotate')}
+                >
+                  Rotate Existing Keyset
+                </Button>
+              </div>
               <label>
                 Keyset Name
                 <input
@@ -455,9 +500,64 @@ function AppShell() {
                   />
                 </label>
               </div>
+              {store.drafts.createForm.mode === 'rotate' ? (
+                <div className="igloo-stack">
+                  <label>
+                    Source Profile
+                    <select
+                      value={store.drafts.rotationForm.sourceProfileId}
+                      onChange={(event) => store.updateRotationForm('sourceProfileId', event.target.value)}
+                    >
+                      <option value="">Select a local profile</option>
+                      {store.profiles.map((profile) => (
+                        <option key={profile.id} value={profile.id}>
+                          {profile.label || 'Unnamed device'} ({shortProfileId(profile.id)})
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <div className="igloo-stack">
+                    {store.drafts.rotationForm.sources.map((source, index) => (
+                      <div key={`rotation-source-${index}`} className="igloo-generated-card">
+                        <header>
+                          <strong>Recovery Share {index + 1}</strong>
+                          <span>Add threshold bfshare packages to reconstruct the current keyset.</span>
+                        </header>
+                        <label>
+                          bfshare
+                          <Textarea
+                            className="min-h-[96px]"
+                            value={source.packageText}
+                            onChange={(event) => store.updateRotationSource(index, 'packageText', event.target.value)}
+                            placeholder="Paste bfshare1..."
+                          />
+                        </label>
+                        <label>
+                          Package Password
+                          <input
+                            type="password"
+                            value={source.password}
+                            onChange={(event) => store.updateRotationSource(index, 'password', event.target.value)}
+                          />
+                        </label>
+                        <div className="igloo-button-row">
+                          <Button type="button" size="sm" variant="secondary" onClick={() => store.removeRotationSource(index)}>
+                            Remove
+                          </Button>
+                        </div>
+                      </div>
+                    ))}
+                    <div className="igloo-button-row">
+                      <Button type="button" size="sm" variant="secondary" onClick={() => store.addRotationSource()}>
+                        Add bfshare
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
               <div className="igloo-button-row">
                 <Button type="button" size="sm" onClick={() => void run(() => store.generateKeyset())}>
-                  Generate Keyset
+                  {store.drafts.createForm.mode === 'rotate' ? 'Rotate Keyset' : 'Generate Keyset'}
                 </Button>
               </div>
             </CardContent>
@@ -599,12 +699,12 @@ function AppShell() {
           <section className="igloo-task-banner">
             <span className="igloo-task-kicker">Distribute the Keyset</span>
             <p>
-              This device is initialized and connected. The remaining shares can be copied as `bfonboard`, shown as a
-              QR package, or saved as a local device profile.
+              This device is initialized and connected. The remaining shares can now be distributed as `bfonboard`
+              packages.
             </p>
             <div className="igloo-task-points">
-              <span>`Copy` and `QR` create `bfonboard` packages.</span>
-              <span>`Save` creates a local device profile and downloads a `bfprofile` package.</span>
+              <span>`Copy`, `QR`, and `Save` all produce `bfonboard` packages.</span>
+              <span>`Save` downloads a `bfonboard` text file instead of creating another local profile.</span>
               <span>Finish when you are done to reach the device dashboard.</span>
             </div>
           </section>
@@ -633,7 +733,7 @@ function AppShell() {
           <Card>
             <CardHeader>
               <CardTitle>Remaining Shares</CardTitle>
-              <CardDescription>Each share can be copied, shown as a QR package, or saved locally.</CardDescription>
+              <CardDescription>Each share can be copied, shown as a QR package, or downloaded as a `bfonboard` file.</CardDescription>
             </CardHeader>
             <CardContent className="igloo-stack">
               <div className="igloo-generated-grid">
@@ -704,9 +804,7 @@ function AppShell() {
                       </div>
                       {result ? (
                         <div className="igloo-message-muted">
-                          {result.kind === 'saved'
-                            ? `Saved as local profile ${result.saved_profile_id}.`
-                            : `${result.kind === 'copied' ? 'Copied' : 'Prepared'} onboarding package for ${result.label}.`}
+                          {`${result.kind === 'copied' ? 'Copied' : result.kind === 'qr' ? 'Prepared QR for' : 'Saved file for'} ${result.label}.`}
                         </div>
                       ) : null}
                     </article>
@@ -1012,6 +1110,89 @@ function AppShell() {
     );
   }
 
+  function renderRotateConnect() {
+    if (!selectedProfile) return null;
+    return (
+      <FlowShell
+        title="Rotate Key"
+        description="Connect with a rotated onboarding package and prepare to replace the active device share."
+        onBack={goToDashboard}
+        backTooltip="Back to dashboard"
+      >
+        <section className="igloo-flow-root igloo-stack">
+          <ProfileConfirmationCard
+            title="Current Device"
+            profileName={selectedProfile.label}
+            sharePublicKey={selectedProfile.share_public_key}
+            groupPublicKey={selectedProfile.group_public_key}
+            relays={selectedProfile.relays}
+          />
+          <Card>
+            <CardHeader>
+              <CardTitle>Connect Rotated bfonboard</CardTitle>
+              <CardDescription>Use a rotated onboarding package to replace this device while keeping the same keyset identity.</CardDescription>
+            </CardHeader>
+            <CardContent className="igloo-stack">
+              <label>
+                bfonboard
+                <Textarea
+                  className="min-h-[112px]"
+                  value={store.drafts.rotateConnectForm.packageText}
+                  onChange={(event) => store.updateRotateConnectForm('packageText', event.target.value)}
+                  placeholder="Paste bfonboard1..."
+                />
+              </label>
+              <label>
+                Package Password
+                <input
+                  type="password"
+                  value={store.drafts.rotateConnectForm.password}
+                  onChange={(event) => store.updateRotateConnectForm('password', event.target.value)}
+                />
+              </label>
+              <div className="igloo-button-row">
+                <Button type="button" size="sm" onClick={() => void run(() => store.connectRotationPackage())}>
+                  Connect Rotation Package
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </section>
+      </FlowShell>
+    );
+  }
+
+  function renderRotateSave() {
+    if (!store.pendingRotationConnection || !selectedProfile) return null;
+    return (
+      <FlowShell
+        title="Confirm Rotated Device"
+        description="Review the replacement device details before replacing the active local profile."
+        onBack={() => store.setActiveView('rotate-connect')}
+        backTooltip="Back to connect"
+      >
+        <section className="igloo-flow-root igloo-stack">
+          <ProfileConfirmationCard
+            title="Replacement Preview"
+            profileName={selectedProfile.label}
+            sharePublicKey={store.pendingRotationConnection.preview.share_public_key}
+            groupPublicKey={store.pendingRotationConnection.preview.group_public_key}
+            relays={store.pendingRotationConnection.preview.relays}
+          />
+          <section className="igloo-task-banner">
+            <span className="igloo-task-kicker">Same keyset, fresh device share</span>
+            <p>This replacement keeps the same group public key and replaces this device with a new share and profile id.</p>
+          </section>
+          <div className="igloo-button-row">
+            <Button type="button" size="sm" onClick={() => void run(() => store.finalizeRotationUpdate())}>
+              Replace Active Device
+            </Button>
+          </div>
+        </section>
+      </FlowShell>
+    );
+  }
+
   function renderDashboard() {
     const operatorProfile = selectedProfile
       ? {
@@ -1172,6 +1353,14 @@ function AppShell() {
                 }
                 maintenanceActions={[
                   {
+                    label: 'Rotate Key',
+                    variant: 'secondary',
+                    disabled: !selectedProfile,
+                    onClick: () => void run(() => {
+                      store.startRotateKey();
+                    }),
+                  },
+                  {
                     label: 'Reset browser workspace',
                     variant: 'destructive',
                     onClick: () => store.resetApp(),
@@ -1245,6 +1434,8 @@ function AppShell() {
       {store.activeView === 'load-confirm' ? renderLoadConfirm() : null}
       {store.activeView === 'onboard-connect' ? renderOnboardConnect() : null}
       {store.activeView === 'onboard-save' ? renderOnboardSave() : null}
+      {store.activeView === 'rotate-connect' ? renderRotateConnect() : null}
+      {store.activeView === 'rotate-save' ? renderRotateSave() : null}
       {store.activeView === 'dashboard' ? renderDashboard() : null}
     </PageLayout>
   );
