@@ -19,17 +19,20 @@ import {
   deriveProfileIdFromShareSecret,
   encodeBfOnboardPackage,
   getWasmKeysetApi,
+  groupPackageToWireJson,
+  groupPublicKeyFromPackage,
   publishEncryptedProfileBackup,
   recoverProfileFromSharePackage,
   startBrowserRuntimeSession,
   startPersistedBrowserRuntimeSession,
   type BrowserOnboardPackagePayload,
-  type BrowserProfileGroupMember,
+  type BrowserGroupPackageMember,
   type BrowserManualPeerPolicyOverride,
   type BrowserProfilePackagePayload,
   type BrowserRemotePeerPolicyObservation,
   type BrowserRuntimeSession,
   type RuntimePeerPermissionState,
+  xOnlyFromCompressedPubkey,
 } from 'igloo-shared';
 
 type GeneratedKeysetInput = {
@@ -184,28 +187,17 @@ function parseJsonObject(value: string, label: string) {
 }
 
 function groupJsonFromPayload(payload: BrowserProfilePackagePayload) {
-  return JSON.stringify(
-    {
-      group_pk: payload.group.groupPublicKey,
-      threshold: payload.group.threshold,
-      members: payload.group.members.map((member) => ({
-        idx: member.index,
-        pubkey: `02${member.sharePublicKey}`,
-      })),
-    },
-    null,
-    2,
-  );
+  return groupPackageToWireJson(payload.groupPackage);
 }
 
 function shareJsonFromPayload(payload: BrowserProfilePackagePayload) {
   const sharePublicKey = publicKeyFromSecret(payload.device.shareSecret);
   const member =
-    payload.group.members.find((candidate) => candidate.sharePublicKey === sharePublicKey) ??
-    payload.group.members[0];
+    payload.groupPackage.members.find((candidate) => xOnlyFromCompressedPubkey(candidate.pubkey) === sharePublicKey) ??
+    payload.groupPackage.members[0];
   return JSON.stringify(
     {
-      idx: member?.index ?? 1,
+      idx: member?.idx ?? 1,
       seckey: payload.device.shareSecret,
     },
     null,
@@ -222,7 +214,7 @@ function previewFromProfilePayload(
   return {
     label: labelOverride?.trim() || payload.device.name,
     share_public_key: sharePublicKey,
-    group_public_key: payload.group.groupPublicKey,
+    group_public_key: groupPublicKeyFromPackage(payload.groupPackage),
     relays: payload.device.relays,
     group_package_json: groupJsonFromPayload(payload),
     share_package_json: shareJsonFromPayload(payload),
@@ -278,9 +270,10 @@ function derivePeerPermissionStatesFromPayload(payload: BrowserProfilePackagePay
   const sharePublicKey = publicKeyFromSecret(payload.device.shareSecret);
   const states = new Map<string, PwaPeerPermissionState>();
 
-  for (const member of payload.group.members) {
-    if (member.sharePublicKey === sharePublicKey) continue;
-    states.set(member.sharePublicKey, defaultPeerPermissionState(member.sharePublicKey));
+  for (const member of payload.groupPackage.members) {
+    const memberPubkey = xOnlyFromCompressedPubkey(member.pubkey);
+    if (memberPubkey === sharePublicKey) continue;
+    states.set(memberPubkey, defaultPeerPermissionState(memberPubkey));
   }
 
   for (const override of payload.device.manualPeerPolicyOverrides) {
@@ -342,12 +335,22 @@ async function profilePayloadFromGeneratedShare(
     throw new Error('Select a generated share first.');
   }
   const shareJson = parseJsonObject(share.share_package_json, 'share package JSON');
-  const members = keyset.shares.map(
-    (entry): BrowserProfileGroupMember => ({
-      index: entry.member_idx,
-      sharePublicKey: entry.share_public_key.toLowerCase(),
-    }),
-  );
+  const group = parseJsonObject(keyset.group_package_json, 'group package JSON');
+  const members = Array.isArray(group.members)
+    ? group.members.map(
+        (member): BrowserGroupPackageMember => ({
+          idx: Math.trunc(typeof member?.idx === 'number' ? member.idx : 0),
+          pubkey: (() => {
+            const raw = typeof member?.pubkey === 'string' ? member.pubkey : '';
+            const normalized = raw.trim().toLowerCase();
+            if (/^(02|03)[0-9a-f]{64}$/.test(normalized)) {
+              return normalized;
+            }
+            return `02${normalizeGroupMemberSharePublicKey(raw)}`;
+          })(),
+        }),
+      )
+    : [];
   const shareSecret = normalizeHex32(typeof shareJson.seckey === 'string' ? shareJson.seckey : '', 'share secret');
   return {
     profileId: await deriveProfileIdFromShareSecret(shareSecret),
@@ -364,19 +367,18 @@ async function profilePayloadFromGeneratedShare(
           },
         })) ??
         members
-          .filter((member) => member.index !== shareMemberIdx)
+          .filter((member) => member.idx !== shareMemberIdx)
           .map((member) => ({
-            pubkey: member.sharePublicKey,
+            pubkey: xOnlyFromCompressedPubkey(member.pubkey),
             policy: createDefaultManualOverride(),
           })),
       remotePeerPolicyObservations: [],
       relays,
     },
-    group: {
-      keysetName: keyset.keyset_name,
-      groupPublicKey: keyset.group_public_key.toLowerCase(),
-      threshold: keyset.threshold,
-      totalCount: keyset.count,
+    keysetName: keyset.keyset_name,
+    groupPackage: {
+      groupPk: normalizeHex32(typeof group.group_pk === 'string' ? group.group_pk : keyset.group_public_key, 'group public key'),
+      threshold: Math.trunc(typeof group.threshold === 'number' ? group.threshold : keyset.threshold),
       members,
     },
   };
@@ -467,9 +469,16 @@ async function runtimePayloadFromSnapshot(args: {
   const share = snapshot.bootstrap?.share;
   const members =
     group?.members?.map(
-      (member): BrowserProfileGroupMember => ({
-        index: Math.trunc(member.idx ?? 0),
-        sharePublicKey: normalizeGroupMemberSharePublicKey(member.pubkey ?? ''),
+      (member): BrowserGroupPackageMember => ({
+        idx: Math.trunc(member.idx ?? 0),
+        pubkey: (() => {
+          const normalized = (member.pubkey ?? '').trim().toLowerCase();
+          if (/^(02|03)[0-9a-f]{64}$/.test(normalized)) {
+            return normalized;
+          }
+          const xonly = normalizeGroupMemberSharePublicKey(member.pubkey ?? '');
+          return `02${xonly}`;
+        })(),
       }),
     ) ?? [];
   const shareSecret = normalizeHex32(share?.seckey ?? '', 'share secret');
@@ -482,19 +491,18 @@ async function runtimePayloadFromSnapshot(args: {
       name: args.label.trim() || 'Onboarded Device',
       shareSecret,
       manualPeerPolicyOverrides: members
-        .filter((member) => member.sharePublicKey !== sharePublicKey)
+        .filter((member) => xOnlyFromCompressedPubkey(member.pubkey) !== sharePublicKey)
         .map((member) => ({
-          pubkey: member.sharePublicKey,
+          pubkey: xOnlyFromCompressedPubkey(member.pubkey),
           policy: createDefaultManualOverride(),
         })),
       remotePeerPolicyObservations: [],
       relays: args.relays,
     },
-    group: {
-      keysetName: args.label.trim() || 'Onboarded Device',
-      groupPublicKey: normalizeHex32(group?.group_pk ?? '', 'group public key'),
+    keysetName: args.label.trim() || 'Onboarded Device',
+    groupPackage: {
+      groupPk: normalizeHex32(group?.group_pk ?? '', 'group public key'),
       threshold: Math.trunc(group?.threshold ?? 0),
-      totalCount: members.length,
       members,
     },
   };
@@ -649,10 +657,7 @@ export async function createRotatedKeyset(input: {
     {
       group_pk: draft.groupPublicKey,
       threshold: draft.threshold,
-      members: draft.members.map((member) => ({
-        idx: member.index,
-        pubkey: `02${member.sharePublicKey}`,
-      })),
+      members: draft.members,
     },
     null,
     2,
@@ -804,6 +809,7 @@ function profilePayloadFromStoredProfile(profile: PwaProfile): BrowserProfilePac
   return {
     profileId: profile.id,
     version: 1,
+    keysetName: profile.label,
     device: {
       name: profile.label,
       shareSecret: normalizeHex32(typeof share.seckey === 'string' ? share.seckey : '', 'share secret'),
@@ -811,15 +817,20 @@ function profilePayloadFromStoredProfile(profile: PwaProfile): BrowserProfilePac
       remotePeerPolicyObservations: profile.remote_peer_policy_observations ?? [],
       relays: profile.relays,
     },
-    group: {
-      keysetName: profile.label,
-      groupPublicKey: normalizeHex32(typeof group.group_pk === 'string' ? group.group_pk : '', 'group public key'),
+    groupPackage: {
+      groupPk: normalizeHex32(typeof group.group_pk === 'string' ? group.group_pk : '', 'group public key'),
       threshold: Math.trunc(typeof group.threshold === 'number' ? group.threshold : 0),
-      totalCount: Array.isArray(group.members) ? group.members.length : 0,
       members: Array.isArray(group.members)
         ? group.members.map((member) => ({
-            index: Math.trunc(typeof member?.idx === 'number' ? member.idx : 0),
-            sharePublicKey: normalizeGroupMemberSharePublicKey(typeof member?.pubkey === 'string' ? member.pubkey : ''),
+            idx: Math.trunc(typeof member?.idx === 'number' ? member.idx : 0),
+            pubkey: (() => {
+              const raw = typeof member?.pubkey === 'string' ? member.pubkey : '';
+              const normalized = raw.trim().toLowerCase();
+              if (/^(02|03)[0-9a-f]{64}$/.test(normalized)) {
+                return normalized;
+              }
+              return `02${normalizeGroupMemberSharePublicKey(raw)}`;
+            })(),
           }))
         : [],
     },
@@ -842,7 +853,7 @@ export async function finalizeRotationUpdateFromConnection(input: {
     },
   } satisfies BrowserProfilePackagePayload;
   const targetPayload = profilePayloadFromStoredProfile(input.targetProfile);
-  if (payload.group.groupPublicKey !== targetPayload.group.groupPublicKey) {
+  if (groupPublicKeyFromPackage(payload.groupPackage) !== groupPublicKeyFromPackage(targetPayload.groupPackage)) {
     throw new Error('Rotation package does not match the selected profile group public key.');
   }
   if (payload.profileId === targetPayload.profileId) {

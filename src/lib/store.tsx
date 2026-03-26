@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { buildProfileDownloadFilename, shortProfileId } from 'igloo-shared';
+import { buildProfileDownloadFilename, groupPublicKeyFromPackage, shortProfileId } from 'igloo-shared';
 
 import * as adapter from './local-adapter';
 import { clearPersistedState, loadPersistedState, savePersistedState } from './storage';
@@ -827,7 +827,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           packageText: state.drafts.rotateConnectForm.packageText,
           password: state.drafts.rotateConnectForm.password,
         });
-        if (connection.profile_payload?.group.groupPublicKey !== selectedProfile.group_public_key) {
+        if (
+          connection.profile_payload &&
+          groupPublicKeyFromPackage(connection.profile_payload.groupPackage) !== selectedProfile.group_public_key
+        ) {
           throw new Error('Rotation package does not match the selected profile group public key.');
         }
         if (connection.profile_payload?.profileId === selectedProfile.id) {

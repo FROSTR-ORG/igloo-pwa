@@ -101,6 +101,7 @@ beforeEach(() => {
       JSON.stringify({
         profileId: '77'.repeat(32),
         version: 1,
+        keysetName: 'Onboarded Device',
         device: {
           name: 'Onboarded Device',
           shareSecret: '11'.repeat(32),
@@ -108,15 +109,13 @@ beforeEach(() => {
           remotePeerPolicyObservations: [],
           relays: ['wss://relay.primal.net']
         },
-        group: {
-          keysetName: 'Onboarded Device',
-          groupPublicKey: '22'.repeat(32),
+        groupPackage: {
+          groupPk: '22'.repeat(32),
           threshold: 2,
-          totalCount: 3,
           members: [
-            { index: 1, sharePublicKey: '33'.repeat(32) },
-            { index: 2, sharePublicKey: '44'.repeat(32) },
-            { index: 3, sharePublicKey: '55'.repeat(32) }
+            { idx: 1, pubkey: `02${'33'.repeat(32)}` },
+            { idx: 2, pubkey: `02${'44'.repeat(32)}` },
+            { idx: 3, pubkey: `02${'55'.repeat(32)}` }
           ]
         },
         raw: value
@@ -129,6 +128,7 @@ beforeEach(() => {
     create_encrypted_profile_backup: (_profile) =>
       JSON.stringify({
         version: 1,
+        keysetName: 'Onboarded Device',
         device: {
           name: 'Onboarded Device',
           sharePublicKey: '33'.repeat(32),
@@ -136,15 +136,13 @@ beforeEach(() => {
           remotePeerPolicyObservations: [],
           relays: ['wss://relay.primal.net']
         },
-        group: {
-          keysetName: 'Onboarded Device',
-          groupPublicKey: '22'.repeat(32),
+        groupPackage: {
+          groupPk: '22'.repeat(32),
           threshold: 2,
-          totalCount: 3,
           members: [
-            { index: 1, sharePublicKey: '33'.repeat(32) },
-            { index: 2, sharePublicKey: '44'.repeat(32) },
-            { index: 3, sharePublicKey: '55'.repeat(32) }
+            { idx: 1, pubkey: `02${'33'.repeat(32)}` },
+            { idx: 2, pubkey: `02${'44'.repeat(32)}` },
+            { idx: 3, pubkey: `02${'55'.repeat(32)}` }
           ]
         }
       }),
