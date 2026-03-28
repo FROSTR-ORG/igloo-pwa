@@ -88,7 +88,7 @@ const AppStore = React.createContext<AppState | null>(null);
 const defaultDrafts: PwaDraftState = {
   createForm: {
     mode: 'new',
-    keysetName: '',
+    groupName: '',
     threshold: '2',
     count: '3',
   },
@@ -423,7 +423,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         const keyset =
           state.drafts.createForm.mode === 'rotate'
             ? await adapter.createRotatedKeyset({
-                keysetName: state.drafts.createForm.keysetName,
+                groupName: state.drafts.createForm.groupName,
                 threshold,
                 count,
                 sources: state.drafts.rotationForm.sources
@@ -434,7 +434,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
                   .filter((source) => source.packageText && source.password),
               })
             : await adapter.createGeneratedKeyset({
-                keysetName: state.drafts.createForm.keysetName,
+                groupName: state.drafts.createForm.groupName,
                 threshold,
                 count,
               });
@@ -456,7 +456,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
             ...current.drafts,
             profileForm: {
               ...current.drafts.profileForm,
-              label: sourceProfile?.label ?? selectedShare?.name ?? `${keyset.keyset_name} Device`,
+              label: sourceProfile?.label ?? selectedShare?.name ?? `${keyset.group_name} Device`,
               relayUrls: sourceProfile?.relays?.join('\n') ?? current.drafts.profileForm.relayUrls,
             },
           },

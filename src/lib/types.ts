@@ -1,7 +1,6 @@
 import type {
   BrowserManualPeerPolicyOverride,
   BrowserProfilePackagePayload,
-  BrowserRemotePeerPolicyObservation,
 } from 'igloo-shared';
 
 export type PwaView =
@@ -95,7 +94,6 @@ export type PwaProfile = PwaProfilePreview & {
   share_string: string;
   signer_settings: PwaSignerSettings;
   manual_peer_policy_overrides?: BrowserManualPeerPolicyOverride[];
-  remote_peer_policy_observations?: BrowserRemotePeerPolicyObservation[];
   peer_pubkey?: string | null;
   runtime_snapshot_json?: string | null;
   onboarding_package?: string | null;
@@ -109,7 +107,7 @@ export type PwaGeneratedShare = {
 };
 
 export type PwaGeneratedKeyset = {
-  keyset_name: string;
+  group_name: string;
   threshold: number;
   count: number;
   group_package_json: string;
@@ -141,7 +139,6 @@ export type PwaLoadConfirmation = {
   share_string: string;
   profile_payload?: BrowserProfilePackagePayload;
   manual_peer_policy_overrides?: BrowserManualPeerPolicyOverride[];
-  remote_peer_policy_observations?: BrowserRemotePeerPolicyObservation[];
   peer_pubkey?: string | null;
   runtime_snapshot_json?: string | null;
 };
@@ -154,7 +151,6 @@ export type PwaOnboardConnection = {
   share_string: string;
   profile_payload?: BrowserProfilePackagePayload;
   manual_peer_policy_overrides?: BrowserManualPeerPolicyOverride[];
-  remote_peer_policy_observations?: BrowserRemotePeerPolicyObservation[];
   peer_pubkey?: string | null;
   runtime_snapshot_json?: string | null;
 };
@@ -178,7 +174,7 @@ export type PwaDistributionSession = {
 export type PwaDraftState = {
   createForm: {
     mode: 'new' | 'rotate';
-    keysetName: string;
+    groupName: string;
     threshold: string;
     count: string;
   };

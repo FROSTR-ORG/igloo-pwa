@@ -32,7 +32,7 @@ describe('igloo-pwa app shell', () => {
   it('opens the create flow and generates a review workspace', async () => {
     renderApp();
     fireEvent.click(screen.getByRole('button', { name: 'Start' }));
-    fireEvent.change(screen.getByLabelText('Keyset Name'), { target: { value: 'Playwright Treasury' } });
+    fireEvent.change(screen.getByLabelText('Group Name'), { target: { value: 'Playwright Treasury' } });
     fireEvent.click(screen.getByRole('button', { name: 'Generate Keyset' }));
     await waitFor(() => {
       expect(screen.getByText('Select the Device Share')).toBeInTheDocument();
@@ -82,7 +82,8 @@ describe('igloo-pwa app shell', () => {
             share_public_key: '33'.repeat(32),
             group_public_key: '22'.repeat(32),
             relays: ['wss://relay.primal.net'],
-            group_package_json: '{"group":"demo"}',
+            group_package_json:
+              '{"group_name":"Test Group","group_pk":"group-pub-1","threshold":2,"members":[]}',
             share_package_json: '{"share":"demo"}',
             source: 'bfprofile',
             relay_profile: 'browser',
@@ -119,7 +120,7 @@ describe('igloo-pwa app shell', () => {
           prefer_install_prompt: true,
         },
         drafts: {
-          createForm: { keysetName: '', threshold: '2', count: '3' },
+          createForm: { groupName: '', threshold: '2', count: '3' },
           profileForm: {
             label: '',
             password: '',
@@ -179,7 +180,7 @@ describe('igloo-pwa app shell', () => {
             share_public_key: '33'.repeat(32),
             group_public_key: '22'.repeat(32),
             relays: ['wss://relay.primal.net'],
-            group_package_json: '{"group_pk":"22","threshold":2,"members":[]}',
+            group_package_json: '{"group_name":"Test Group","group_pk":"22","threshold":2,"members":[]}',
             share_package_json: '{"idx":1,"seckey":"11"}',
             source: 'bfonboard',
           },
@@ -197,7 +198,7 @@ describe('igloo-pwa app shell', () => {
         },
         drafts: {
           createForm: {
-            keysetName: '',
+            groupName: '',
             threshold: '2',
             count: '3',
           },
@@ -235,7 +236,8 @@ describe('igloo-pwa app shell', () => {
             share_public_key: 'share-pub-1',
             group_public_key: 'group-pub-1',
             relays: ['wss://relay.primal.net'],
-            group_package_json: '{"group":"demo"}',
+            group_package_json:
+              '{"group_name":"Test Group","group_pk":"group-pub-1","threshold":2,"members":[]}',
             share_package_json: '{"share":"demo"}',
             source: 'bfprofile',
             relay_profile: 'browser',
@@ -273,7 +275,7 @@ describe('igloo-pwa app shell', () => {
         },
         drafts: {
           createForm: {
-            keysetName: '',
+            groupName: '',
             threshold: '2',
             count: '3',
           },

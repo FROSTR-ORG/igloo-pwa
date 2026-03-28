@@ -6,6 +6,7 @@ import { setBrowserRuntimeTestHooks, setInjectedWasmBridgeModuleForTests } from 
 const mockRuntimeSnapshot = JSON.stringify({
   bootstrap: {
     group: {
+      group_name: 'Onboarded Device',
       group_pk: '22'.repeat(32),
       threshold: 2,
       members: [
@@ -101,15 +102,14 @@ beforeEach(() => {
       JSON.stringify({
         profileId: '77'.repeat(32),
         version: 1,
-        keysetName: 'Onboarded Device',
         device: {
           name: 'Onboarded Device',
           shareSecret: '11'.repeat(32),
           manualPeerPolicyOverrides: [],
-          remotePeerPolicyObservations: [],
           relays: ['wss://relay.primal.net']
         },
         groupPackage: {
+          groupName: 'Onboarded Device',
           groupPk: '22'.repeat(32),
           threshold: 2,
           members: [
@@ -128,15 +128,14 @@ beforeEach(() => {
     create_encrypted_profile_backup: (_profile) =>
       JSON.stringify({
         version: 1,
-        keysetName: 'Onboarded Device',
         device: {
           name: 'Onboarded Device',
           sharePublicKey: '33'.repeat(32),
           manualPeerPolicyOverrides: [],
-          remotePeerPolicyObservations: [],
           relays: ['wss://relay.primal.net']
         },
         groupPackage: {
+          groupName: 'Onboarded Device',
           groupPk: '22'.repeat(32),
           threshold: 2,
           members: [
@@ -166,6 +165,7 @@ beforeEach(() => {
     create_keyset_bundle: (_configJson) =>
       JSON.stringify({
         group: {
+          group_name: 'Onboarded Device',
           group_pk: '22'.repeat(32),
           threshold: 2,
           members: [
@@ -186,6 +186,7 @@ beforeEach(() => {
         next_group_id: 'bb'.repeat(32),
         next: {
           group: {
+            group_name: 'Onboarded Device',
             group_pk: '22'.repeat(32),
             threshold: 2,
             members: [
@@ -212,7 +213,7 @@ beforeEach(() => {
           relays: ['wss://relay.primal.net']
         },
         profile: {
-          keysetName: 'Onboarded Device',
+          groupName: 'Onboarded Device',
           relays: ['wss://relay.primal.net'],
           groupPublicKey: '22'.repeat(32),
           sharePublicKey: '33'.repeat(32),

@@ -29,14 +29,13 @@ import {
   type BrowserGroupPackageMember,
   type BrowserManualPeerPolicyOverride,
   type BrowserProfilePackagePayload,
-  type BrowserRemotePeerPolicyObservation,
   type BrowserRuntimeSession,
   type RuntimePeerPermissionState,
   xOnlyFromCompressedPubkey,
 } from 'igloo-shared';
 
 type GeneratedKeysetInput = {
-  keysetName: string;
+  groupName: string;
   threshold: number;
   count: number;
 };
@@ -297,29 +296,6 @@ function derivePeerPermissionStatesFromPayload(payload: BrowserProfilePackagePay
     });
   }
 
-  for (const observation of payload.device.remotePeerPolicyObservations) {
-    const existing = states.get(observation.pubkey) ?? defaultPeerPermissionState(observation.pubkey);
-    states.set(observation.pubkey, {
-      ...existing,
-      remote_observation: {
-        request: {
-          ping: observation.profile.request.ping,
-          onboard: observation.profile.request.onboard,
-          sign: observation.profile.request.sign,
-          ecdh: observation.profile.request.ecdh,
-        },
-        respond: {
-          ping: observation.profile.respond.ping,
-          onboard: observation.profile.respond.onboard,
-          sign: observation.profile.respond.sign,
-          ecdh: observation.profile.respond.ecdh,
-        },
-        updated: observation.profile.updated,
-        revision: observation.profile.revision,
-      },
-    });
-  }
-
   return Array.from(states.values()).sort((a, b) => a.pubkey.localeCompare(b.pubkey));
 }
 
@@ -372,11 +348,10 @@ async function profilePayloadFromGeneratedShare(
             pubkey: xOnlyFromCompressedPubkey(member.pubkey),
             policy: createDefaultManualOverride(),
           })),
-      remotePeerPolicyObservations: [],
       relays,
     },
-    keysetName: keyset.keyset_name,
     groupPackage: {
+      groupName: keyset.group_name,
       groupPk: normalizeHex32(typeof group.group_pk === 'string' ? group.group_pk : keyset.group_public_key, 'group public key'),
       threshold: Math.trunc(typeof group.threshold === 'number' ? group.threshold : keyset.threshold),
       members,
@@ -430,7 +405,6 @@ async function createStoredProfileFromPayload(args: {
     runtime_snapshot_json: args.runtimeSnapshotJson ?? null,
     onboarding_package: args.onboardingPackage ?? null,
     manual_peer_policy_overrides: args.payload.device.manualPeerPolicyOverrides,
-    remote_peer_policy_observations: args.payload.device.remotePeerPolicyObservations,
   } satisfies PwaProfile;
 }
 
@@ -496,11 +470,10 @@ async function runtimePayloadFromSnapshot(args: {
           pubkey: xOnlyFromCompressedPubkey(member.pubkey),
           policy: createDefaultManualOverride(),
         })),
-      remotePeerPolicyObservations: [],
       relays: args.relays,
     },
-    keysetName: args.label.trim() || 'Onboarded Device',
     groupPackage: {
+      groupName: args.label.trim() || 'Onboarded Device',
       groupPk: normalizeHex32(group?.group_pk ?? '', 'group public key'),
       threshold: Math.trunc(group?.threshold ?? 0),
       members,
@@ -518,31 +491,6 @@ function toRuntimeProfile(profile: PwaProfile, snapshot: ReturnType<BrowserRunti
         respond: { ...createDefaultManualOverride().respond, ...policy.manual_override.respond },
       },
     })),
-    remote_peer_policy_observations: snapshot.peerPermissionStates
-      .filter((policy) => policy.remote_observation !== null)
-      .map((policy) => ({
-        pubkey: policy.pubkey,
-        profile: {
-          forPeer: profile.share_public_key,
-          revision: policy.remote_observation?.revision ?? 0,
-          updated: policy.remote_observation?.updated ?? 0,
-          blockAll: false,
-          request: {
-            echo: true,
-            ping: policy.remote_observation?.request.ping ?? true,
-            onboard: policy.remote_observation?.request.onboard ?? true,
-            sign: policy.remote_observation?.request.sign ?? true,
-            ecdh: policy.remote_observation?.request.ecdh ?? true,
-          },
-          respond: {
-            echo: true,
-            ping: policy.remote_observation?.respond.ping ?? true,
-            onboard: policy.remote_observation?.respond.onboard ?? true,
-            sign: policy.remote_observation?.respond.sign ?? true,
-            ecdh: policy.remote_observation?.respond.ecdh ?? true,
-          },
-        },
-      })),
     runtime_snapshot_json: snapshot.runtimeSnapshotJson,
     signer_settings: normalizePwaSignerSettings(snapshot.signerSettings),
   };
@@ -590,16 +538,18 @@ export async function disposeRuntimeSessionForProfile(profileId?: string) {
 }
 
 export async function createGeneratedKeyset(input: GeneratedKeysetInput): Promise<PwaGeneratedKeyset> {
-  if (!input.keysetName.trim()) {
-    throw new Error('Keyset name is required.');
+  if (!input.groupName.trim()) {
+    throw new Error('Group name is required.');
   }
   const api = await getWasmKeysetApi();
   const raw = api.create_keyset_bundle(JSON.stringify({
+    group_name: input.groupName.trim(),
     threshold: input.threshold,
     count: input.count,
   }));
   const bundle = JSON.parse(raw) as {
     group: {
+      group_name: string;
       group_pk: string;
       threshold: number;
       members: Array<{ idx: number; pubkey: string }>;
@@ -607,7 +557,7 @@ export async function createGeneratedKeyset(input: GeneratedKeysetInput): Promis
     shares: Array<{ idx: number; seckey: string }>;
   };
   const shares = bundle.shares.map((share) => ({
-    name: `${input.keysetName.trim()} Device ${share.idx}`,
+    name: `${input.groupName.trim()} Device ${share.idx}`,
     member_idx: share.idx,
     share_public_key: publicKeyFromSecret(share.seckey),
     share_package_json: JSON.stringify(
@@ -621,12 +571,13 @@ export async function createGeneratedKeyset(input: GeneratedKeysetInput): Promis
   }));
 
   return {
-    keyset_name: input.keysetName.trim(),
+    group_name: input.groupName.trim(),
     threshold: input.threshold,
     count: input.count,
     group_public_key: normalizeHex32(bundle.group.group_pk, 'group public key'),
     group_package_json: JSON.stringify(
       {
+        group_name: bundle.group.group_name,
         group_pk: bundle.group.group_pk,
         threshold: bundle.group.threshold,
         members: bundle.group.members,
@@ -639,22 +590,23 @@ export async function createGeneratedKeyset(input: GeneratedKeysetInput): Promis
 }
 
 export async function createRotatedKeyset(input: {
-  keysetName: string;
+  groupName: string;
   threshold: number;
   count: number;
   sources: Array<{ packageText: string; password: string }>;
 }): Promise<PwaGeneratedKeyset> {
-  if (!input.keysetName.trim()) {
-    throw new Error('Keyset name is required.');
+  if (!input.groupName.trim()) {
+    throw new Error('Group name is required.');
   }
   const draft = await buildRotationDraftFromBfshares({
     sources: input.sources,
     threshold: input.threshold,
     count: input.count,
-    keysetName: input.keysetName.trim(),
+    groupName: input.groupName.trim(),
   });
   const groupPackageJson = JSON.stringify(
     {
+      group_name: draft.groupName,
       group_pk: draft.groupPublicKey,
       threshold: draft.threshold,
       members: draft.members,
@@ -663,7 +615,7 @@ export async function createRotatedKeyset(input: {
     2,
   );
   const shares = draft.shares.map((share) => ({
-    name: `${draft.keysetName} Device ${share.memberIndex}`,
+    name: `${draft.groupName} Device ${share.memberIndex}`,
     member_idx: share.memberIndex,
     share_public_key: share.sharePublicKey,
     share_package_json: JSON.stringify(
@@ -676,7 +628,7 @@ export async function createRotatedKeyset(input: {
     ),
   }));
   return {
-    keyset_name: draft.keysetName,
+    group_name: draft.groupName,
     threshold: draft.threshold,
     count: draft.count,
     group_public_key: draft.groupPublicKey,
@@ -764,7 +716,6 @@ export async function importBfProfile(input: LoadInput): Promise<PwaLoadConfirma
     share_string: shareString,
     profile_payload: payload,
     manual_peer_policy_overrides: payload.device.manualPeerPolicyOverrides,
-    remote_peer_policy_observations: payload.device.remotePeerPolicyObservations,
   };
 }
 
@@ -780,7 +731,6 @@ export async function recoverProfileFromBfShare(input: RecoverInput): Promise<Pw
     share_string: input.shareString.trim(),
     profile_payload: recovered.profile,
     manual_peer_policy_overrides: recovered.profile.device.manualPeerPolicyOverrides,
-    remote_peer_policy_observations: recovered.profile.device.remotePeerPolicyObservations,
   };
 }
 
@@ -809,15 +759,14 @@ function profilePayloadFromStoredProfile(profile: PwaProfile): BrowserProfilePac
   return {
     profileId: profile.id,
     version: 1,
-    keysetName: profile.label,
     device: {
       name: profile.label,
       shareSecret: normalizeHex32(typeof share.seckey === 'string' ? share.seckey : '', 'share secret'),
       manualPeerPolicyOverrides: profile.manual_peer_policy_overrides ?? [],
-      remotePeerPolicyObservations: profile.remote_peer_policy_observations ?? [],
       relays: profile.relays,
     },
     groupPackage: {
+      groupName: typeof group.group_name === 'string' ? group.group_name : profile.label,
       groupPk: normalizeHex32(typeof group.group_pk === 'string' ? group.group_pk : '', 'group public key'),
       threshold: Math.trunc(typeof group.threshold === 'number' ? group.threshold : 0),
       members: Array.isArray(group.members)
@@ -885,7 +834,7 @@ export async function connectOnboardingPackage(input: OnboardConnectInput): Prom
   const result = await connectOnboardingPackageAndCaptureProfile({
     packageText: input.packageText.trim(),
     password: input.password,
-    keysetName: 'Onboarded Device',
+    groupName: 'Onboarded Device',
   });
   const payload = await runtimePayloadFromSnapshot({
     label: 'Onboarded Device',
@@ -905,7 +854,6 @@ export async function connectOnboardingPackage(input: OnboardConnectInput): Prom
     runtime_snapshot_json: result.runtimeSnapshotJson,
     profile_payload: payload,
     manual_peer_policy_overrides: payload.device.manualPeerPolicyOverrides,
-    remote_peer_policy_observations: payload.device.remotePeerPolicyObservations,
   };
 }
 
@@ -947,7 +895,7 @@ export async function startSession(profile: PwaProfile, unlockPhrase: string): P
   await clearActiveRuntimeSession();
   activeRuntimeSession = profile.runtime_snapshot_json?.trim()
     ? await startPersistedBrowserRuntimeSession({
-        keysetName: profile.label,
+        groupName: profile.label,
         relays: profile.relays,
         groupPublicKey: profile.group_public_key,
         sharePublicKey: profile.share_public_key,
@@ -956,7 +904,7 @@ export async function startSession(profile: PwaProfile, unlockPhrase: string): P
         runtimeSnapshotJson: profile.runtime_snapshot_json,
       })
     : await startBrowserRuntimeSession({
-        keysetName: profile.label,
+        groupName: profile.label,
         relays: profile.relays,
         groupPublicKey: profile.group_public_key,
         sharePublicKey: profile.share_public_key,
@@ -1074,7 +1022,7 @@ export async function applyOperatorSettings(
     const runtimeProfile = toRuntimeProfile(updatedProfile, snapshot);
     await clearActiveRuntimeSession();
     activeRuntimeSession = await startPersistedBrowserRuntimeSession({
-      keysetName: runtimeProfile.label,
+      groupName: runtimeProfile.label,
       relays: runtimeProfile.relays,
       groupPublicKey: runtimeProfile.group_public_key,
       sharePublicKey: runtimeProfile.share_public_key,

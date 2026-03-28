@@ -92,6 +92,22 @@ function toPwaLogEntries(lines: string[] = []): LogEntry[] {
   }));
 }
 
+function formatUiError(error: unknown) {
+  if (error instanceof Error && error.message.trim()) return error.message;
+  if (typeof error === 'string' && error.trim()) return error;
+  if (error && typeof error === 'object') {
+    const message = Reflect.get(error, 'message');
+    if (typeof message === 'string' && message.trim()) return message;
+    try {
+      const serialized = JSON.stringify(error);
+      if (serialized && serialized !== '{}') return serialized;
+    } catch {
+      // Fall through to the generic message below.
+    }
+  }
+  return 'Unexpected error.';
+}
+
 type OperatorSettingsDraft = {
   signerName: string;
   relays: string[];
@@ -328,7 +344,7 @@ function AppShell() {
       setUiError(null);
       await action();
     } catch (error) {
-      setUiError(error instanceof Error ? error.message : 'Unexpected error.');
+      setUiError(formatUiError(error));
     }
   }, []);
 
@@ -442,7 +458,7 @@ function AppShell() {
           <StepProgress steps={['Generate', 'Create profile', 'Review', 'Distribute']} active={0} />
           <section className="igloo-task-banner">
             <span className="igloo-task-kicker">Create or Rotate</span>
-            <p>Provide the keyset name and threshold geometry, then either create fresh shares or rebuild from threshold bfshare inputs.</p>
+            <p>Provide the group name and threshold geometry, then either create fresh shares or rebuild from threshold bfshare inputs.</p>
             <div className="igloo-task-points">
               <span>Threshold defaults to 2, total keys defaults to 3.</span>
               <span>Rotation preserves the same group public key and issues fresh device shares.</span>
@@ -473,10 +489,10 @@ function AppShell() {
                 </Button>
               </div>
               <label>
-                Keyset Name
+                Group Name
                 <input
-                  value={store.drafts.createForm.keysetName}
-                  onChange={(event) => store.updateCreateForm('keysetName', event.target.value)}
+                  value={store.drafts.createForm.groupName}
+                  onChange={(event) => store.updateCreateForm('groupName', event.target.value)}
                   placeholder="e.g. Treasury Signers"
                 />
               </label>
