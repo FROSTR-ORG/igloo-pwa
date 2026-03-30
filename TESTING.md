@@ -19,7 +19,7 @@ npm --prefix ../../test run test:e2e:igloo-pwa
 
 That suite is the primary validation for:
 
-- stored-profile inventory
+- stored profiles on the landing page
 - `bfprofile` import
 - `bfshare` recovery
 - `bfonboard` onboarding

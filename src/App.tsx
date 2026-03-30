@@ -9,6 +9,15 @@ import {
   CardHeader,
   CardTitle,
   ContentCard,
+  CreateFlowDistributionSection,
+  CreateFlowDistributionCards,
+  CreateFlowGenerateCard,
+  CreateFlowLocalSaveCard,
+  CreateFlowReviewPanel,
+  CreateFlowSharePicker,
+  CreateFlowTaskBanner,
+  HostEntryTile,
+  HostFlowShell,
   OperatorDashboardTabs,
   OperatorPermissionsPanel,
   OperatorSettingsPanel,
@@ -16,6 +25,8 @@ import {
   PageLayout,
   ProfileConfirmationCard,
   QrPayloadModal,
+  StepProgress,
+  StoredProfilesLandingCard,
   Textarea,
   type LogEntry,
   type PeerPolicy,
@@ -23,64 +34,6 @@ import {
 import { shortProfileId } from 'igloo-shared';
 
 import { StoreProvider, useStore } from './lib/store';
-
-function LandingIcon({ children }: { children: React.ReactNode }) {
-  return <div className="igloo-pwa-entry-icon" aria-hidden="true">{children}</div>;
-}
-
-function EntryTile({
-  kicker,
-  title,
-  description,
-  actionLabel,
-  icon,
-  tone = 'secondary',
-  onAction,
-}: {
-  kicker: string;
-  title: string;
-  description: string;
-  actionLabel: string;
-  icon: React.ReactNode;
-  tone?: 'primary' | 'secondary';
-  onAction: () => void;
-}) {
-  return (
-    <section className={`igloo-panel igloo-pwa-entry-tile ${tone === 'primary' ? 'is-primary' : ''}`}>
-      <div className="igloo-pwa-entry-head">
-        <LandingIcon>{icon}</LandingIcon>
-        <div className="igloo-pwa-entry-copy">
-          <span className="igloo-pwa-entry-kicker">{kicker}</span>
-          <h3>{title}</h3>
-          <p>{description}</p>
-        </div>
-      </div>
-      <Button type="button" size="sm" variant={tone === 'primary' ? 'default' : 'secondary'} onClick={onAction}>
-        {actionLabel}
-      </Button>
-    </section>
-  );
-}
-
-function FlowShell({
-  title,
-  description,
-  onBack,
-  backTooltip,
-  children,
-}: {
-  title: string;
-  description: string;
-  onBack: () => void;
-  backTooltip: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <ContentCard title={title} description={description} onBack={onBack} backButtonTooltip={backTooltip}>
-      {children}
-    </ContentCard>
-  );
-}
 
 function toPwaLogEntries(lines: string[] = []): LogEntry[] {
   return lines.map((line, index) => ({
@@ -297,28 +250,6 @@ function deriveRuntimeSummaryLabel(runtimeSnapshot: ReturnType<typeof useStore>[
   return 'Signer Running';
 }
 
-function StepProgress({
-  steps,
-  active,
-}: {
-  steps: string[];
-  active: number;
-}) {
-  return (
-    <div className="igloo-step-progress" aria-label="Flow progress">
-      {steps.map((step, index) => (
-        <div
-          key={step}
-          className={index === active ? 'igloo-step-chip is-active' : 'igloo-step-chip'}
-        >
-          <span>{index + 1}</span>
-          <strong>{step}</strong>
-        </div>
-      ))}
-    </div>
-  );
-}
-
 function AppShell() {
   const store = useStore();
   const [uiError, setUiError] = React.useState<string | null>(null);
@@ -372,35 +303,16 @@ function AppShell() {
               Create or rotate a keyset, load an existing profile, or finish onboarding a device from an accepted package.
             </p>
           </div>
-          {store.profiles.length ? (
-            <Card>
-              <CardHeader>
-                <CardTitle>Stored Profiles</CardTitle>
-                <CardDescription>Profiles remain available while logged out. Only label and short id are shown here.</CardDescription>
-              </CardHeader>
-              <CardContent className="igloo-stack">
-                {store.profiles.map((profile) => (
-                  <div key={profile.id} className="igloo-flow-card">
-                    <div className="flex items-center justify-between gap-4">
-                      <div className="min-w-0">
-                        <strong>{profile.label || 'Unnamed device'}</strong>
-                        <div className="text-xs text-slate-400">{shortProfileId(profile.id)}</div>
-                      </div>
-                      <Button
-                        type="button"
-                        size="sm"
-                        onClick={() => void run(() => store.loadStoredProfile(profile.id))}
-                      >
-                        Load Profile
-                      </Button>
-                    </div>
-                  </div>
-                ))}
-              </CardContent>
-            </Card>
-          ) : null}
+          <StoredProfilesLandingCard
+            profiles={store.profiles.map((profile) => ({
+              id: profile.id,
+              label: profile.label || 'Unnamed device',
+              subtitle: shortProfileId(profile.id),
+            }))}
+            onAction={(profileId) => void run(() => store.loadStoredProfile(profileId))}
+          />
           <div className="igloo-pwa-entry-grid">
-            <EntryTile
+            <HostEntryTile
               kicker="Fresh Setup"
               title="Create / Rotate Keyset"
               description="Generate a new keyset or rotate an existing one, create one local device profile, and distribute the remaining shares."
@@ -414,7 +326,7 @@ function AppShell() {
                 </svg>
               )}
             />
-            <EntryTile
+            <HostEntryTile
               kicker="Existing Material"
               title="Load Profile"
               description="Import a `bfprofile` string or recover your device profile from a password-protected `bfshare`."
@@ -427,7 +339,7 @@ function AppShell() {
                 </svg>
               )}
             />
-            <EntryTile
+            <HostEntryTile
               kicker="Accepted Invite"
               title="Onboard Device"
               description="Connect with a password-protected `bfonboard` package, confirm the profile data, and save this device."
@@ -448,7 +360,7 @@ function AppShell() {
 
   function renderCreateGenerate() {
     return (
-      <FlowShell
+      <HostFlowShell
         title="Create / Rotate Keyset"
         description="Step 1 of 4 · create a new keyset or rotate an existing one before selecting the local device share."
         onBack={goToLanding}
@@ -456,137 +368,50 @@ function AppShell() {
       >
         <section className="igloo-flow-root igloo-stack">
           <StepProgress steps={['Generate', 'Create profile', 'Review', 'Distribute']} active={0} />
-          <section className="igloo-task-banner">
-            <span className="igloo-task-kicker">Create or Rotate</span>
-            <p>Provide the group name and threshold geometry, then either create fresh shares or rebuild from threshold bfshare inputs.</p>
-            <div className="igloo-task-points">
-              <span>Threshold defaults to 2, total keys defaults to 3.</span>
-              <span>Rotation preserves the same group public key and issues fresh device shares.</span>
-            </div>
-          </section>
-          <Card>
-            <CardHeader>
-              <CardTitle>Create or Rotate</CardTitle>
-              <CardDescription>Choose the source mode, then provide the target threshold geometry.</CardDescription>
-            </CardHeader>
-            <CardContent className="igloo-stack">
-              <div className="igloo-button-row">
-                <Button
-                  type="button"
-                  size="sm"
-                  variant={store.drafts.createForm.mode === 'new' ? 'default' : 'secondary'}
-                  onClick={() => store.updateCreateForm('mode', 'new')}
-                >
-                  Create New Keyset
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant={store.drafts.createForm.mode === 'rotate' ? 'default' : 'secondary'}
-                  onClick={() => store.updateCreateForm('mode', 'rotate')}
-                >
-                  Rotate Existing Keyset
-                </Button>
-              </div>
-              <label>
-                Group Name
-                <input
-                  value={store.drafts.createForm.groupName}
-                  onChange={(event) => store.updateCreateForm('groupName', event.target.value)}
-                  placeholder="e.g. Treasury Signers"
-                />
-              </label>
-              <div className="igloo-two-up">
-                <label>
-                  Threshold
-                  <input
-                    type="number"
-                    min={2}
-                    value={store.drafts.createForm.threshold}
-                    onChange={(event) => store.updateCreateForm('threshold', event.target.value)}
-                  />
-                </label>
-                <label>
-                  Total Keys
-                  <input
-                    type="number"
-                    min={2}
-                    value={store.drafts.createForm.count}
-                    onChange={(event) => store.updateCreateForm('count', event.target.value)}
-                  />
-                </label>
-              </div>
-              {store.drafts.createForm.mode === 'rotate' ? (
-                <div className="igloo-stack">
-                  <label>
-                    Source Profile
-                    <select
-                      value={store.drafts.rotationForm.sourceProfileId}
-                      onChange={(event) => store.updateRotationForm('sourceProfileId', event.target.value)}
-                    >
-                      <option value="">Select a local profile</option>
-                      {store.profiles.map((profile) => (
-                        <option key={profile.id} value={profile.id}>
-                          {profile.label || 'Unnamed device'} ({shortProfileId(profile.id)})
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <div className="igloo-stack">
-                    {store.drafts.rotationForm.sources.map((source, index) => (
-                      <div key={`rotation-source-${index}`} className="igloo-generated-card">
-                        <header>
-                          <strong>Recovery Share {index + 1}</strong>
-                          <span>Add threshold bfshare packages to reconstruct the current keyset.</span>
-                        </header>
-                        <label>
-                          bfshare
-                          <Textarea
-                            className="min-h-[96px]"
-                            value={source.packageText}
-                            onChange={(event) => store.updateRotationSource(index, 'packageText', event.target.value)}
-                            placeholder="Paste bfshare1..."
-                          />
-                        </label>
-                        <label>
-                          Package Password
-                          <input
-                            type="password"
-                            value={source.password}
-                            onChange={(event) => store.updateRotationSource(index, 'password', event.target.value)}
-                          />
-                        </label>
-                        <div className="igloo-button-row">
-                          <Button type="button" size="sm" variant="secondary" onClick={() => store.removeRotationSource(index)}>
-                            Remove
-                          </Button>
-                        </div>
-                      </div>
-                    ))}
-                    <div className="igloo-button-row">
-                      <Button type="button" size="sm" variant="secondary" onClick={() => store.addRotationSource()}>
-                        Add bfshare
-                      </Button>
-                    </div>
-                  </div>
-                </div>
-              ) : null}
-              <div className="igloo-button-row">
-                <Button type="button" size="sm" onClick={() => void run(() => store.generateKeyset())}>
-                  {store.drafts.createForm.mode === 'rotate' ? 'Rotate Keyset' : 'Generate Keyset'}
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
+          <CreateFlowTaskBanner
+            kicker="Create or Rotate"
+            description="Provide the group name and threshold geometry, then either create fresh shares or rebuild from threshold bfshare inputs."
+            points={[
+              'Threshold defaults to 2, total keys defaults to 3.',
+              'Rotation preserves the same group public key and issues fresh device shares.',
+            ]}
+          />
+          <CreateFlowGenerateCard
+            form={{
+              ...store.drafts.createForm,
+              sourceProfileId: store.drafts.rotationForm.sourceProfileId,
+            }}
+            availableProfiles={store.profiles.map((profile) => ({
+              id: profile.id,
+              label: `${profile.label || 'Unnamed device'} (${shortProfileId(profile.id)})`,
+            }))}
+            rotationSources={store.drafts.rotationForm.sources.map((source) => ({
+              packageText: source.packageText,
+              packagePassword: source.password,
+            }))}
+            onChangeForm={(field, value) => {
+              if (field === 'sourceProfileId') {
+                store.updateRotationForm('sourceProfileId', value);
+                return;
+              }
+              store.updateCreateForm(field, value);
+            }}
+            onChangeRotationSource={(index, field, value) =>
+              store.updateRotationSource(index, field === 'packagePassword' ? 'password' : 'packageText', value)
+            }
+            onAddRotationSource={() => store.addRotationSource()}
+            onRemoveRotationSource={(index) => store.removeRotationSource(index)}
+            onGenerate={() => void run(() => store.generateKeyset())}
+          />
         </section>
-      </FlowShell>
+      </HostFlowShell>
     );
   }
 
   function renderCreateProfile() {
     if (!store.generatedKeyset) return null;
     return (
-      <FlowShell
+      <HostFlowShell
         title="Create Device Profile"
         description="Step 2 of 3 · choose one share for this device and enter the local profile details."
         onBack={() => store.setActiveView('create-generate')}
@@ -600,79 +425,46 @@ function AppShell() {
               <CardDescription>Choose which generated share should become the local signing device.</CardDescription>
             </CardHeader>
             <CardContent className="igloo-stack">
-              <div className="igloo-flow-list">
-                {store.generatedKeyset.shares.map((share) => (
-                  <div
-                    key={share.member_idx}
-                    className={
-                      store.selectedGeneratedShareIdx === share.member_idx
-                        ? 'igloo-flow-card is-selected'
-                        : 'igloo-flow-card'
-                    }
-                  >
-                    <button
-                      type="button"
-                      className="igloo-flow-card-select"
-                      onClick={() => store.selectGeneratedShare(share.member_idx)}
-                    >
-                      <strong>{share.name}</strong>
-                      <span>Member {share.member_idx}</span>
-                      <small>{share.share_public_key}</small>
-                    </button>
-                  </div>
-                ))}
-              </div>
-              <div className="igloo-two-up">
-                <label>
-                  Device Profile Name
-                  <input
-                    value={store.drafts.profileForm.label}
-                    onChange={(event) => store.updateProfileForm('label', event.target.value)}
-                  />
-                </label>
-                <label>
-                  Relays
-                  <Textarea
-                    className="min-h-[72px]"
-                    value={store.drafts.profileForm.relayUrls}
-                    onChange={(event) => store.updateProfileForm('relayUrls', event.target.value)}
-                  />
-                </label>
-              </div>
-              <div className="igloo-two-up">
-                <label>
-                  Device Password
-                  <input
-                    type="password"
-                    value={store.drafts.profileForm.password}
-                    onChange={(event) => store.updateProfileForm('password', event.target.value)}
-                  />
-                </label>
-                <label>
-                  Confirm Password
-                  <input
-                    type="password"
-                    value={store.drafts.profileForm.confirmPassword}
-                    onChange={(event) => store.updateProfileForm('confirmPassword', event.target.value)}
-                  />
-                </label>
-              </div>
+              <CreateFlowSharePicker
+                shares={store.generatedKeyset.shares}
+                selectedMemberIdx={store.selectedGeneratedShareIdx}
+                onSelect={(memberIdx) => store.selectGeneratedShare(memberIdx)}
+              />
+              {selectedShare ? (
+                <CreateFlowLocalSaveCard
+                  share={selectedShare}
+                  draft={{
+                    label: store.drafts.profileForm.label,
+                    relayUrls: store.drafts.profileForm.relayUrls,
+                    primarySecret: store.drafts.profileForm.password,
+                    secondarySecret: store.drafts.profileForm.confirmPassword,
+                  }}
+                  title="Local Browser Device"
+                  subtitle={`Member ${selectedShare.member_idx}`}
+                  labelInputLabel="Device Profile Name"
+                  relayLabel="Relays"
+                  primarySecretLabel="Device Password"
+                  secondarySecretLabel="Confirm Password"
+                  actionLabel="Continue to Review"
+                  actionVariant="default"
+                  onLabelChange={(value) => store.updateProfileForm('label', value)}
+                  onPrimarySecretChange={(value) => store.updateProfileForm('password', value)}
+                  onSecondarySecretChange={(value) => store.updateProfileForm('confirmPassword', value)}
+                  onRelayUrlsChange={(value) => store.updateProfileForm('relayUrls', value)}
+                  onAction={() => void run(() => store.reviewGeneratedProfile())}
+                />
+              ) : null}
             </CardContent>
           </Card>
-          <div className="igloo-button-row">
-            <Button type="button" size="sm" onClick={() => void run(() => store.reviewGeneratedProfile())}>
-              Continue to Review
-            </Button>
-          </div>
         </section>
-      </FlowShell>
+      </HostFlowShell>
     );
   }
 
   function renderCreateConfirm() {
     if (!store.generatedKeyset) return null;
     return (
-      <FlowShell
+      <HostFlowShell
         title="Review Device Profile"
         description="Step 3 of 4 · review the read-only profile details before initializing this device."
         onBack={() => store.setActiveView('create-profile')}
@@ -680,21 +472,16 @@ function AppShell() {
       >
         <section className="igloo-flow-root igloo-stack">
           <StepProgress steps={['Generate', 'Create profile', 'Review', 'Distribute']} active={2} />
-          <ProfileConfirmationCard
-            title="Preview and Confirm"
-            description="This preview is read-only. Confirm the profile information before continuing to distribution."
+          <CreateFlowReviewPanel
             profileName={store.drafts.profileForm.label || selectedShare?.name || 'Device Profile'}
             sharePublicKey={selectedShare?.share_public_key ?? 'n/a'}
             groupPublicKey={store.generatedKeyset.group_public_key}
             relays={store.drafts.profileForm.relayUrls.split(/\r?\n/).map((value) => value.trim()).filter(Boolean)}
+            actionLabel="Accept and Continue"
+            onAccept={() => void run(() => store.acceptGeneratedProfile())}
           />
-          <div className="igloo-button-row">
-            <Button type="button" size="sm" onClick={() => void run(() => store.acceptGeneratedProfile())}>
-              Accept and Continue
-            </Button>
-          </div>
         </section>
-      </FlowShell>
+      </HostFlowShell>
     );
   }
 
@@ -704,7 +491,7 @@ function AppShell() {
       store.distributionSession?.remaining_member_indices.includes(share.member_idx),
     );
     return (
-      <FlowShell
+      <HostFlowShell
         title="Distribute the Keyset"
         description="Step 4 of 4 · the signing device is running, and the remaining shares can now be distributed."
         onBack={() => store.setActiveView('create-confirm')}
@@ -712,128 +499,69 @@ function AppShell() {
       >
         <section className="igloo-flow-root igloo-stack">
           <StepProgress steps={['Generate', 'Create profile', 'Review', 'Distribute']} active={3} />
-          <section className="igloo-task-banner">
-            <span className="igloo-task-kicker">Distribute the Keyset</span>
-            <p>
-              This device is initialized and connected. The remaining shares can now be distributed as `bfonboard`
-              packages.
-            </p>
-            <div className="igloo-task-points">
-              <span>`Copy`, `QR`, and `Save` all produce `bfonboard` packages.</span>
-              <span>`Save` downloads a `bfonboard` text file instead of creating another local profile.</span>
-              <span>Finish when you are done to reach the device dashboard.</span>
-            </div>
-          </section>
-          <OperatorSignerPanel
-            profile={{
-              name: selectedProfile.label,
-              groupPublicKey: selectedProfile.group_public_key,
-              sharePublicKey: selectedProfile.share_public_key,
-            }}
-            introMessage="The primary browser signer is initialized and connected so the remaining shares can be distributed."
-            runtimeState={store.runtimeSnapshot?.active ? 'running' : 'stopped'}
-            runtimeControlLabel={store.runtimeSnapshot?.active ? 'Stop Signer' : 'Start Signer'}
-            runtimeSummaryLabel={deriveRuntimeSummaryLabel(store.runtimeSnapshot)}
-            sharePublicKey={selectedProfile.share_public_key}
-            groupPublicKey={selectedProfile.group_public_key}
-            onPrimaryAction={() =>
-              void run(() => (store.runtimeSnapshot?.active ? store.stopSigner() : store.startSigner()))
+          <CreateFlowDistributionSection
+            bannerKicker="Distribute the Keyset"
+            bannerDescription="This device is initialized and connected. The remaining shares can now be distributed as `bfonboard` packages."
+            bannerPoints={[
+              '`Copy`, `QR`, and `Save` all produce `bfonboard` packages.',
+              '`Save` downloads a `bfonboard` text file instead of creating another local profile.',
+              'Finish when you are done to reach the device dashboard.',
+            ]}
+            sectionTitle="Remaining Shares"
+            sectionDescription="Each share can be copied, shown as a QR package, or downloaded as a `bfonboard` file."
+            shares={remainingShares}
+            drafts={Object.fromEntries(
+              Object.entries(store.drafts.distributionForms).map(([memberIdx, form]) => [
+                Number(memberIdx),
+                {
+                  label: form.label,
+                  packagePassword: form.password,
+                  confirmPassword: form.confirmPassword,
+                },
+              ]),
+            )}
+            results={
+              Object.fromEntries(
+                Object.entries(store.distributionSession?.results ?? {}).map(([memberIdx, result]) => [
+                  Number(memberIdx),
+                  result,
+                ]),
+              ) as Record<number, { kind: 'copied' | 'qr' | 'saved'; label: string }>
             }
-            primaryActionVariant={store.runtimeSnapshot?.active ? 'destructive' : 'success'}
-            onRefreshPeers={() => void run(() => store.refreshSigner())}
-            refreshPeersDisabled={!store.runtimeSnapshot?.active}
-            peers={derivePwaPeers(store.peerPermissionStates, store.runtimeSnapshot?.runtime_status)}
-            pendingOperations={derivePendingOperations(store.runtimeSnapshot?.runtime_status)}
-            logs={toPwaLogEntries(store.runtimeSnapshot?.runtime_log_lines)}
+            onChangeDraft={(memberIdx, field, value) =>
+              store.updateDistributionForm(
+                memberIdx,
+                field === 'packagePassword' ? 'password' : field,
+                value,
+              )
+            }
+            onDistribute={(memberIdx, kind) => void run(() => store.distributeShare(memberIdx, kind))}
+            onFinish={() => store.finishDistribution()}
+            beforeCards={(
+              <OperatorSignerPanel
+                profile={{
+                  name: selectedProfile.label,
+                  groupPublicKey: selectedProfile.group_public_key,
+                  sharePublicKey: selectedProfile.share_public_key,
+                }}
+                introMessage="The primary browser signer is initialized and connected so the remaining shares can be distributed."
+                runtimeState={store.runtimeSnapshot?.active ? 'running' : 'stopped'}
+                runtimeControlLabel={store.runtimeSnapshot?.active ? 'Stop Signer' : 'Start Signer'}
+                runtimeSummaryLabel={deriveRuntimeSummaryLabel(store.runtimeSnapshot)}
+                sharePublicKey={selectedProfile.share_public_key}
+                groupPublicKey={selectedProfile.group_public_key}
+                onPrimaryAction={() =>
+                  void run(() => (store.runtimeSnapshot?.active ? store.stopSigner() : store.startSigner()))
+                }
+                primaryActionVariant={store.runtimeSnapshot?.active ? 'destructive' : 'success'}
+                onRefreshPeers={() => void run(() => store.refreshSigner())}
+                refreshPeersDisabled={!store.runtimeSnapshot?.active}
+                peers={derivePwaPeers(store.peerPermissionStates, store.runtimeSnapshot?.runtime_status)}
+                pendingOperations={derivePendingOperations(store.runtimeSnapshot?.runtime_status)}
+                logs={toPwaLogEntries(store.runtimeSnapshot?.runtime_log_lines)}
+              />
+            )}
           />
-          <Card>
-            <CardHeader>
-              <CardTitle>Remaining Shares</CardTitle>
-              <CardDescription>Each share can be copied, shown as a QR package, or downloaded as a `bfonboard` file.</CardDescription>
-            </CardHeader>
-            <CardContent className="igloo-stack">
-              <div className="igloo-generated-grid">
-                {remainingShares.map((share) => {
-                  const form = store.drafts.distributionForms[share.member_idx];
-                  const result = store.distributionSession?.results[share.member_idx];
-                  return (
-                    <article key={share.member_idx} className="igloo-generated-card">
-                      <header>
-                        <strong>{share.name}</strong>
-                        <span>Member {share.member_idx} · {share.share_public_key}</span>
-                      </header>
-                      <div className="igloo-two-up">
-                        <label>
-                          Share Name
-                          <input
-                            value={form?.label ?? ''}
-                            onChange={(event) =>
-                              store.updateDistributionForm(share.member_idx, 'label', event.target.value)
-                            }
-                          />
-                        </label>
-                        <label>
-                          Password
-                          <input
-                            type="password"
-                            value={form?.password ?? ''}
-                            onChange={(event) =>
-                              store.updateDistributionForm(share.member_idx, 'password', event.target.value)
-                            }
-                          />
-                        </label>
-                      </div>
-                      <label>
-                        Confirm Password
-                        <input
-                          type="password"
-                          value={form?.confirmPassword ?? ''}
-                          onChange={(event) =>
-                            store.updateDistributionForm(share.member_idx, 'confirmPassword', event.target.value)
-                          }
-                        />
-                      </label>
-                      <div className="igloo-button-row">
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="secondary"
-                          onClick={() => void run(() => store.distributeShare(share.member_idx, 'copy'))}
-                        >
-                          Copy
-                        </Button>
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="secondary"
-                          onClick={() => void run(() => store.distributeShare(share.member_idx, 'qr'))}
-                        >
-                          QR
-                        </Button>
-                        <Button
-                          type="button"
-                          size="sm"
-                          onClick={() => void run(() => store.distributeShare(share.member_idx, 'save'))}
-                        >
-                          Save
-                        </Button>
-                      </div>
-                      {result ? (
-                        <div className="igloo-message-muted">
-                          {`${result.kind === 'copied' ? 'Copied' : result.kind === 'qr' ? 'Prepared QR for' : 'Saved file for'} ${result.label}.`}
-                        </div>
-                      ) : null}
-                    </article>
-                  );
-                })}
-              </div>
-            </CardContent>
-          </Card>
-          <div className="igloo-button-row">
-            <Button type="button" size="sm" onClick={() => store.finishDistribution()}>
-              Finish
-            </Button>
-          </div>
           <QrPayloadModal
             open={Boolean(store.distributionSession.qr_package)}
             onClose={() => store.closeQrPackage()}
@@ -842,13 +570,13 @@ function AppShell() {
             payload={store.distributionSession.qr_package?.package_text ?? ''}
           />
         </section>
-      </FlowShell>
+      </HostFlowShell>
     );
   }
 
   function renderLoadChoice() {
     return (
-      <FlowShell
+      <HostFlowShell
         title="Load Profile"
         description="Choose whether to import a full device profile or recover one from your protected share."
         onBack={goToLanding}
@@ -856,7 +584,7 @@ function AppShell() {
       >
         <section className="igloo-flow-root igloo-pwa-entry-shell">
           <div className="igloo-pwa-entry-grid igloo-pwa-entry-grid-two">
-            <EntryTile
+            <HostEntryTile
               kicker="Local Import"
               title="Import Profile"
               description="Load an existing device profile from a password-protected `bfprofile` string."
@@ -870,7 +598,7 @@ function AppShell() {
                 </svg>
               )}
             />
-            <EntryTile
+            <HostEntryTile
               kicker="Remote Recovery"
               title="Recover from Share"
               description="Use a password-protected `bfshare` string to download and decrypt the profile from its relays."
@@ -885,13 +613,13 @@ function AppShell() {
             />
           </div>
         </section>
-      </FlowShell>
+      </HostFlowShell>
     );
   }
 
   function renderLoadImport() {
     return (
-      <FlowShell
+      <HostFlowShell
         title="Import Profile"
         description="Paste a password-protected `bfprofile` string and confirm the decoded device profile."
         onBack={() => store.startLoadChoice()}
@@ -930,13 +658,13 @@ function AppShell() {
             </CardContent>
           </Card>
         </section>
-      </FlowShell>
+      </HostFlowShell>
     );
   }
 
   function renderLoadRecover() {
     return (
-      <FlowShell
+      <HostFlowShell
         title="Recover from Share"
         description="Use a protected `bfshare` string and password to fetch and decrypt the remote profile."
         onBack={() => store.startLoadChoice()}
@@ -975,14 +703,14 @@ function AppShell() {
             </CardContent>
           </Card>
         </section>
-      </FlowShell>
+      </HostFlowShell>
     );
   }
 
   function renderLoadConfirm() {
     if (!store.pendingLoadConfirmation) return null;
     return (
-      <FlowShell
+      <HostFlowShell
         title="Confirm Profile"
         description="Review the decoded profile information before loading this device."
         onBack={() => store.setActiveView(store.pendingLoadConfirmation?.kind === 'bfprofile' ? 'load-import' : 'load-recover')}
@@ -1009,13 +737,13 @@ function AppShell() {
             </Button>
           </div>
         </section>
-      </FlowShell>
+      </HostFlowShell>
     );
   }
 
   function renderOnboardConnect() {
     return (
-      <FlowShell
+      <HostFlowShell
         title="Onboard Device"
         description="Connect with a password-protected onboarding package and complete the handshake."
         onBack={goToLanding}
@@ -1056,14 +784,14 @@ function AppShell() {
             </CardContent>
           </Card>
         </section>
-      </FlowShell>
+      </HostFlowShell>
     );
   }
 
   function renderOnboardSave() {
     if (!store.pendingOnboardConnection) return null;
     return (
-      <FlowShell
+      <HostFlowShell
         title="Save Onboarded Device"
         description="Review the resolved profile details and choose the password used to store this device locally."
         onBack={() => store.setActiveView('onboard-connect')}
@@ -1122,14 +850,14 @@ function AppShell() {
             </CardContent>
           </Card>
         </section>
-      </FlowShell>
+      </HostFlowShell>
     );
   }
 
   function renderRotateConnect() {
     if (!selectedProfile) return null;
     return (
-      <FlowShell
+      <HostFlowShell
         title="Rotate Key"
         description="Connect with a rotated onboarding package and prepare to replace the active device share."
         onBack={goToDashboard}
@@ -1174,14 +902,14 @@ function AppShell() {
             </CardContent>
           </Card>
         </section>
-      </FlowShell>
+      </HostFlowShell>
     );
   }
 
   function renderRotateSave() {
     if (!store.pendingRotationConnection || !selectedProfile) return null;
     return (
-      <FlowShell
+      <HostFlowShell
         title="Confirm Rotated Device"
         description="Review the replacement device details before replacing the active local profile."
         onBack={() => store.setActiveView('rotate-connect')}
@@ -1205,7 +933,7 @@ function AppShell() {
             </Button>
           </div>
         </section>
-      </FlowShell>
+      </HostFlowShell>
     );
   }
 

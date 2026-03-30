@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog, adapted for this repository.
 
+## [Unreleased]
+
+### Changed
+- The browser host now shares more of its host-shell, review, and distribution flow framing with `igloo-home` through `igloo-ui`.
+- The create and rotation distribution steps now use the shared share-label and package-password distribution contract.
+
+### Fixed
+- PWA end-to-end flows now match the shared create-flow surface and rotation timing expectations after the host-shell hard cut.
+- The PWA Playwright web server now launches without the transient `NO_COLOR` and `FORCE_COLOR` warning.
+
 ## [0.2.0] - 2026-03-27
 
 ### Added

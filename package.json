@@ -7,7 +7,7 @@
     "build:ui": "npm --prefix ../igloo-ui run build",
     "build:bridge-wasm": "node ./scripts/sync-bridge-wasm.mjs",
     "build:app": "tsc && vite build",
-    "dev": "npm run build:ui && npm run build:bridge-wasm && vite --host 0.0.0.0 --port 1430 --strictPort",
+    "dev": "if [ \"${FROSTR_TEST_PREPARED:-0}\" = \"1\" ]; then vite --host 0.0.0.0 --port 1430 --strictPort; else npm run build:ui && npm run build:bridge-wasm && vite --host 0.0.0.0 --port 1430 --strictPort; fi",
     "build": "npm run build:ui && npm run build:bridge-wasm && npm run build:app",
     "preview": "vite preview --host 0.0.0.0 --port 4174",
     "test:unit": "vitest run",

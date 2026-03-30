@@ -1,5 +1,3 @@
-@import "igloo-ui/styles.css";
-
 .igloo-pwa-entry-shell {
   display: grid;
   place-items: center;
