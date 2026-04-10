@@ -1,6 +1,7 @@
 import type {
   BrowserManualPeerPolicyOverride,
   BrowserProfilePackagePayload,
+  SignerSettings as SharedSignerSettings,
 } from 'igloo-shared';
 
 export type PwaView =
@@ -24,13 +25,7 @@ export type PwaView =
 export type PwaDashboardTab = 'signer' | 'permissions' | 'settings';
 export type PwaPeerSelectionStrategy = 'deterministic_sorted' | 'random';
 
-export type PwaSignerSettings = {
-  sign_timeout_secs: number;
-  ping_timeout_secs: number;
-  request_ttl_secs: number;
-  state_save_interval_secs: number;
-  peer_selection_strategy: PwaPeerSelectionStrategy;
-};
+export type PwaSignerSettings = SharedSignerSettings;
 
 export type PwaPolicyOverrideValue = 'unset' | 'allow' | 'deny';
 
@@ -86,7 +81,7 @@ export type PwaProfile = PwaProfilePreview & {
   id: string;
   relay_profile: string;
   group_ref: string;
-  share_ref: string;
+  encrypted_profile_ref: string;
   state_path: string;
   created_at: number;
   stored_password: string;
@@ -215,6 +210,7 @@ export type PwaDraftState = {
 export type PwaPersistedState = {
   profiles: PwaProfile[];
   peerPermissionStates: PwaPeerPermissionState[];
+  runtimeWarning: string | null;
   selectedProfileId: string;
   activeView: PwaView;
   activeDashboardTab: PwaDashboardTab;

@@ -1,5 +1,11 @@
 import * as React from 'react';
-import { buildProfileDownloadFilename, groupPublicKeyFromPackage, shortProfileId } from 'igloo-shared';
+import {
+  buildProfileDownloadFilename,
+  DEFAULT_RELAYS,
+  groupPublicKeyFromPackage,
+  saveBrowserProfileAndMaybeActivate,
+  shortProfileId,
+} from 'igloo-shared';
 
 import * as adapter from './local-adapter';
 import { clearPersistedState, loadPersistedState, savePersistedState } from './storage';
@@ -62,7 +68,7 @@ type AppState = PwaPersistedState & {
   updateRotateConnectForm: (field: keyof PwaDraftState['rotateConnectForm'], value: string) => void;
   connectRotationPackage: () => Promise<void>;
   finalizeRotationUpdate: () => Promise<void>;
-  exportProfile: (profileId: string) => Promise<void>;
+  copyProfilePackage: (profileId: string, format: 'bfprofile' | 'bfshare') => Promise<void>;
   deleteProfile: (profileId: string) => void;
   updatePeerPolicy: (
     pubkey: string,
@@ -79,8 +85,8 @@ type AppState = PwaPersistedState & {
     relays: string[];
     signerSettings: PwaSignerSettings;
   }) => Promise<void>;
+  logout: () => Promise<void>;
   updateSettings: (field: keyof PwaSettings, checked: boolean) => void;
-  resetApp: () => void;
 };
 
 const AppStore = React.createContext<AppState | null>(null);
@@ -100,7 +106,7 @@ const defaultDrafts: PwaDraftState = {
     label: '',
     password: '',
     confirmPassword: '',
-    relayUrls: 'wss://relay.primal.net',
+    relayUrls: DEFAULT_RELAYS.join('\n'),
   },
   distributionForms: {},
   importProfileForm: {
@@ -132,10 +138,13 @@ const defaultSettings: PwaSettings = {
   prefer_install_prompt: true,
 };
 
+const ACTIVE_RUNTIME_POLL_INTERVAL_MS = 1_000;
+
 function createDefaultState(): PwaPersistedState {
   return {
     profiles: [],
     peerPermissionStates: adapter.defaultPeerPermissionStates(),
+    runtimeWarning: null,
     selectedProfileId: '',
     activeView: 'landing',
     activeDashboardTab: 'signer',
@@ -237,6 +246,12 @@ function downloadText(filename: string, value: string) {
 export function StoreProvider({ children }: { children: React.ReactNode }) {
   const [state, setState] = React.useState<PwaPersistedState>(() => normalizeLoadedState());
   const restoredRuntimeProfileRef = React.useRef<string | null>(null);
+  const runtimeSnapshotRef = React.useRef<PwaRuntimeSnapshot | null>(state.runtimeSnapshot);
+  const shouldRestorePersistedRuntimeRef = React.useRef(Boolean(state.runtimeSnapshot?.active));
+
+  React.useEffect(() => {
+    runtimeSnapshotRef.current = state.runtimeSnapshot;
+  }, [state.runtimeSnapshot]);
 
   React.useEffect(() => {
     if (state.settings.remember_browser_state) {
@@ -252,12 +267,17 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   );
 
   React.useEffect(() => {
+    if (!shouldRestorePersistedRuntimeRef.current) {
+      restoredRuntimeProfileRef.current = null;
+      return;
+    }
     const profile = selectedProfile;
     if (!profile?.runtime_snapshot_json || !state.runtimeSnapshot?.active) {
       restoredRuntimeProfileRef.current = null;
       return;
     }
     if (restoredRuntimeProfileRef.current === profile.id) return;
+    shouldRestorePersistedRuntimeRef.current = false;
     restoredRuntimeProfileRef.current = profile.id;
     void adapter
       .startSession(profile, state.unlockPhrase || profile.stored_password)
@@ -265,6 +285,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         setState((current) => ({
           ...current,
           runtimeSnapshot,
+          runtimeWarning: null,
           profiles: current.profiles.map((entry) =>
             entry.id === profile.id && runtimeSnapshot.profile
               ? {
@@ -279,6 +300,52 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       .catch(() => undefined);
   }, [selectedProfile, state.runtimeSnapshot?.active, state.unlockPhrase]);
 
+  React.useEffect(() => {
+    const activeProfileId = state.runtimeSnapshot?.active ? state.runtimeSnapshot.profile?.id ?? null : null;
+    if (!activeProfileId) return;
+
+    let cancelled = false;
+
+    const syncRuntimeSnapshot = async () => {
+      const currentSnapshot = runtimeSnapshotRef.current;
+      if (!currentSnapshot?.active || currentSnapshot.profile?.id !== activeProfileId) return;
+
+      try {
+        const runtimeSnapshot = await adapter.readSession(currentSnapshot);
+        if (!runtimeSnapshot || cancelled) return;
+        setState((current) => {
+          if (!current.runtimeSnapshot?.active || current.runtimeSnapshot.profile?.id !== activeProfileId) {
+            return current;
+          }
+          return {
+            ...current,
+            profiles:
+              runtimeSnapshot.profile == null
+                ? current.profiles
+                : current.profiles.map((profile) =>
+                    profile.id === activeProfileId ? runtimeSnapshot.profile ?? profile : profile,
+                  ),
+            peerPermissionStates:
+              runtimeSnapshot.peer_permission_states ?? current.peerPermissionStates,
+            runtimeSnapshot,
+          };
+        });
+      } catch {
+        // Ignore transient read failures while the runtime is stopping or being replaced.
+      }
+    };
+
+    void syncRuntimeSnapshot();
+    const interval = window.setInterval(() => {
+      void syncRuntimeSnapshot();
+    }, ACTIVE_RUNTIME_POLL_INTERVAL_MS);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [state.runtimeSnapshot?.active, state.runtimeSnapshot?.profile?.id]);
+
   const ensureProfileIdAvailable = React.useCallback(
     (profile: Pick<PwaProfile, 'id' | 'label'>) => {
       if (state.profiles.some((entry) => entry.id === profile.id)) {
@@ -291,15 +358,27 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const persistProfileToDashboard = React.useCallback(
     async (profile: PwaProfile, password: string, runtimeSnapshot?: PwaRuntimeSnapshot | null) => {
       ensureProfileIdAvailable(profile);
-      const snapshot =
-        runtimeSnapshot ?? (state.settings.auto_open_signer ? await adapter.startSession(profile, password) : null);
-      const storedProfile = snapshot?.profile ?? profile;
+      const saved =
+        runtimeSnapshot != null
+          ? {
+              profile: runtimeSnapshot.profile ?? profile,
+              runtime: runtimeSnapshot,
+              runtimeWarning: null,
+            }
+          : await saveBrowserProfileAndMaybeActivate({
+              profile,
+              autoStart: state.settings.auto_open_signer,
+              activate: async () => await adapter.startSession(profile, password),
+            });
+      const snapshot = saved.runtime;
+      const storedProfile = (snapshot?.profile ?? saved.profile) as PwaProfile;
 
       setState((current) => ({
         ...current,
         profiles: [storedProfile, ...current.profiles.filter((entry) => entry.id !== storedProfile.id)],
         peerPermissionStates:
           snapshot?.peer_permission_states ?? current.peerPermissionStates ?? adapter.defaultPeerPermissionStates(),
+        runtimeWarning: saved.runtimeWarning?.message ?? null,
         selectedProfileId: storedProfile.id,
         activeView: 'dashboard',
         activeDashboardTab: 'signer',
@@ -338,6 +417,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           activeDashboardTab: 'signer',
           unlockPhrase: profile.stored_password,
           runtimeSnapshot,
+          runtimeWarning: null,
           peerPermissionStates:
             runtimeSnapshot.peer_permission_states ?? adapter.defaultPeerPermissionStates(),
           profiles: current.profiles.map((entry) =>
@@ -523,7 +603,12 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           relayUrls: state.drafts.profileForm.relayUrls,
           existingProfileIds: state.profiles.map((entry) => entry.id),
         });
-        const runtimeSnapshot = await adapter.startSession(profile, state.drafts.profileForm.password);
+        const saved = await saveBrowserProfileAndMaybeActivate({
+          profile,
+          autoStart: true,
+          activate: async () => await adapter.startSession(profile, state.drafts.profileForm.password),
+        });
+        const runtimeSnapshot = saved.runtime;
         const remaining = state.generatedKeyset.shares
           .map((share) => share.member_idx)
           .filter((memberIdx) => memberIdx !== state.selectedGeneratedShareIdx);
@@ -536,11 +621,12 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           activeDashboardTab: 'signer',
           unlockPhrase: state.drafts.profileForm.password,
           runtimeSnapshot,
+          runtimeWarning: saved.runtimeWarning?.message ?? null,
           peerPermissionStates:
-            runtimeSnapshot.peer_permission_states ?? adapter.defaultPeerPermissionStates(),
+            runtimeSnapshot?.peer_permission_states ?? adapter.defaultPeerPermissionStates(),
           distributionSession: {
             profile_id: profile.id,
-            signer_pubkey: runtimeSnapshot.runtime_host?.signer_pubkey ?? profile.share_public_key,
+            signer_pubkey: runtimeSnapshot?.runtime_host?.signer_pubkey ?? profile.share_public_key,
             remaining_member_indices: remaining,
             results: {},
             qr_package: null,
@@ -854,7 +940,12 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           connection: state.pendingRotationConnection,
           existingProfileIds: state.profiles.map((entry) => entry.id),
         });
-        const runtimeSnapshot = await adapter.startSession(profile, profile.stored_password);
+        const saved = await saveBrowserProfileAndMaybeActivate({
+          profile,
+          autoStart: true,
+          activate: async () => await adapter.startSession(profile, profile.stored_password),
+        });
+        const runtimeSnapshot = saved.runtime;
         setState((current) => ({
           ...current,
           profiles: [
@@ -865,23 +956,32 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           activeView: 'dashboard',
           activeDashboardTab: 'signer',
           runtimeSnapshot,
+          runtimeWarning: saved.runtimeWarning?.message ?? null,
           unlockPhrase: profile.stored_password,
           pendingRotationConnection: null,
           peerPermissionStates:
-            runtimeSnapshot.peer_permission_states ?? adapter.defaultPeerPermissionStates(),
+            runtimeSnapshot?.peer_permission_states ?? adapter.defaultPeerPermissionStates(),
         }));
       },
-      async exportProfile(profileId) {
+      async copyProfilePackage(profileId, format) {
         const profile = state.profiles.find((entry) => entry.id === profileId);
         if (!profile) return;
-        const payload = await adapter.exportProfile(profile);
-        downloadText(buildProfileDownloadFilename(profile.label, profile.id, 'bfprofile.txt'), payload);
+        const packageText = format === 'bfprofile' ? profile.profile_string : profile.share_string;
+        if (!packageText.trim()) {
+          throw new Error(`No ${format} package is available for this profile.`);
+        }
+        if (!navigator.clipboard?.writeText) {
+          throw new Error('Clipboard access is unavailable in this browser.');
+        }
+        await navigator.clipboard.writeText(packageText);
       },
       deleteProfile(profileId) {
         void adapter.disposeRuntimeSessionForProfile(profileId);
         setState((current) => ({
           ...current,
           profiles: current.profiles.filter((entry) => entry.id !== profileId),
+          runtimeWarning:
+            current.selectedProfileId === profileId ? null : current.runtimeWarning,
           selectedProfileId:
             current.selectedProfileId === profileId
               ? current.profiles.find((entry) => entry.id !== profileId)?.id ?? ''
@@ -902,6 +1002,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           ...current,
           peerPermissionStates:
             runtimeSnapshot.peer_permission_states ?? adapter.defaultPeerPermissionStates(),
+          runtimeWarning: null,
           profiles:
             runtimeSnapshot.profile == null
               ? current.profiles
@@ -917,6 +1018,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           ...current,
           peerPermissionStates:
             runtimeSnapshot.peer_permission_states ?? adapter.defaultPeerPermissionStates(),
+          runtimeWarning: null,
           profiles:
             runtimeSnapshot.profile == null
               ? current.profiles
@@ -939,6 +1041,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
                 ),
           peerPermissionStates:
             runtimeSnapshot.peer_permission_states ?? adapter.defaultPeerPermissionStates(),
+          runtimeWarning: null,
           runtimeSnapshot,
           activeView: 'dashboard',
           activeDashboardTab: 'signer',
@@ -956,6 +1059,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
                 ),
           peerPermissionStates:
             runtimeSnapshot?.peer_permission_states ?? current.peerPermissionStates,
+          runtimeWarning: null,
           runtimeSnapshot,
         }));
       },
@@ -971,6 +1075,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
                 ),
           peerPermissionStates:
             runtimeSnapshot?.peer_permission_states ?? current.peerPermissionStates,
+          runtimeWarning: null,
           runtimeSnapshot,
         }));
       },
@@ -987,9 +1092,30 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
                 ),
           peerPermissionStates:
             runtimeSnapshot.peer_permission_states ?? current.peerPermissionStates,
+          runtimeWarning: null,
           runtimeSnapshot,
           activeView: 'dashboard',
           activeDashboardTab: 'settings',
+        }));
+      },
+      async logout() {
+        const stoppedSnapshot = state.runtimeSnapshot?.active
+          ? await adapter.stopSession(state.runtimeSnapshot)
+          : null;
+        setState((current) => ({
+          ...current,
+          profiles:
+            stoppedSnapshot?.profile == null
+              ? current.profiles
+              : current.profiles.map((profile) =>
+                  profile.id === stoppedSnapshot.profile?.id ? stoppedSnapshot.profile ?? profile : profile,
+                ),
+          peerPermissionStates: adapter.defaultPeerPermissionStates(),
+          runtimeWarning: null,
+          runtimeSnapshot: null,
+          activeView: 'landing',
+          activeDashboardTab: 'signer',
+          unlockPhrase: '',
         }));
       },
       updateSettings(field, checked) {
@@ -1000,11 +1126,6 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
             [field]: checked,
           },
         }));
-      },
-      resetApp() {
-        void adapter.disposeRuntimeSessionForProfile();
-        clearPersistedState();
-        setState(createDefaultState());
       },
     }),
     [persistProfileToDashboard, selectedProfile, state],

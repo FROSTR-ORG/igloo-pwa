@@ -88,7 +88,7 @@ describe('igloo-pwa app shell', () => {
             source: 'bfprofile',
             relay_profile: 'browser',
             group_ref: 'group-ref',
-            share_ref: 'share-ref',
+            encrypted_profile_ref: 'encrypted-profile-ref',
             state_path: '/tmp/igloo-pwa/existing-device',
             created_at: 1700000000000,
             stored_password: 'pw',
@@ -242,7 +242,7 @@ describe('igloo-pwa app shell', () => {
             source: 'bfprofile',
             relay_profile: 'browser',
             group_ref: 'group-ref',
-            share_ref: 'share-ref',
+            encrypted_profile_ref: 'encrypted-profile-ref',
             state_path: '/tmp/igloo-pwa/profile-77',
             created_at: 1700000000000,
             stored_password: 'pw',
@@ -301,5 +301,81 @@ describe('igloo-pwa app shell', () => {
       const stored = window.localStorage.getItem(STORAGE_KEY);
       expect(stored).toContain('"auto_open_signer":false');
     });
+  });
+
+  it('shows the unified settings actions and no reset control', () => {
+    cleanup();
+    window.localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({
+        profiles: [
+          {
+            id: '77'.repeat(32),
+            label: 'Primary Browser Device',
+            share_public_key: 'share-pub-1',
+            group_public_key: 'group-pub-1',
+            relays: ['wss://relay.primal.net'],
+            group_package_json:
+              '{"group_name":"Test Group","group_pk":"group-pub-1","threshold":2,"members":[]}',
+            share_package_json: '{"share":"demo"}',
+            source: 'bfprofile',
+            relay_profile: 'browser',
+            group_ref: 'group-ref',
+            encrypted_profile_ref: 'encrypted-profile-ref',
+            state_path: '/tmp/igloo-pwa/profile-77',
+            created_at: 1700000000000,
+            stored_password: 'pw',
+            profile_string: 'bfprofile1demo',
+            share_string: 'bfshare1demo',
+            signer_settings: {
+              sign_timeout_secs: 30,
+              ping_timeout_secs: 15,
+              request_ttl_secs: 300,
+              state_save_interval_secs: 30,
+              peer_selection_strategy: 'deterministic_sorted',
+            },
+            onboarding_package: null,
+          },
+        ],
+        selectedProfileId: '77'.repeat(32),
+        activeView: 'dashboard',
+        activeDashboardTab: 'settings',
+        unlockPhrase: '',
+        generatedKeyset: null,
+        selectedGeneratedShareIdx: null,
+        pendingLoadConfirmation: null,
+        pendingOnboardConnection: null,
+        distributionSession: null,
+        runtimeSnapshot: null,
+        settings: {
+          remember_browser_state: true,
+          auto_open_signer: true,
+          prefer_install_prompt: true,
+        },
+        drafts: {
+          createForm: { groupName: '', threshold: '2', count: '3' },
+          profileForm: {
+            label: '',
+            password: '',
+            confirmPassword: '',
+            relayUrls: 'wss://relay.primal.net',
+          },
+          distributionForms: {},
+          importProfileForm: { profileString: '', password: '' },
+          recoverProfileForm: { shareString: '', password: '' },
+          onboardConnectForm: { packageText: '', password: '' },
+          onboardSaveForm: { label: '', password: '', confirmPassword: '' },
+        },
+      }),
+    );
+
+    render(<App />);
+
+    expect(screen.getAllByRole('button', { name: 'copy profile' }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole('button', { name: 'copy share' }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole('button', { name: 'rotate share' }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole('button', { name: 'logout' }).length).toBeGreaterThan(0);
+    expect(screen.queryByRole('button', { name: /reset browser workspace/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /wipe/i })).not.toBeInTheDocument();
   });
 });

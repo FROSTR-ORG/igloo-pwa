@@ -294,7 +294,14 @@ function AppShell() {
     return <div className="igloo-shell-alert">{uiError}</div>;
   }
 
+  function renderRuntimeWarning() {
+    if (!store.runtimeWarning) return null;
+    return <div className="igloo-shell-alert">{store.runtimeWarning}</div>;
+  }
+
   function renderLanding() {
+    const landingSelectedProfileId = store.selectedProfileId || store.profiles[0]?.id || '';
+
     return (
       <ContentCard title="Welcome to Igloo" description="Choose one path to initialize this browser workspace.">
         <section className="igloo-flow-root igloo-pwa-entry-shell">
@@ -307,9 +314,43 @@ function AppShell() {
             profiles={store.profiles.map((profile) => ({
               id: profile.id,
               label: profile.label || 'Unnamed device',
-              subtitle: shortProfileId(profile.id),
+              subtitle:
+                store.runtimeSnapshot?.active && store.runtimeSnapshot.profile?.id === profile.id
+                  ? `${shortProfileId(profile.id)} · signer active`
+                  : shortProfileId(profile.id),
+              statusLabel:
+                store.runtimeSnapshot?.active && store.runtimeSnapshot.profile?.id === profile.id
+                  ? 'Active'
+                  : 'Available',
+              loadLabel:
+                store.runtimeSnapshot?.active && store.runtimeSnapshot.profile?.id === profile.id
+                  ? 'Open Dashboard'
+                  : 'Load Profile',
             }))}
-            onAction={(profileId) => void run(() => store.loadStoredProfile(profileId))}
+            selectedProfileId={landingSelectedProfileId}
+            description="Stored profiles stay available while logged out. Select one, then choose whether to load it or remove it from this browser."
+            onSelect={store.selectProfile}
+            onLoad={(profileId) =>
+              void run(async () => {
+                if (store.runtimeSnapshot?.active && store.runtimeSnapshot.profile?.id === profileId) {
+                  goToDashboard();
+                  return;
+                }
+                await store.loadStoredProfile(profileId);
+              })
+            }
+            onDelete={(profileId) =>
+              void run(async () => {
+                const profile = store.profiles.find((entry) => entry.id === profileId);
+                const confirmed = window.confirm(
+                  `Delete stored profile ${profile?.label || 'Unnamed device'} (${shortProfileId(profileId)})?`,
+                );
+                if (!confirmed) {
+                  return;
+                }
+                store.deleteProfile(profileId);
+              })
+            }
           />
           <div className="igloo-pwa-entry-grid">
             <HostEntryTile
@@ -1095,19 +1136,42 @@ function AppShell() {
                 message={
                   store.runtimeSnapshot?.active ? null : 'Start the signer to apply settings live.'
                 }
+                maintenanceDescription="Browser package export, share rotation, and session controls."
                 maintenanceActions={[
                   {
-                    label: 'Rotate Key',
+                    label: 'copy profile',
                     variant: 'secondary',
                     disabled: !selectedProfile,
-                    onClick: () => void run(() => {
-                      store.startRotateKey();
-                    }),
+                    onClick: () =>
+                      void run(async () => {
+                        if (!selectedProfile) return;
+                        await store.copyProfilePackage(selectedProfile.id, 'bfprofile');
+                      }),
                   },
                   {
-                    label: 'Reset browser workspace',
-                    variant: 'destructive',
-                    onClick: () => store.resetApp(),
+                    label: 'copy share',
+                    variant: 'secondary',
+                    disabled: !selectedProfile,
+                    onClick: () =>
+                      void run(async () => {
+                        if (!selectedProfile) return;
+                        await store.copyProfilePackage(selectedProfile.id, 'bfshare');
+                      }),
+                  },
+                  {
+                    label: 'rotate share',
+                    variant: 'secondary',
+                    disabled: !selectedProfile,
+                    onClick: () =>
+                      void run(() => {
+                        store.startRotateKey();
+                      }),
+                  },
+                  {
+                    label: 'logout',
+                    variant: 'outline',
+                    disabled: !selectedProfile,
+                    onClick: () => void run(() => store.logout()),
                   },
                 ]}
                 extraSections={
@@ -1167,6 +1231,7 @@ function AppShell() {
       }
     >
       {renderError()}
+      {renderRuntimeWarning()}
       {store.activeView === 'landing' ? renderLanding() : null}
       {store.activeView === 'create-generate' ? renderCreateGenerate() : null}
       {store.activeView === 'create-profile' ? renderCreateProfile() : null}
