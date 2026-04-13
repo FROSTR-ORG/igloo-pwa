@@ -5,7 +5,6 @@
 ## Fast Baseline
 
 ```bash
-bunx tsc --noEmit
 npm run test:unit
 ```
 
@@ -14,8 +13,11 @@ npm run test:unit
 Use the shared Playwright harness for real browser-flow coverage:
 
 ```bash
-npm --prefix ../../test run test:e2e:igloo-pwa
+make igloo-pwa-test-e2e
 ```
+
+If you are working only inside this repo, `npm run test:e2e` now routes through the
+shared workspace prep path before invoking the same Playwright suite.
 
 That suite is the primary validation for:
 
@@ -24,11 +26,11 @@ That suite is the primary validation for:
 - `bfshare` recovery
 - `bfonboard` onboarding
 - operator rotation flows
-- logged-in `Rotate Key`
+- logged-in `rotate share`
 
 ## Expected Validation Split
 
 - repo-local checks:
-  - TypeScript and unit coverage
+  - prep-first local build/unit coverage via `npm run build` and `npm run test:unit`
 - workspace test harness:
   - browser end-to-end product flows

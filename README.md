@@ -24,6 +24,16 @@ Browser app host for FROSTR.
 
 ## Build
 
+Workspace-owned entrypoints are the default for cross-repo flows:
+
+```bash
+make igloo-pwa-build
+make igloo-pwa-dev
+make igloo-pwa-test-e2e
+```
+
+For repo-local work inside `repos/igloo-pwa`, use the prep-first scripts:
+
 ```bash
 npm install
 npm run build
@@ -40,15 +50,18 @@ npm run dev
 Repo-local checks:
 
 ```bash
-bunx tsc --noEmit
 npm run test:unit
 ```
 
 Workspace E2E coverage:
 
 ```bash
-npm --prefix ../../test run test:e2e:igloo-pwa
+make igloo-pwa-test-e2e
 ```
+
+Low-level maintenance/debug commands still exist:
+- `npm run build:browser-wasm`
+- `npm run build:ui`
 
 ## Project Docs
 

@@ -4,14 +4,19 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "prepare:workspace": "bash ../../scripts/test-prebuild.sh ensure ui browser-wasm",
+    "prepare:e2e": "bash ../../scripts/test-prebuild.sh ensure pwa home",
     "build:ui": "npm --prefix ../igloo-ui run build",
     "build:browser-wasm": "node ./scripts/sync-bridge-wasm.mjs",
     "build:app": "tsc && vite build",
-    "dev": "if [ \"${FROSTR_TEST_PREPARED:-0}\" = \"1\" ]; then vite --host 0.0.0.0 --port 1430 --strictPort; else npm run build:ui && npm run build:browser-wasm && vite --host 0.0.0.0 --port 1430 --strictPort; fi",
-    "build": "npm run build:ui && npm run build:browser-wasm && npm run build:app",
+    "dev:raw": "vite --host 0.0.0.0 --port 1430 --strictPort",
+    "dev": "npm run prepare:workspace && npm run dev:raw",
+    "build": "npm run prepare:workspace && npm run build:app",
     "preview": "vite preview --host 0.0.0.0 --port 4174",
-    "test:unit": "vitest run",
-    "test:e2e": "npm --prefix ../../test run test:e2e:igloo-pwa",
+    "test:unit:raw": "vitest run",
+    "test:unit": "npm run prepare:workspace && npm run test:unit:raw",
+    "test:e2e:raw": "npm --prefix ../../test run test:e2e:igloo-pwa",
+    "test:e2e": "npm run prepare:e2e && FROSTR_TEST_PREPARED=1 npm run test:e2e:raw",
     "test": "npm run test:unit"
   },
   "dependencies": {

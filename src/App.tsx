@@ -28,6 +28,7 @@ import {
   StepProgress,
   StoredProfilesLandingCard,
   Textarea,
+  CRITICAL_E2E_TEST_IDS,
   type LogEntry,
   type PeerPolicy,
 } from 'igloo-ui';
@@ -385,6 +386,7 @@ function AppShell() {
               title="Onboard Device"
               description="Connect with a password-protected `bfonboard` package, confirm the profile data, and save this device."
               actionLabel="Continue Onboarding"
+              testId={CRITICAL_E2E_TEST_IDS.landingContinueOnboarding}
               onAction={() => store.setActiveView('onboard-connect')}
               icon={(
                 <svg viewBox="0 0 24 24" role="presentation">
@@ -936,7 +938,12 @@ function AppShell() {
                 />
               </label>
               <div className="igloo-button-row">
-                <Button type="button" size="sm" onClick={() => void run(() => store.connectRotationPackage())}>
+                <Button
+                  type="button"
+                  size="sm"
+                  data-testid={CRITICAL_E2E_TEST_IDS.rotationConnectSubmit}
+                  onClick={() => void run(() => store.connectRotationPackage())}
+                >
                   Connect Rotation Package
                 </Button>
               </div>
@@ -969,7 +976,12 @@ function AppShell() {
             <p>This replacement keeps the same group public key and replaces this device with a new share and profile id.</p>
           </section>
           <div className="igloo-button-row">
-            <Button type="button" size="sm" onClick={() => void run(() => store.finalizeRotationUpdate())}>
+            <Button
+              type="button"
+              size="sm"
+              data-testid={CRITICAL_E2E_TEST_IDS.rotationConfirmSubmit}
+              onClick={() => void run(() => store.finalizeRotationUpdate())}
+            >
               Replace Active Device
             </Button>
           </div>
@@ -1160,6 +1172,7 @@ function AppShell() {
                   },
                   {
                     label: 'rotate share',
+                    testId: CRITICAL_E2E_TEST_IDS.maintenanceRotateShare,
                     variant: 'secondary',
                     disabled: !selectedProfile,
                     onClick: () =>

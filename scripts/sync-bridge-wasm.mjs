@@ -24,7 +24,7 @@ for (const artifact of expectedArtifacts) {
     await fs.access(artifactPath);
   } catch {
     throw new Error(
-      `Missing shared bridge artifact ${artifactPath}. Build igloo-shared first or use ./run.sh browser igloo-pwa build.`
+      `Missing shared bridge artifact ${artifactPath}. Run "make browser-wasm-sync" or "npm run prepare:workspace" first.`
     );
   }
 }
