@@ -52,6 +52,196 @@ describe('igloo-pwa app shell', () => {
     });
   });
 
+  it('shows live onboarding status on distributed create-flow shares', async () => {
+    cleanup();
+    window.localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({
+        profiles: [
+          {
+            id: '77'.repeat(32),
+            label: 'Primary Browser Device',
+            share_public_key: '11'.repeat(32),
+            group_public_key: '22'.repeat(32),
+            relays: ['wss://relay.primal.net'],
+            group_package_json: '{"group_name":"Test Group","group_pk":"22","threshold":2,"members":[]}',
+            share_package_json: '{"share":"demo"}',
+            source: 'generated',
+            relay_profile: 'browser',
+            group_ref: 'group-ref',
+            encrypted_profile_ref: 'encrypted-profile-ref',
+            state_path: '/tmp/igloo-pwa/profile-77',
+            created_at: 1700000000000,
+            stored_password: 'pw',
+            profile_string: 'bfprofile1demo',
+            share_string: 'bfshare1demo',
+            signer_settings: {
+              sign_timeout_secs: 30,
+              ping_timeout_secs: 15,
+              request_ttl_secs: 300,
+              state_save_interval_secs: 30,
+              peer_selection_strategy: 'deterministic_sorted',
+            },
+            onboarding_package: null,
+          },
+        ],
+        selectedProfileId: '77'.repeat(32),
+        activeView: 'create-distribute',
+        activeDashboardTab: 'signer',
+        unlockPhrase: 'pw',
+        generatedKeyset: {
+          group_name: 'Test Group',
+          threshold: 2,
+          count: 2,
+          group_package_json: '{"group_name":"Test Group","group_pk":"22","threshold":2,"members":[]}',
+          group_public_key: '22'.repeat(32),
+          shares: [
+            {
+              name: 'Primary Browser Device',
+              member_idx: 1,
+              share_package_json: '{"idx":1,"seckey":"11"}',
+              share_public_key: '11'.repeat(32),
+            },
+            {
+              name: 'Remote Tablet',
+              member_idx: 2,
+              share_package_json: '{"idx":2,"seckey":"12"}',
+              share_public_key: '44'.repeat(32),
+            },
+          ],
+        },
+        selectedGeneratedShareIdx: 1,
+        pendingLoadConfirmation: null,
+        pendingOnboardConnection: null,
+        pendingRotationConnection: null,
+        distributionSession: {
+          profile_id: '77'.repeat(32),
+          signer_pubkey: '11'.repeat(32),
+          remaining_member_indices: [2],
+          results: {
+            2: {
+              kind: 'copied',
+              member_idx: 2,
+              label: 'Remote Tablet',
+              package_text: 'bfonboard1demo',
+              target_peer_pubkey: '44'.repeat(32),
+              tracking: {
+                stage: 'waiting_for_device',
+              },
+            },
+          },
+          qr_package: null,
+        },
+        runtimeSnapshot: {
+          active: true,
+          profile: {
+            id: '77'.repeat(32),
+            label: 'Primary Browser Device',
+            share_public_key: '11'.repeat(32),
+            group_public_key: '22'.repeat(32),
+            relays: ['wss://relay.primal.net'],
+            group_package_json: '{"group_name":"Test Group","group_pk":"22","threshold":2,"members":[]}',
+            share_package_json: '{"share":"demo"}',
+            source: 'generated',
+            relay_profile: 'browser',
+            group_ref: 'group-ref',
+            encrypted_profile_ref: 'encrypted-profile-ref',
+            state_path: '/tmp/igloo-pwa/profile-77',
+            created_at: 1700000000000,
+            stored_password: 'pw',
+            profile_string: 'bfprofile1demo',
+            share_string: 'bfshare1demo',
+            signer_settings: {
+              sign_timeout_secs: 30,
+              ping_timeout_secs: 15,
+              request_ttl_secs: 300,
+              state_save_interval_secs: 30,
+              peer_selection_strategy: 'deterministic_sorted',
+            },
+            onboarding_package: null,
+          },
+          runtime_status: {
+            peers: [
+              {
+                idx: 2,
+                pubkey: '44'.repeat(32),
+                known: true,
+                last_seen: 1700000000,
+                online: false,
+                incoming_available: 3,
+                outgoing_available: 3,
+                outgoing_spent: 0,
+                can_sign: false,
+                should_send_nonces: false,
+              },
+            ],
+            onboarding_statuses: [
+              {
+                pubkey: '44'.repeat(32),
+                stage: 'handshake_completed',
+                updated_at: 1700000000,
+              },
+            ],
+            metadata: {
+              peers: ['44'.repeat(32)],
+            },
+            pending_operations: [],
+            status: {
+              last_active: 1700000000,
+            },
+          },
+          readiness: {
+            runtime_ready: true,
+            restore_complete: true,
+            sign_ready: false,
+            ecdh_ready: true,
+            last_refresh_at: 1700000000,
+          },
+          runtime_log_lines: [],
+          runtime_host: {
+            profile_id: '77'.repeat(32),
+            mode: 'browser',
+            log_source: 'test',
+            started_at: 1700000000,
+            signer_pubkey: '11'.repeat(32),
+          },
+        },
+        settings: {
+          remember_browser_state: true,
+          auto_open_signer: true,
+          prefer_install_prompt: true,
+        },
+        drafts: {
+          createForm: { mode: 'new', groupName: 'Test Group', threshold: '2', count: '2' },
+          rotationForm: { sourceProfileId: '', sources: [{ packageText: '', password: '' }] },
+          profileForm: {
+            label: 'Primary Browser Device',
+            password: 'pw',
+            confirmPassword: 'pw',
+            relayUrls: 'wss://relay.primal.net',
+          },
+          distributionForms: {
+            2: { label: 'Remote Tablet', password: '', confirmPassword: '' },
+          },
+          importProfileForm: { profileString: '', password: '' },
+          recoverProfileForm: { shareString: '', password: '' },
+          onboardConnectForm: { packageText: '', password: '' },
+          onboardSaveForm: { label: '', password: '', confirmPassword: '' },
+          rotateConnectForm: { packageText: '', password: '' },
+        },
+        peerPermissionStates: [],
+        runtimeWarning: null,
+      }),
+    );
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByText('handshake completed')).toBeInTheDocument();
+      expect(screen.getByText('Copied Remote Tablet.')).toBeInTheDocument();
+    });
+  });
+
   it('accepts a real-looking bfonboard package and advances directly to save', async () => {
     renderApp();
 

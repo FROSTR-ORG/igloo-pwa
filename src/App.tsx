@@ -32,9 +32,10 @@ import {
   type LogEntry,
   type PeerPolicy,
 } from 'igloo-ui';
-import { shortProfileId } from 'igloo-shared';
+import { shortProfileId, type RuntimeOnboardingStatus } from 'igloo-shared';
 
 import { StoreProvider, useStore } from './lib/store';
+import type { PwaDistributionActionResult, PwaGeneratedShare } from './lib/types';
 
 function toPwaLogEntries(lines: string[] = []): LogEntry[] {
   return lines.map((line, index) => ({
@@ -125,6 +126,7 @@ type PwaRuntimeReadiness = {
 
 type PwaRuntimeStatus = {
   peers?: PwaRuntimePeerStatus[];
+  onboarding_statuses?: RuntimeOnboardingStatus[];
   pending_operations?: PwaRuntimePendingOperation[];
   metadata?: {
     peers?: string[];
@@ -249,6 +251,72 @@ function deriveRuntimeSummaryLabel(runtimeSnapshot: ReturnType<typeof useStore>[
     return 'Signer Running (Degraded)';
   }
   return 'Signer Running';
+}
+
+function deriveDistributionResults(
+  results: Record<number, PwaDistributionActionResult>,
+  shares: PwaGeneratedShare[],
+  runtimeStatus: unknown,
+) {
+  const summary = (runtimeStatus ?? null) as PwaRuntimeStatus | null;
+  const runtimePeers = new Map(
+    (summary?.peers ?? []).map((peer) => [peer.pubkey.toLowerCase(), peer]),
+  );
+  const onboardingStatuses = new Map(
+    (summary?.onboarding_statuses ?? []).map((status) => [status.pubkey.toLowerCase(), status]),
+  );
+
+  return Object.fromEntries(
+    Object.entries(results ?? {}).map(([memberIdx, result]) => {
+      const memberNumber = Number(memberIdx);
+      const targetPeerPubkey =
+        result.target_peer_pubkey?.toLowerCase() ??
+        shares?.find((share) => share.member_idx === memberNumber)?.share_public_key?.toLowerCase() ??
+        '';
+      const peer = targetPeerPubkey ? runtimePeers.get(targetPeerPubkey) : null;
+      const onboarding = targetPeerPubkey ? onboardingStatuses.get(targetPeerPubkey) : null;
+
+      let tracking = result.tracking ?? { stage: 'waiting_for_device' as const };
+      if (peer?.can_sign) {
+        tracking = {
+          stage: 'sign_ready',
+          updatedAt: peer.last_seen ?? onboarding?.updated_at ?? tracking.updatedAt ?? null,
+        };
+      } else if (peer?.online) {
+        tracking = {
+          stage: 'peer_online',
+          updatedAt: peer.last_seen ?? onboarding?.updated_at ?? tracking.updatedAt ?? null,
+        };
+      } else if (onboarding?.stage === 'handshake_completed') {
+        tracking = {
+          stage: 'handshake_completed',
+          updatedAt: onboarding.updated_at,
+          error: onboarding.error ?? null,
+        };
+      } else if (onboarding?.stage === 'device_contacted_host') {
+        tracking = {
+          stage: 'device_contacted_host',
+          updatedAt: onboarding.updated_at,
+          error: onboarding.error ?? null,
+        };
+      } else if (onboarding?.stage === 'failed') {
+        tracking = {
+          stage: 'failed',
+          updatedAt: onboarding.updated_at,
+          error: onboarding.error ?? null,
+        };
+      }
+
+      return [
+        memberNumber,
+        {
+          ...result,
+          target_peer_pubkey: targetPeerPubkey || result.target_peer_pubkey,
+          tracking,
+        },
+      ];
+    }),
+  );
 }
 
 function AppShell() {
@@ -533,6 +601,11 @@ function AppShell() {
     const remainingShares = store.generatedKeyset.shares.filter((share) =>
       store.distributionSession?.remaining_member_indices.includes(share.member_idx),
     );
+    const distributionResults = deriveDistributionResults(
+      store.distributionSession?.results ?? {},
+      remainingShares,
+      store.runtimeSnapshot?.runtime_status,
+    );
     return (
       <HostFlowShell
         title="Distribute the Keyset"
@@ -563,14 +636,7 @@ function AppShell() {
                 },
               ]),
             )}
-            results={
-              Object.fromEntries(
-                Object.entries(store.distributionSession?.results ?? {}).map(([memberIdx, result]) => [
-                  Number(memberIdx),
-                  result,
-                ]),
-              ) as Record<number, { kind: 'copied' | 'qr' | 'saved'; label: string }>
-            }
+            results={distributionResults}
             onChangeDraft={(memberIdx, field, value) =>
               store.updateDistributionForm(
                 memberIdx,
@@ -581,28 +647,35 @@ function AppShell() {
             onDistribute={(memberIdx, kind) => void run(() => store.distributeShare(memberIdx, kind))}
             onFinish={() => store.finishDistribution()}
             beforeCards={(
-              <OperatorSignerPanel
-                profile={{
-                  name: selectedProfile.label,
-                  groupPublicKey: selectedProfile.group_public_key,
-                  sharePublicKey: selectedProfile.share_public_key,
-                }}
-                introMessage="The primary browser signer is initialized and connected so the remaining shares can be distributed."
-                runtimeState={store.runtimeSnapshot?.active ? 'running' : 'stopped'}
-                runtimeControlLabel={store.runtimeSnapshot?.active ? 'Stop Signer' : 'Start Signer'}
-                runtimeSummaryLabel={deriveRuntimeSummaryLabel(store.runtimeSnapshot)}
-                sharePublicKey={selectedProfile.share_public_key}
-                groupPublicKey={selectedProfile.group_public_key}
-                onPrimaryAction={() =>
-                  void run(() => (store.runtimeSnapshot?.active ? store.stopSigner() : store.startSigner()))
-                }
-                primaryActionVariant={store.runtimeSnapshot?.active ? 'destructive' : 'success'}
-                onRefreshPeers={() => void run(() => store.refreshSigner())}
-                refreshPeersDisabled={!store.runtimeSnapshot?.active}
-                peers={derivePwaPeers(store.peerPermissionStates, store.runtimeSnapshot?.runtime_status)}
-                pendingOperations={derivePendingOperations(store.runtimeSnapshot?.runtime_status)}
-                logs={toPwaLogEntries(store.runtimeSnapshot?.runtime_log_lines)}
-              />
+              <>
+                {!store.runtimeSnapshot?.active ? (
+                  <div className="igloo-shell-alert">
+                    Live onboarding tracking is paused until the host signer is running.
+                  </div>
+                ) : null}
+                <OperatorSignerPanel
+                  profile={{
+                    name: selectedProfile.label,
+                    groupPublicKey: selectedProfile.group_public_key,
+                    sharePublicKey: selectedProfile.share_public_key,
+                  }}
+                  introMessage="The primary browser signer is initialized and connected so the remaining shares can be distributed."
+                  runtimeState={store.runtimeSnapshot?.active ? 'running' : 'stopped'}
+                  runtimeControlLabel={store.runtimeSnapshot?.active ? 'Stop Signer' : 'Start Signer'}
+                  runtimeSummaryLabel={deriveRuntimeSummaryLabel(store.runtimeSnapshot)}
+                  sharePublicKey={selectedProfile.share_public_key}
+                  groupPublicKey={selectedProfile.group_public_key}
+                  onPrimaryAction={() =>
+                    void run(() => (store.runtimeSnapshot?.active ? store.stopSigner() : store.startSigner()))
+                  }
+                  primaryActionVariant={store.runtimeSnapshot?.active ? 'destructive' : 'success'}
+                  onRefreshPeers={() => void run(() => store.refreshSigner())}
+                  refreshPeersDisabled={!store.runtimeSnapshot?.active}
+                  peers={derivePwaPeers(store.peerPermissionStates, store.runtimeSnapshot?.runtime_status)}
+                  pendingOperations={derivePendingOperations(store.runtimeSnapshot?.runtime_status)}
+                  logs={toPwaLogEntries(store.runtimeSnapshot?.runtime_log_lines)}
+                />
+              </>
             )}
           />
           <QrPayloadModal

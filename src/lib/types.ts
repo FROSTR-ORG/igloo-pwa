@@ -1,8 +1,10 @@
 import type {
   BrowserManualPeerPolicyOverride,
   BrowserProfilePackagePayload,
+  RuntimeOnboardingStatus,
   SignerSettings as SharedSignerSettings,
 } from 'igloo-shared';
+import type { SharedDistributionTrackingStatus } from 'igloo-ui';
 
 export type PwaView =
   | 'landing'
@@ -156,7 +158,11 @@ export type PwaDistributionActionResult =
       member_idx: number;
       label: string;
       package_text: string;
+      target_peer_pubkey?: string;
+      tracking?: SharedDistributionTrackingStatus;
     };
+
+export type PwaRuntimeOnboardingStatus = RuntimeOnboardingStatus;
 
 export type PwaDistributionSession = {
   profile_id: string;

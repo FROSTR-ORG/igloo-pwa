@@ -718,6 +718,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
                     member_idx: memberIdx,
                     label: form.label,
                     package_text: result.package_text,
+                    target_peer_pubkey: result.preview.share_public_key,
+                    tracking: {
+                      stage: 'waiting_for_device',
+                    },
                   },
                 },
                 qr_package:
