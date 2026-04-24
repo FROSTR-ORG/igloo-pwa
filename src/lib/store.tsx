@@ -181,6 +181,8 @@ function createDefaultState(): PwaPersistedState {
     pendingRotationConnection: null,
     distributionSession: null,
     runtimeSnapshot: null,
+    // In-memory only. Populated on each `startSession` call; reset on load.
+    sharePackageJsonByProfileId: {},
     settings: defaultSettings,
     drafts: defaultDrafts,
     draftSecrets: createDefaultDraftSecrets(),
@@ -224,6 +226,8 @@ function normalizeLoadedState(): PwaPersistedState {
     pendingRotationConnection: null,
     distributionSession: null,
     runtimeSnapshot: null,
+    // In-memory only; repopulated on each `startSession` call.
+    sharePackageJsonByProfileId: {},
     draftSecrets: createDefaultDraftSecrets(),
     peerPermissionStates:
       loaded.peerPermissionStates?.length ? loaded.peerPermissionStates : adapter.defaultPeerPermissionStates(),
@@ -562,12 +566,12 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
                 threshold,
                 count,
               });
+        // D.1/PR16b: `share_package_json` no longer lives on persisted
+        // profiles. Use the public `member_idx` field to pick the
+        // matching slot in the rotated keyset.
         const preferredMemberIdx =
-          sourceProfile && typeof sourceProfile.share_package_json === 'string'
-            ? Number.parseInt(
-                String((JSON.parse(sourceProfile.share_package_json) as { idx?: number | string }).idx ?? ''),
-                10,
-              )
+          sourceProfile && typeof sourceProfile.member_idx === 'number' && sourceProfile.member_idx > 0
+            ? sourceProfile.member_idx
             : NaN;
         const selectedShare =
           keyset.shares.find((share) => share.member_idx === preferredMemberIdx) ?? keyset.shares[0];

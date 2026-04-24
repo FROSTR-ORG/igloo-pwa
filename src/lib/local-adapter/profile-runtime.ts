@@ -16,12 +16,42 @@ import {
 let activeRuntimeSession: BrowserRuntimeSession | null = null;
 let activeRuntimeProfileId: string | null = null;
 
+/**
+ * Module-scoped in-memory cache of the reconstructed `{idx, seckey}`
+ * share package JSON per profile id. Populated on `startSession` after
+ * the user's passphrase unlocks `encrypted_bfshare_artifact`, and read
+ * by runtime-snapshot / rotation paths that need to re-derive the
+ * profile payload. Cleared when the session stops or the profile is
+ * deleted. This value CONTAINS THE RAW SHARE SECKEY and is never
+ * serialized outside the tab (no localStorage, no postMessage).
+ */
+const sharePackageJsonByProfileId = new Map<string, string>();
+
+export function getSharePackageJsonForProfile(profileId: string): string | null {
+  return sharePackageJsonByProfileId.get(profileId) ?? null;
+}
+
+export function requireSharePackageJsonForProfile(profileId: string): string {
+  const value = sharePackageJsonByProfileId.get(profileId);
+  if (!value) {
+    throw new Error('Signer session is not unlocked. Start the signer with the profile passphrase first.');
+  }
+  return value;
+}
+
+export function clearSharePackageJsonForProfile(profileId: string) {
+  sharePackageJsonByProfileId.delete(profileId);
+}
+
 async function clearActiveRuntimeSession() {
   if (!activeRuntimeSession) return;
   try {
     activeRuntimeSession.stop();
   } catch {
     // Ignore stop failures while replacing or resetting the session.
+  }
+  if (activeRuntimeProfileId) {
+    sharePackageJsonByProfileId.delete(activeRuntimeProfileId);
   }
   activeRuntimeSession = null;
   activeRuntimeProfileId = null;
@@ -31,22 +61,9 @@ export async function disposeRuntimeSessionForProfile(profileId?: string) {
   if (!profileId || activeRuntimeProfileId === profileId) {
     await clearActiveRuntimeSession();
   }
-}
-
-function memberIdxFromSharePackageJson(sharePackageJson: string | undefined | null): number {
-  if (!sharePackageJson) return 1;
-  try {
-    const parsed = JSON.parse(sharePackageJson) as { idx?: unknown };
-    if (typeof parsed.idx === 'number' && Number.isFinite(parsed.idx)) {
-      return Math.trunc(parsed.idx);
-    }
-    if (typeof parsed.idx === 'string' && /^\d+$/.test(parsed.idx)) {
-      return Number.parseInt(parsed.idx, 10);
-    }
-  } catch {
-    // fall through to default
+  if (profileId) {
+    sharePackageJsonByProfileId.delete(profileId);
   }
-  return 1;
 }
 
 /**
@@ -57,8 +74,8 @@ function memberIdxFromSharePackageJson(sharePackageJson: string | undefined | nu
  * message — the AEAD is the authenticator, so there is no timing
  * side-channel to worry about here.
  */
-async function unlockShareFromArtifact(
-  profile: PwaProfile,
+export async function unlockShareFromArtifact(
+  profile: Pick<PwaProfile, 'encrypted_bfshare_artifact' | 'member_idx'>,
   passphrase: string,
 ): Promise<string> {
   try {
@@ -66,7 +83,11 @@ async function unlockShareFromArtifact(
       profile.encrypted_bfshare_artifact,
       passphrase,
     );
-    const memberIdx = memberIdxFromSharePackageJson(profile.share_package_json);
+    // `member_idx` is persisted directly on the profile record (v2). For
+    // legacy callers that still have an older shape, we fall back to 1
+    // via `memberIdxFromSharePackageJson(null)` which yields 0 — then
+    // we guard against zero to avoid producing an invalid share JSON.
+    const memberIdx = profile.member_idx > 0 ? profile.member_idx : 1;
     return sharePackageToWireJson(memberIdx, decoded.shareSecret);
   } catch {
     throw new Error('Incorrect passphrase.');
@@ -99,8 +120,9 @@ export async function startSession(profile: PwaProfile, passphrase: string): Pro
     sharePackageJson,
   });
   activeRuntimeProfileId = profile.id;
+  sharePackageJsonByProfileId.set(profile.id, sharePackageJson);
 
-  return toRuntimeSnapshot(profile, activeRuntimeSession, true);
+  return toRuntimeSnapshot(profile, activeRuntimeSession, true, sharePackageJson);
 }
 
 export async function stopSession(current: PwaRuntimeSnapshot | null): Promise<PwaRuntimeSnapshot | null> {
@@ -111,7 +133,14 @@ export async function stopSession(current: PwaRuntimeSnapshot | null): Promise<P
     // after a reload.
     return null;
   }
-  const stoppedSnapshot = toRuntimeSnapshot(current.profile, activeRuntimeSession, false);
+  const sharePackageJson = sharePackageJsonByProfileId.get(current.profile.id);
+  // Capture a final stopped snapshot before clearing caches. If the
+  // share JSON is already gone, fall back to `toRuntimeSnapshot` without
+  // the projection refresh by passing an empty string — the runtime
+  // will still surface logs and `active: false`.
+  const stoppedSnapshot = sharePackageJson
+    ? toRuntimeSnapshot(current.profile, activeRuntimeSession, false, sharePackageJson)
+    : { ...(current as PwaRuntimeSnapshot), active: false, runtime_log_lines: [] };
   await clearActiveRuntimeSession();
   return {
     ...stoppedSnapshot,
@@ -125,8 +154,9 @@ export async function refreshSession(current: PwaRuntimeSnapshot | null): Promis
   if (!activeRuntimeSession || activeRuntimeProfileId !== current.profile.id) {
     return null;
   }
+  const sharePackageJson = requireSharePackageJsonForProfile(current.profile.id);
   const refreshed = await activeRuntimeSession.refreshPeers();
-  const runtimeProfile = toRuntimeProfile(current.profile, refreshed);
+  const runtimeProfile = toRuntimeProfile(current.profile, refreshed, sharePackageJson);
   return {
     active: true,
     profile: runtimeProfile,
@@ -148,9 +178,16 @@ export async function readSession(current: PwaRuntimeSnapshot | null): Promise<P
   if (!activeRuntimeSession || activeRuntimeProfileId !== current.profile.id) {
     return null;
   }
+  const sharePackageJson = sharePackageJsonByProfileId.get(current.profile.id);
+  if (!sharePackageJson) {
+    // Session exists but share JSON is gone — shouldn't happen in
+    // practice but bail out rather than reading a stale profile.
+    return null;
+  }
 
-  return toRuntimeSnapshot(current.profile, activeRuntimeSession, true);
+  return toRuntimeSnapshot(current.profile, activeRuntimeSession, true, sharePackageJson);
 }
+
 
 export async function applyPeerPolicy(
   current: PwaRuntimeSnapshot | null,
@@ -172,7 +209,8 @@ export async function applyPeerPolicy(
     value: value ? 'allow' : 'deny',
   });
 
-  return toRuntimeSnapshot(current.profile, activeRuntimeSession, true);
+  const sharePackageJson = requireSharePackageJsonForProfile(current.profile.id);
+  return toRuntimeSnapshot(current.profile, activeRuntimeSession, true, sharePackageJson);
 }
 
 export async function clearPeerPolicies(current: PwaRuntimeSnapshot | null): Promise<PwaRuntimeSnapshot> {
@@ -186,7 +224,8 @@ export async function clearPeerPolicies(current: PwaRuntimeSnapshot | null): Pro
   const session = activeRuntimeSession;
   await session.clearPeerPolicyOverrides();
 
-  return toRuntimeSnapshot(current.profile, session, true);
+  const sharePackageJson = requireSharePackageJsonForProfile(current.profile.id);
+  return toRuntimeSnapshot(current.profile, session, true, sharePackageJson);
 }
 
 export async function applyOperatorSettings(
@@ -214,6 +253,8 @@ export async function applyOperatorSettings(
   const nextRelays = updatedProfile.relays.join('\n');
   const relayChanged = previousRelays !== nextRelays;
 
+  const sharePackageJson = requireSharePackageJsonForProfile(profile.id);
+
   if (relayChanged) {
     // Relay change requires a fresh session bootstrap. With
     // `runtime_snapshot_json` persistence deleted under D.1, the
@@ -222,7 +263,7 @@ export async function applyOperatorSettings(
     // session: stop the current session and let the caller drive
     // re-start via the main start flow.
     activeRuntimeSession.updateConfig(updatedProfile.signer_settings);
-    const snapshot = toRuntimeSnapshot(updatedProfile, activeRuntimeSession, true);
+    const snapshot = toRuntimeSnapshot(updatedProfile, activeRuntimeSession, true, sharePackageJson);
     await clearActiveRuntimeSession();
     return {
       ...snapshot,
@@ -235,5 +276,5 @@ export async function applyOperatorSettings(
   }
 
   activeRuntimeSession.updateConfig(updatedProfile.signer_settings);
-  return toRuntimeSnapshot(updatedProfile, activeRuntimeSession, true);
+  return toRuntimeSnapshot(updatedProfile, activeRuntimeSession, true, sharePackageJson);
 }

@@ -1,6 +1,7 @@
 import type {
   BrowserManualPeerPolicyOverride,
   BrowserProfilePackagePayload,
+  BrowserProfilePreview,
   RuntimeOnboardingStatus,
   SignerSettings as SharedSignerSettings,
 } from 'igloo-shared';
@@ -69,13 +70,21 @@ export type PwaSettings = {
   prefer_install_prompt: boolean;
 };
 
+/**
+ * Non-secret preview metadata for a profile. `share_package_json` is
+ * intentionally NOT on this type: the wire JSON is `{idx, seckey}` and
+ * the `seckey` hex is the raw FROST share secret. We only ever hold
+ * the share JSON in memory after the session is unlocked; see
+ * `PwaPersistedState.sharePackageJsonByProfileId`.
+ */
 export type PwaProfilePreview = {
   label: string;
   share_public_key: string;
   group_public_key: string;
   relays: string[];
   group_package_json: string;
-  share_package_json: string;
+  /** Member index within the group. Public metadata (also present in the group package). */
+  member_idx: number;
   source: 'generated' | 'bfprofile' | 'bfshare' | 'bfonboard';
 };
 
@@ -102,6 +111,12 @@ export type PwaProfile = PwaProfilePreview & {
   onboarding_package?: string | null;
 };
 
+/**
+ * In-memory only: a freshly generated share. `share_package_json`
+ * carries the raw share `seckey` hex and therefore must never be
+ * persisted — `pendingKeyset` (which contains this) is in the
+ * non-persistable partition of `PwaPersistedState`.
+ */
 export type PwaGeneratedShare = {
   name: string;
   member_idx: number;
@@ -139,10 +154,15 @@ export type PwaRuntimeSnapshot = {
  * passphrase for the brief interval between decrypt and finalize. They
  * are never persisted to localStorage (D.1). If the page reloads
  * mid-flow, the user re-enters the passphrase.
+ *
+ * The `preview` here is the shared-SDK-native `BrowserProfilePreview`
+ * shape, which carries `share_package_json`. That is fine for this
+ * type because `PwaLoadConfirmation` is part of the non-persistable
+ * partition of `PwaPersistedState` — it never reaches localStorage.
  */
 export type PwaLoadConfirmation = {
   kind: 'bfprofile' | 'bfshare';
-  preview: PwaProfilePreview;
+  preview: BrowserProfilePreview;
   passphrase: string;
   profile_string: string;
   share_string: string;
@@ -153,10 +173,12 @@ export type PwaLoadConfirmation = {
 
 /**
  * Pending onboarding connections are IN-MEMORY ONLY. Same rationale as
- * `PwaLoadConfirmation`: passphrase lives in React state only.
+ * `PwaLoadConfirmation`: passphrase lives in React state only and the
+ * `preview` (which still carries the wire-shape `share_package_json`)
+ * never reaches localStorage.
  */
 export type PwaOnboardConnection = {
-  preview: PwaProfilePreview;
+  preview: BrowserProfilePreview;
   passphrase: string;
   package_text: string;
   profile_string: string;
@@ -271,6 +293,14 @@ export type PwaPersistedState = {
   distributionSession: PwaDistributionSession | null;
   /** In-memory only. Runtime re-bootstraps fresh on reload. */
   runtimeSnapshot: PwaRuntimeSnapshot | null;
+  /**
+   * In-memory only. Reconstructed `{idx, seckey}` share package JSON per
+   * profile id, produced after the user's passphrase unlocks
+   * `encrypted_bfshare_artifact` at session start. Holds the raw share
+   * seckey hex — MUST NOT be persisted. Reset on every page load and
+   * repopulated on each `startSession` call.
+   */
+  sharePackageJsonByProfileId: Record<string, string>;
   settings: PwaSettings;
   drafts: PwaDraftState;
   /** In-memory only. Holds every password/passphrase typed into a form. */

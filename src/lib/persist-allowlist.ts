@@ -15,6 +15,12 @@ import type {
  *
  * Every new persisted field requires an explicit addition to one of the
  * allow-lists below. Default for any new field is NON-persisted.
+ *
+ * NOTE: `share_package_json` is deliberately OMITTED. Its wire shape is
+ * `{idx, seckey}` and the `seckey` hex is the raw FROST share secret —
+ * NOT public metadata. The runtime reconstructs it in memory at session
+ * start from `encrypted_bfshare_artifact` and keeps it in the
+ * non-persisted `sharePackageJsonByProfileId` map.
  */
 
 const PROFILE_ALLOWED_KEYS = [
@@ -29,7 +35,7 @@ const PROFILE_ALLOWED_KEYS = [
   'group_public_key',
   'share_public_key',
   'group_package_json',
-  'share_package_json',
+  'member_idx',
   'signer_settings',
   'peer_pubkey',
   'manual_peer_policy_overrides',

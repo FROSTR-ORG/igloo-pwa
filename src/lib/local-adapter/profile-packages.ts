@@ -20,6 +20,7 @@ import {
   type OnboardFinalizeInput,
   type RecoverInput,
 } from './common';
+import { unlockShareFromArtifact } from './profile-runtime';
 
 export async function importBfProfile(input: LoadInput): Promise<PwaLoadConfirmation> {
   const imported = await importBrowserProfilePackage(input.profileString, input.password);
@@ -74,13 +75,22 @@ export async function finalizeRotationUpdateFromConnection(input: {
   if (!input.connection.profile_payload) {
     throw new Error('Missing canonical rotated profile payload.');
   }
+  // D.1/PR16b: `share_package_json` is no longer stored on the
+  // persisted profile record. Rebuild it in memory by decrypting the
+  // target profile's `encrypted_bfshare_artifact` with the passphrase
+  // the user entered for this rotation. The reconstructed string lives
+  // only on this call's stack frame.
+  const targetSharePackageJson = await unlockShareFromArtifact(
+    input.targetProfile,
+    input.targetPassphrase,
+  );
   const finalized = await finalizeRotatedBrowserProfile({
     targetProfile: {
       id: input.targetProfile.id,
       label: input.targetProfile.label,
       relays: input.targetProfile.relays,
       groupPackageJson: input.targetProfile.group_package_json,
-      sharePackageJson: input.targetProfile.share_package_json,
+      sharePackageJson: targetSharePackageJson,
       manualPeerPolicyOverrides: input.targetProfile.manual_peer_policy_overrides ?? [],
       // In-memory-only passphrase supplied by the caller at rotation
       // time. We never persist it on the profile record.
