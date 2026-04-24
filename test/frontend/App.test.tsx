@@ -2,7 +2,10 @@ import * as React from 'react';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it } from 'vitest';
 
+import { sharePackageToWireJson } from 'igloo-shared';
+
 import App from '@/App';
+import * as adapter from '@/lib/local-adapter';
 import {
   LEGACY_STORAGE_KEY_V1,
   STORAGE_KEY,
@@ -80,7 +83,7 @@ describe('igloo-pwa app shell', () => {
             relays: ['wss://relay.primal.net'],
             group_package_json:
               '{"group_name":"Test Group","group_pk":"group-pub-1","threshold":2,"members":[]}',
-            share_package_json: '{"share":"demo"}',
+            member_idx: 1,
             source: 'bfprofile',
             relay_profile: 'browser',
             group_ref: 'group-ref',
@@ -156,7 +159,7 @@ describe('igloo-pwa app shell', () => {
             relays: ['wss://relay.primal.net'],
             group_package_json:
               '{"group_name":"Test Group","group_pk":"group-pub-1","threshold":2,"members":[]}',
-            share_package_json: '{"share":"demo"}',
+            member_idx: 1,
             source: 'bfprofile',
             relay_profile: 'browser',
             group_ref: 'group-ref',
@@ -224,7 +227,7 @@ describe('igloo-pwa app shell', () => {
             relays: ['wss://relay.primal.net'],
             group_package_json:
               '{"group_name":"Test Group","group_pk":"group-pub-1","threshold":2,"members":[]}',
-            share_package_json: '{"share":"demo"}',
+            member_idx: 1,
             source: 'bfprofile',
             relay_profile: 'browser',
             group_ref: 'group-ref',
@@ -326,6 +329,11 @@ describe('v1 → v2 localStorage migration (D.1)', () => {
 
 describe('toPersistable allow-list (D.1)', () => {
   const secretMarker = 'SECRET-MARKER-DO-NOT-PERSIST';
+  // PR16b: the `share_package_json` wire shape is `{idx, seckey}` and
+  // the seckey hex is the raw FROST share secret. Seed a distinctive
+  // fixture here so tests can assert it never reaches the persisted
+  // blob.
+  const shareSeckeyFixture = 'deadbeef'.repeat(8);
 
   function buildStateWithSecrets(): PwaPersistedState {
     const profile = {
@@ -335,7 +343,7 @@ describe('toPersistable allow-list (D.1)', () => {
       group_public_key: '22'.repeat(32),
       relays: ['wss://relay.example'],
       group_package_json: '{}',
-      share_package_json: '{"idx":1,"seckey":"11"}',
+      member_idx: 1,
       source: 'generated',
       relay_profile: 'browser',
       group_ref: 'group-ref',
@@ -352,7 +360,11 @@ describe('toPersistable allow-list (D.1)', () => {
         state_save_interval_secs: 30,
         peer_selection_strategy: 'deterministic_sorted' as const,
       },
-      // Synthesized secret-bearing field that must NOT appear in persistable:
+      // Synthesized secret-bearing fields that must NOT appear in persistable.
+      // `share_package_json` is deliberately set here to simulate a stale
+      // legacy profile with a live seckey leaking through if the allow-list
+      // ever regresses — the red-team assertion below catches that.
+      share_package_json: `{"idx":1,"seckey":"${shareSeckeyFixture}"}`,
       stored_password: secretMarker,
       runtime_snapshot_json: secretMarker,
       onboarding_package: null,
@@ -373,6 +385,11 @@ describe('toPersistable allow-list (D.1)', () => {
       pendingRotationConnection: null,
       distributionSession: null,
       runtimeSnapshot: null,
+      sharePackageJsonByProfileId: {
+        // In-memory-only runtime cache. Must never reach the
+        // persisted allow-list.
+        [profile.id]: `{"idx":1,"seckey":"${shareSeckeyFixture}"}`,
+      },
       settings: {
         remember_browser_state: true,
         auto_open_signer: true,
@@ -428,7 +445,25 @@ describe('toPersistable allow-list (D.1)', () => {
     const [persistedProfile] = toPersistable(state).profiles;
     expect(persistedProfile.id).toBe(state.profiles[0].id);
     expect(persistedProfile.encrypted_bfshare_artifact).toBe('bfshare1valid');
+    expect(persistedProfile.member_idx).toBe(1);
     expect(persistedProfile.signer_settings.sign_timeout_secs).toBe(30);
+    // PR16b: `share_package_json` is no longer on the persistable
+    // profile shape. Even if something in the in-memory state carries
+    // it, the allow-list must drop it before serialization.
+    expect(persistedProfile).not.toHaveProperty('share_package_json');
+  });
+
+  it('red-team: the persisted blob never contains the share seckey fixture (PR16b)', () => {
+    const state = buildStateWithSecrets();
+    const persistable = toPersistable(state);
+    const serialized = JSON.stringify(persistable);
+
+    // The seckey hex must not leak through either the profile record or
+    // the in-memory runtime cache (`sharePackageJsonByProfileId`).
+    expect(serialized).not.toContain(shareSeckeyFixture);
+    expect(serialized).not.toContain('share_package_json');
+    expect(serialized).not.toContain('sharePackageJsonByProfileId');
+    expect(serialized).not.toContain('"seckey"');
   });
 });
 
@@ -463,5 +498,137 @@ describe('debounced persistor (D.1)', () => {
     persistor.flush();
 
     expect(writeCount).toBe(0);
+  });
+});
+
+describe('share_package_json runtime-only reconstruction (PR16b)', () => {
+  // The WASM test hook in `src/test/setup.ts` is wired to return
+  // `shareSecret: '11'.repeat(32)` from `decode_bfshare_package`. Use
+  // that fixture to drive session start and verify reconstruction.
+  const SECKEY_FIXTURE = '11'.repeat(32);
+  const MEMBER_IDX = 1;
+
+  function buildProfile(): PwaProfile {
+    return {
+      id: '77'.repeat(32),
+      label: 'Primary Browser Device',
+      share_public_key: '33'.repeat(32),
+      group_public_key: '22'.repeat(32),
+      relays: ['wss://relay.primal.net'],
+      group_package_json: JSON.stringify({
+        group_name: 'Test Group',
+        group_pk: '22'.repeat(32),
+        threshold: 2,
+        members: [
+          { idx: 1, pubkey: `02${'33'.repeat(32)}` },
+          { idx: 2, pubkey: `02${'44'.repeat(32)}` },
+        ],
+      }),
+      member_idx: MEMBER_IDX,
+      source: 'generated',
+      relay_profile: 'browser',
+      group_ref: 'group-ref',
+      encrypted_profile_ref: 'encrypted-profile-ref',
+      state_path: '/tmp/igloo-pwa/profile',
+      created_at: 1700000000,
+      encrypted_bfshare_artifact: 'bfshare1demo',
+      profile_string: 'bfprofile1demo',
+      share_string: 'bfshare1demo',
+      signer_settings: {
+        sign_timeout_secs: 30,
+        ping_timeout_secs: 15,
+        request_ttl_secs: 300,
+        state_save_interval_secs: 30,
+        peer_selection_strategy: 'deterministic_sorted' as const,
+      },
+      peer_pubkey: null,
+      manual_peer_policy_overrides: [],
+      onboarding_package: null,
+    };
+  }
+
+  it('startSession caches a byte-equal share_package_json reconstructed from the encrypted artifact', async () => {
+    const profile = buildProfile();
+
+    // Pre-condition: the persisted profile does NOT carry
+    // `share_package_json` anywhere.
+    expect(profile).not.toHaveProperty('share_package_json');
+
+    await adapter.startSession(profile, 'test-passphrase');
+
+    const cached = adapter.getSharePackageJsonForProfile(profile.id);
+    expect(cached).not.toBeNull();
+    // Byte-equal to the wire JSON produced by the legacy path.
+    expect(cached).toBe(sharePackageToWireJson(MEMBER_IDX, SECKEY_FIXTURE));
+
+    // Clean up the in-memory cache so subsequent tests start fresh.
+    await adapter.disposeRuntimeSessionForProfile(profile.id);
+    expect(adapter.getSharePackageJsonForProfile(profile.id)).toBeNull();
+  });
+
+  it('red-team: persisted v2 blob contains no seckey fixture after a session unlock', async () => {
+    const profile = buildProfile();
+
+    await adapter.startSession(profile, 'test-passphrase');
+    const cached = adapter.getSharePackageJsonForProfile(profile.id);
+    expect(cached).toContain(SECKEY_FIXTURE); // Sanity: cache carries the secret.
+
+    const state: PwaPersistedState = {
+      profiles: [profile],
+      peerPermissionStates: [],
+      runtimeWarning: null,
+      selectedProfileId: profile.id,
+      activeView: 'dashboard',
+      activeDashboardTab: 'signer',
+      unlockPassphrase: 'test-passphrase',
+      pendingKeyset: null,
+      selectedGeneratedShareIdx: null,
+      pendingLoadConfirmation: null,
+      pendingOnboardConnection: null,
+      pendingRotationConnection: null,
+      distributionSession: null,
+      runtimeSnapshot: null,
+      sharePackageJsonByProfileId: { [profile.id]: cached as string },
+      settings: {
+        remember_browser_state: true,
+        auto_open_signer: true,
+        prefer_install_prompt: true,
+      },
+      drafts: {
+        createForm: { mode: 'new', groupName: '', threshold: '2', count: '3' },
+        rotationForm: { sourceProfileId: '', sources: [{ packageText: '' }] },
+        profileForm: { label: '', relayUrls: '' },
+        distributionForms: {},
+        importProfileForm: { profileString: '' },
+        recoverProfileForm: { shareString: '' },
+        onboardConnectForm: { packageText: '' },
+        onboardSaveForm: { label: '' },
+        rotateConnectForm: { packageText: '' },
+      },
+      draftSecrets: {
+        rotationSources: {},
+        profileFormPassword: '',
+        profileFormConfirm: '',
+        distributionPasswords: {},
+        importProfileFormPassword: '',
+        recoverProfileFormPassword: '',
+        onboardConnectFormPassword: '',
+        onboardSaveFormPassword: '',
+        onboardSaveFormConfirm: '',
+        rotateConnectFormPassword: '',
+      },
+    };
+
+    const persistable = toPersistable(state);
+    const serialized = JSON.stringify(persistable);
+
+    // Red-team: the raw seckey fixture must not appear anywhere in the
+    // blob that would be written to localStorage.
+    expect(serialized).not.toContain(SECKEY_FIXTURE);
+    expect(serialized).not.toContain('share_package_json');
+    expect(serialized).not.toContain('sharePackageJsonByProfileId');
+    expect(serialized).not.toContain('"seckey"');
+
+    await adapter.disposeRuntimeSessionForProfile(profile.id);
   });
 });
