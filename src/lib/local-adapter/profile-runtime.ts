@@ -1,6 +1,7 @@
+import { decodeBfSharePackage, sharePackageToWireJson } from 'igloo-shared';
+
 import {
   startBrowserRuntimeSession,
-  startPersistedBrowserRuntimeSession,
   type BrowserRuntimeSession,
 } from '../page-runtime-host';
 import type { PwaProfile, PwaRuntimeSnapshot } from '../types';
@@ -32,35 +33,71 @@ export async function disposeRuntimeSessionForProfile(profileId?: string) {
   }
 }
 
-export async function startSession(profile: PwaProfile, unlockPhrase: string): Promise<PwaRuntimeSnapshot> {
-  if (!unlockPhrase.trim()) {
-    throw new Error('Unlock phrase is required.');
+function memberIdxFromSharePackageJson(sharePackageJson: string | undefined | null): number {
+  if (!sharePackageJson) return 1;
+  try {
+    const parsed = JSON.parse(sharePackageJson) as { idx?: unknown };
+    if (typeof parsed.idx === 'number' && Number.isFinite(parsed.idx)) {
+      return Math.trunc(parsed.idx);
+    }
+    if (typeof parsed.idx === 'string' && /^\d+$/.test(parsed.idx)) {
+      return Number.parseInt(parsed.idx, 10);
+    }
+  } catch {
+    // fall through to default
   }
-  if (unlockPhrase !== profile.stored_password) {
-    throw new Error('Unlock phrase did not match the stored device password.');
+  return 1;
+}
+
+/**
+ * Decrypt the password-sealed share artifact and rebuild a fresh
+ * `sharePackageJson` suitable for runtime bootstrap. The passphrase is
+ * only held on the stack for the duration of this call. On failure we
+ * throw an "Incorrect passphrase" error with a stable, non-leaky
+ * message — the AEAD is the authenticator, so there is no timing
+ * side-channel to worry about here.
+ */
+async function unlockShareFromArtifact(
+  profile: PwaProfile,
+  passphrase: string,
+): Promise<string> {
+  try {
+    const decoded = await decodeBfSharePackage(
+      profile.encrypted_bfshare_artifact,
+      passphrase,
+    );
+    const memberIdx = memberIdxFromSharePackageJson(profile.share_package_json);
+    return sharePackageToWireJson(memberIdx, decoded.shareSecret);
+  } catch {
+    throw new Error('Incorrect passphrase.');
+  }
+}
+
+export async function startSession(profile: PwaProfile, passphrase: string): Promise<PwaRuntimeSnapshot> {
+  if (!passphrase.trim()) {
+    throw new Error('Passphrase is required.');
+  }
+  if (!profile.encrypted_bfshare_artifact?.trim()) {
+    // v1 → v2 migration drop: profile is missing the encrypted artifact.
+    // Force the user to re-onboard / re-import to produce one.
+    throw new Error(
+      'This profile was persisted under the legacy v1 schema and no longer has an encrypted share artifact. Re-onboard or re-import the profile to continue.',
+    );
   }
 
+  const sharePackageJson = await unlockShareFromArtifact(profile, passphrase);
+
   await clearActiveRuntimeSession();
-  activeRuntimeSession = profile.runtime_snapshot_json?.trim()
-    ? await startPersistedBrowserRuntimeSession({
-        groupName: profile.label,
-        relays: profile.relays,
-        groupPublicKey: profile.group_public_key,
-        sharePublicKey: profile.share_public_key,
-        peerPubkey: profile.peer_pubkey ?? undefined,
-        signerSettings: profile.signer_settings,
-        runtimeSnapshotJson: profile.runtime_snapshot_json,
-      })
-    : await startBrowserRuntimeSession({
-        groupName: profile.label,
-        relays: profile.relays,
-        groupPublicKey: profile.group_public_key,
-        sharePublicKey: profile.share_public_key,
-        peerPubkey: profile.peer_pubkey ?? undefined,
-        signerSettings: profile.signer_settings,
-        groupPackageJson: profile.group_package_json,
-        sharePackageJson: profile.share_package_json,
-      });
+  activeRuntimeSession = await startBrowserRuntimeSession({
+    groupName: profile.label,
+    relays: profile.relays,
+    groupPublicKey: profile.group_public_key,
+    sharePublicKey: profile.share_public_key,
+    peerPubkey: profile.peer_pubkey ?? undefined,
+    signerSettings: profile.signer_settings,
+    groupPackageJson: profile.group_package_json,
+    sharePackageJson,
+  });
   activeRuntimeProfileId = profile.id;
 
   return toRuntimeSnapshot(profile, activeRuntimeSession, true);
@@ -69,7 +106,10 @@ export async function startSession(profile: PwaProfile, unlockPhrase: string): P
 export async function stopSession(current: PwaRuntimeSnapshot | null): Promise<PwaRuntimeSnapshot | null> {
   if (!current?.profile) return null;
   if (!activeRuntimeSession || activeRuntimeProfileId !== current.profile.id) {
-    throw new Error('No active browser signer session is attached to this profile.');
+    // Idempotent: nothing active for this profile. Do not throw — callers
+    // may hit this legitimately under React StrictMode double-mount or
+    // after a reload.
+    return null;
   }
   const stoppedSnapshot = toRuntimeSnapshot(current.profile, activeRuntimeSession, false);
   await clearActiveRuntimeSession();
@@ -83,7 +123,7 @@ export async function stopSession(current: PwaRuntimeSnapshot | null): Promise<P
 export async function refreshSession(current: PwaRuntimeSnapshot | null): Promise<PwaRuntimeSnapshot | null> {
   if (!current?.profile) return null;
   if (!activeRuntimeSession || activeRuntimeProfileId !== current.profile.id) {
-    throw new Error('No active browser signer session is attached to this profile.');
+    return null;
   }
   const refreshed = await activeRuntimeSession.refreshPeers();
   const runtimeProfile = toRuntimeProfile(current.profile, refreshed);
@@ -106,7 +146,7 @@ export async function refreshSession(current: PwaRuntimeSnapshot | null): Promis
 export async function readSession(current: PwaRuntimeSnapshot | null): Promise<PwaRuntimeSnapshot | null> {
   if (!current?.profile) return null;
   if (!activeRuntimeSession || activeRuntimeProfileId !== current.profile.id) {
-    throw new Error('No active browser signer session is attached to this profile.');
+    return null;
   }
 
   return toRuntimeSnapshot(current.profile, activeRuntimeSession, true);
@@ -175,20 +215,23 @@ export async function applyOperatorSettings(
   const relayChanged = previousRelays !== nextRelays;
 
   if (relayChanged) {
-    const snapshot = activeRuntimeSession.updateConfig(updatedProfile.signer_settings);
-    const runtimeProfile = toRuntimeProfile(updatedProfile, snapshot);
+    // Relay change requires a fresh session bootstrap. With
+    // `runtime_snapshot_json` persistence deleted under D.1, the
+    // caller is responsible for supplying a passphrase to re-unlock
+    // the share. We preserve legacy behaviour for the in-memory
+    // session: stop the current session and let the caller drive
+    // re-start via the main start flow.
+    activeRuntimeSession.updateConfig(updatedProfile.signer_settings);
+    const snapshot = toRuntimeSnapshot(updatedProfile, activeRuntimeSession, true);
     await clearActiveRuntimeSession();
-    activeRuntimeSession = await startPersistedBrowserRuntimeSession({
-      groupName: runtimeProfile.label,
-      relays: runtimeProfile.relays,
-      groupPublicKey: runtimeProfile.group_public_key,
-      sharePublicKey: runtimeProfile.share_public_key,
-      peerPubkey: runtimeProfile.peer_pubkey ?? undefined,
-      signerSettings: runtimeProfile.signer_settings,
-      runtimeSnapshotJson: runtimeProfile.runtime_snapshot_json,
-    });
-    activeRuntimeProfileId = runtimeProfile.id;
-    return toRuntimeSnapshot(runtimeProfile, activeRuntimeSession, true);
+    return {
+      ...snapshot,
+      active: false,
+      runtime_log_lines: [
+        ...snapshot.runtime_log_lines,
+        '[info] relays changed; stop and restart the signer to bootstrap against the new relays',
+      ],
+    };
   }
 
   activeRuntimeSession.updateConfig(updatedProfile.signer_settings);

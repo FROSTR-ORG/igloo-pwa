@@ -141,12 +141,16 @@ export function toPwaProfile(finalized: Awaited<ReturnType<typeof createFinalize
     encrypted_profile_ref: finalized.artifactRefs.encryptedProfileRef,
     state_path: finalized.artifactRefs.statePath,
     created_at: now(),
-    stored_password: finalized.storedPassword,
+    // `shareString` is the bfshare1 bech32m artifact produced by the
+    // WASM `encode_bfshare_package` call — already password-encrypted.
+    // We surface it as `encrypted_bfshare_artifact` so the session-start
+    // flow can decode it with the user's passphrase instead of relying
+    // on a persisted `stored_password`.
+    encrypted_bfshare_artifact: finalized.shareString,
     profile_string: finalized.profileString,
     share_string: finalized.shareString,
     signer_settings: normalizePwaSignerSettings(finalized.summary.signerSettings),
     peer_pubkey: finalized.peerPubkey,
-    runtime_snapshot_json: finalized.runtimeSnapshotJson,
     onboarding_package: finalized.onboardingPackage,
     manual_peer_policy_overrides: finalized.manualPeerPolicyOverrides,
   } satisfies PwaProfile;
@@ -276,7 +280,6 @@ export async function createStoredProfileFromPayload(args: {
   profileString?: string;
   shareString?: string;
   onboardingPackage?: string | null;
-  runtimeSnapshotJson?: string | null;
   peerPubkey?: string | null;
   signerSettings?: Partial<PwaSignerSettings> | null;
 }) {
@@ -287,7 +290,8 @@ export async function createStoredProfileFromPayload(args: {
     existingProfileIds: args.existingProfileIds,
     signerSettings: args.signerSettings ?? DEFAULT_SIGNER_SETTINGS,
     peerPubkey: args.peerPubkey ?? null,
-    runtimeSnapshotJson: args.runtimeSnapshotJson ?? null,
+    // D.1/D.5: no runtime snapshot is ever persisted on a PwaProfile.
+    runtimeSnapshotJson: null,
     profileString: args.profileString,
     shareString: args.shareString,
     onboardingPackage: args.onboardingPackage ?? null,
@@ -296,6 +300,10 @@ export async function createStoredProfileFromPayload(args: {
 }
 
 export function toRuntimeProfile(profile: PwaProfile, snapshot: ReturnType<BrowserRuntimeSession['read']>): PwaProfile {
+  // Runtime-snapshot JSON is no longer surfaced on the PwaProfile or the
+  // persisted shape (D.1 + D.5). We still run through the shared
+  // projection for label/relay normalization, but we feed it null for
+  // the runtime snapshot on both sides.
   const projection = createBrowserRuntimeProfileProjection({
     profile: {
       id: profile.id,
@@ -305,10 +313,10 @@ export function toRuntimeProfile(profile: PwaProfile, snapshot: ReturnType<Brows
       sharePackageJson: profile.share_package_json,
       manualPeerPolicyOverrides: profile.manual_peer_policy_overrides ?? [],
       peerPubkey: profile.peer_pubkey ?? null,
-      runtimeSnapshotJson: profile.runtime_snapshot_json ?? null,
+      runtimeSnapshotJson: null,
     },
     signerSettings: snapshot.signerSettings,
-    runtimeSnapshotJson: snapshot.runtimeSnapshotJson,
+    runtimeSnapshotJson: null,
     peerPermissionStates: snapshot.peerPermissionStates,
   });
   const summary = projection.summary;
@@ -319,7 +327,6 @@ export function toRuntimeProfile(profile: PwaProfile, snapshot: ReturnType<Brows
     group_public_key: summary.groupPublicKey,
     share_public_key: summary.sharePublicKey,
     manual_peer_policy_overrides: projection.manualPeerPolicyOverrides,
-    runtime_snapshot_json: summary.runtimeSnapshotJson ?? null,
     signer_settings: normalizePwaSignerSettings(snapshot.signerSettings),
     peer_pubkey: summary.peerPubkey ?? null,
   };
