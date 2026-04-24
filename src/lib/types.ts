@@ -86,13 +86,19 @@ export type PwaProfile = PwaProfilePreview & {
   encrypted_profile_ref: string;
   state_path: string;
   created_at: number;
-  stored_password: string;
+  /**
+   * Password-encrypted bfshare1 bech32m artifact. Produced by
+   * `encode_bfshare_package` (WASM). Decrypting it with the user's
+   * passphrase yields the share secret; the passphrase check is AEAD
+   * failure, so there is no timing side-channel. Safe at rest in
+   * localStorage.
+   */
+  encrypted_bfshare_artifact: string;
   profile_string: string;
   share_string: string;
   signer_settings: PwaSignerSettings;
   manual_peer_policy_overrides?: BrowserManualPeerPolicyOverride[];
   peer_pubkey?: string | null;
-  runtime_snapshot_json?: string | null;
   onboarding_package?: string | null;
 };
 
@@ -128,28 +134,36 @@ export type PwaRuntimeSnapshot = {
   } | null;
 };
 
+/**
+ * Pending load confirmations are IN-MEMORY ONLY. They carry the user's
+ * passphrase for the brief interval between decrypt and finalize. They
+ * are never persisted to localStorage (D.1). If the page reloads
+ * mid-flow, the user re-enters the passphrase.
+ */
 export type PwaLoadConfirmation = {
   kind: 'bfprofile' | 'bfshare';
   preview: PwaProfilePreview;
-  stored_password: string;
+  passphrase: string;
   profile_string: string;
   share_string: string;
   profile_payload?: BrowserProfilePackagePayload;
   manual_peer_policy_overrides?: BrowserManualPeerPolicyOverride[];
   peer_pubkey?: string | null;
-  runtime_snapshot_json?: string | null;
 };
 
+/**
+ * Pending onboarding connections are IN-MEMORY ONLY. Same rationale as
+ * `PwaLoadConfirmation`: passphrase lives in React state only.
+ */
 export type PwaOnboardConnection = {
   preview: PwaProfilePreview;
-  stored_password: string;
+  passphrase: string;
   package_text: string;
   profile_string: string;
   share_string: string;
   profile_payload?: BrowserProfilePackagePayload;
   manual_peer_policy_overrides?: BrowserManualPeerPolicyOverride[];
   peer_pubkey?: string | null;
-  runtime_snapshot_json?: string | null;
 };
 
 export type PwaDistributionActionResult =
@@ -172,6 +186,11 @@ export type PwaDistributionSession = {
   qr_package: { member_idx: number; label: string; package_text: string } | null;
 };
 
+/**
+ * In-memory-and-persistable draft fields. All `password` / `confirmPassword`
+ * fields are OUT of this shape — they live only in the companion
+ * `PwaDraftSecrets` record, which is never sent to localStorage.
+ */
 export type PwaDraftState = {
   createForm: {
     mode: 'new' | 'rotate';
@@ -181,38 +200,56 @@ export type PwaDraftState = {
   };
   rotationForm: {
     sourceProfileId: string;
-    sources: Array<{ packageText: string; password: string }>;
+    sources: Array<{ packageText: string }>;
   };
   profileForm: {
     label: string;
-    password: string;
-    confirmPassword: string;
     relayUrls: string;
   };
-  distributionForms: Record<number, { label: string; password: string; confirmPassword: string }>;
+  distributionForms: Record<number, { label: string }>;
   importProfileForm: {
     profileString: string;
-    password: string;
   };
   recoverProfileForm: {
     shareString: string;
-    password: string;
   };
   onboardConnectForm: {
     packageText: string;
-    password: string;
   };
   onboardSaveForm: {
     label: string;
-    password: string;
-    confirmPassword: string;
   };
   rotateConnectForm: {
     packageText: string;
-    password: string;
   };
 };
 
+/**
+ * Passphrase/password draft fields. IN-MEMORY ONLY. This record is
+ * held inside the React store but never included in the persistable
+ * state allow-list, so it cannot reach `localStorage`.
+ */
+export type PwaDraftSecrets = {
+  rotationSources: Record<number, string>;
+  profileFormPassword: string;
+  profileFormConfirm: string;
+  distributionPasswords: Record<number, { password: string; confirmPassword: string }>;
+  importProfileFormPassword: string;
+  recoverProfileFormPassword: string;
+  onboardConnectFormPassword: string;
+  onboardSaveFormPassword: string;
+  onboardSaveFormConfirm: string;
+  rotateConnectFormPassword: string;
+};
+
+/**
+ * Full in-memory app state. The localStorage persist path goes through
+ * `toPersistable(state)` (see `persist-allowlist.ts`) which sifts this
+ * shape down to a narrow allow-list of non-secret fields. The passphrase,
+ * the draft keyset, pending confirmations, runtime snapshots, and all
+ * `draftSecrets` fields are explicitly NOT in the persist allow-list
+ * and therefore live only in React state for the lifetime of the tab.
+ */
 export type PwaPersistedState = {
   profiles: PwaProfile[];
   peerPermissionStates: PwaPeerPermissionState[];
@@ -220,14 +257,22 @@ export type PwaPersistedState = {
   selectedProfileId: string;
   activeView: PwaView;
   activeDashboardTab: PwaDashboardTab;
-  unlockPhrase: string;
-  generatedKeyset: PwaGeneratedKeyset | null;
+  /** In-memory only. Re-entered on every session start. */
+  unlockPassphrase: string;
+  /** In-memory only. Ephemeral keyset in-flight during generation. */
+  pendingKeyset: PwaGeneratedKeyset | null;
   selectedGeneratedShareIdx: number | null;
+  /** In-memory only. Passphrase-carrying pending flows do not survive reload. */
   pendingLoadConfirmation: PwaLoadConfirmation | null;
+  /** In-memory only. */
   pendingOnboardConnection: PwaOnboardConnection | null;
+  /** In-memory only. */
   pendingRotationConnection: PwaOnboardConnection | null;
   distributionSession: PwaDistributionSession | null;
+  /** In-memory only. Runtime re-bootstraps fresh on reload. */
   runtimeSnapshot: PwaRuntimeSnapshot | null;
   settings: PwaSettings;
   drafts: PwaDraftState;
+  /** In-memory only. Holds every password/passphrase typed into a form. */
+  draftSecrets: PwaDraftSecrets;
 };
