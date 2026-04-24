@@ -1,9 +1,18 @@
 import * as React from 'react';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 
 import App from '@/App';
-import { STORAGE_KEY } from '@/lib/storage';
+import {
+  LEGACY_STORAGE_KEY_V1,
+  STORAGE_KEY,
+  __resetLegacyCleanupSentinelForTests,
+  cleanupLegacyPersistedState,
+  createDebouncedPersistor,
+  loadPersistedState,
+} from '@/lib/storage';
+import { toPersistable } from '@/lib/persist-allowlist';
+import type { PwaPersistedState, PwaProfile } from '@/lib/types';
 import { StoreProvider, useStore } from '@/lib/store';
 
 function renderApp() {
@@ -19,6 +28,11 @@ function StoreHarness({ onReady }: { onReady: (store: ReturnType<typeof useStore
   }, [onReady, store]);
   return null;
 }
+
+beforeEach(() => {
+  window.localStorage.clear();
+  __resetLegacyCleanupSentinelForTests();
+});
 
 describe('igloo-pwa app shell', () => {
   it('renders the landing page by default', () => {
@@ -52,214 +66,6 @@ describe('igloo-pwa app shell', () => {
     });
   });
 
-  it('shows live onboarding status on distributed create-flow shares', async () => {
-    cleanup();
-    window.localStorage.setItem(
-      STORAGE_KEY,
-      JSON.stringify({
-        profiles: [
-          {
-            id: '77'.repeat(32),
-            label: 'Primary Browser Device',
-            share_public_key: '11'.repeat(32),
-            group_public_key: '22'.repeat(32),
-            relays: ['wss://relay.primal.net'],
-            group_package_json: '{"group_name":"Test Group","group_pk":"22","threshold":2,"members":[]}',
-            share_package_json: '{"share":"demo"}',
-            source: 'generated',
-            relay_profile: 'browser',
-            group_ref: 'group-ref',
-            encrypted_profile_ref: 'encrypted-profile-ref',
-            state_path: '/tmp/igloo-pwa/profile-77',
-            created_at: 1700000000000,
-            stored_password: 'pw',
-            profile_string: 'bfprofile1demo',
-            share_string: 'bfshare1demo',
-            signer_settings: {
-              sign_timeout_secs: 30,
-              ping_timeout_secs: 15,
-              request_ttl_secs: 300,
-              state_save_interval_secs: 30,
-              peer_selection_strategy: 'deterministic_sorted',
-            },
-            onboarding_package: null,
-          },
-        ],
-        selectedProfileId: '77'.repeat(32),
-        activeView: 'create-distribute',
-        activeDashboardTab: 'signer',
-        unlockPhrase: 'pw',
-        generatedKeyset: {
-          group_name: 'Test Group',
-          threshold: 2,
-          count: 2,
-          group_package_json: '{"group_name":"Test Group","group_pk":"22","threshold":2,"members":[]}',
-          group_public_key: '22'.repeat(32),
-          shares: [
-            {
-              name: 'Primary Browser Device',
-              member_idx: 1,
-              share_package_json: '{"idx":1,"seckey":"11"}',
-              share_public_key: '11'.repeat(32),
-            },
-            {
-              name: 'Remote Tablet',
-              member_idx: 2,
-              share_package_json: '{"idx":2,"seckey":"12"}',
-              share_public_key: '44'.repeat(32),
-            },
-          ],
-        },
-        selectedGeneratedShareIdx: 1,
-        pendingLoadConfirmation: null,
-        pendingOnboardConnection: null,
-        pendingRotationConnection: null,
-        distributionSession: {
-          profile_id: '77'.repeat(32),
-          signer_pubkey: '11'.repeat(32),
-          remaining_member_indices: [2],
-          results: {
-            2: {
-              kind: 'copied',
-              member_idx: 2,
-              label: 'Remote Tablet',
-              package_text: 'bfonboard1demo',
-              target_peer_pubkey: '44'.repeat(32),
-              tracking: {
-                stage: 'waiting_for_device',
-              },
-            },
-          },
-          qr_package: null,
-        },
-        runtimeSnapshot: {
-          active: true,
-          profile: {
-            id: '77'.repeat(32),
-            label: 'Primary Browser Device',
-            share_public_key: '11'.repeat(32),
-            group_public_key: '22'.repeat(32),
-            relays: ['wss://relay.primal.net'],
-            group_package_json: '{"group_name":"Test Group","group_pk":"22","threshold":2,"members":[]}',
-            share_package_json: '{"share":"demo"}',
-            source: 'generated',
-            relay_profile: 'browser',
-            group_ref: 'group-ref',
-            encrypted_profile_ref: 'encrypted-profile-ref',
-            state_path: '/tmp/igloo-pwa/profile-77',
-            created_at: 1700000000000,
-            stored_password: 'pw',
-            profile_string: 'bfprofile1demo',
-            share_string: 'bfshare1demo',
-            signer_settings: {
-              sign_timeout_secs: 30,
-              ping_timeout_secs: 15,
-              request_ttl_secs: 300,
-              state_save_interval_secs: 30,
-              peer_selection_strategy: 'deterministic_sorted',
-            },
-            onboarding_package: null,
-          },
-          runtime_status: {
-            peers: [
-              {
-                idx: 2,
-                pubkey: '44'.repeat(32),
-                known: true,
-                last_seen: 1700000000,
-                online: false,
-                incoming_available: 3,
-                outgoing_available: 3,
-                outgoing_spent: 0,
-                can_sign: false,
-                should_send_nonces: false,
-              },
-            ],
-            onboarding_statuses: [
-              {
-                pubkey: '44'.repeat(32),
-                stage: 'handshake_completed',
-                updated_at: 1700000000,
-              },
-            ],
-            metadata: {
-              peers: ['44'.repeat(32)],
-            },
-            pending_operations: [],
-            status: {
-              last_active: 1700000000,
-            },
-          },
-          readiness: {
-            runtime_ready: true,
-            restore_complete: true,
-            sign_ready: false,
-            ecdh_ready: true,
-            last_refresh_at: 1700000000,
-          },
-          runtime_log_lines: [],
-          runtime_host: {
-            profile_id: '77'.repeat(32),
-            mode: 'browser',
-            log_source: 'test',
-            started_at: 1700000000,
-            signer_pubkey: '11'.repeat(32),
-          },
-        },
-        settings: {
-          remember_browser_state: true,
-          auto_open_signer: true,
-          prefer_install_prompt: true,
-        },
-        drafts: {
-          createForm: { mode: 'new', groupName: 'Test Group', threshold: '2', count: '2' },
-          rotationForm: { sourceProfileId: '', sources: [{ packageText: '', password: '' }] },
-          profileForm: {
-            label: 'Primary Browser Device',
-            password: 'pw',
-            confirmPassword: 'pw',
-            relayUrls: 'wss://relay.primal.net',
-          },
-          distributionForms: {
-            2: { label: 'Remote Tablet', password: '', confirmPassword: '' },
-          },
-          importProfileForm: { profileString: '', password: '' },
-          recoverProfileForm: { shareString: '', password: '' },
-          onboardConnectForm: { packageText: '', password: '' },
-          onboardSaveForm: { label: '', password: '', confirmPassword: '' },
-          rotateConnectForm: { packageText: '', password: '' },
-        },
-        peerPermissionStates: [],
-        runtimeWarning: null,
-      }),
-    );
-
-    render(<App />);
-
-    await waitFor(() => {
-      expect(screen.getByText('handshake completed')).toBeInTheDocument();
-      expect(screen.getByText('Copied Remote Tablet.')).toBeInTheDocument();
-    });
-  });
-
-  it('accepts a real-looking bfonboard package and advances directly to save', async () => {
-    renderApp();
-
-    fireEvent.click(screen.getAllByRole('button', { name: 'Continue Onboarding' })[0]);
-    fireEvent.change(screen.getByLabelText('bfonboard'), {
-      target: { value: `bfonboard1${'q'.repeat(96)}` },
-    });
-    fireEvent.change(screen.getByLabelText('Decryption Password'), {
-      target: { value: 'playwright-onboard-pass' },
-    });
-    fireEvent.click(screen.getByRole('button', { name: 'Connect' }));
-
-    await waitFor(() => {
-      expect(screen.getByText('Save Onboarded Device')).toBeInTheDocument();
-      expect(screen.getByText('Review Onboarded Profile')).toBeInTheDocument();
-    });
-  });
-
   it('rejects onboarding when the derived profile id already exists locally', async () => {
     cleanup();
     window.localStorage.setItem(
@@ -281,7 +87,7 @@ describe('igloo-pwa app shell', () => {
             encrypted_profile_ref: 'encrypted-profile-ref',
             state_path: '/tmp/igloo-pwa/existing-device',
             created_at: 1700000000000,
-            stored_password: 'pw',
+            encrypted_bfshare_artifact: 'bfshare1demo',
             profile_string: 'bfprofile1demo',
             share_string: 'bfshare1demo',
             signer_settings: {
@@ -297,35 +103,21 @@ describe('igloo-pwa app shell', () => {
         selectedProfileId: '77'.repeat(32),
         activeView: 'dashboard',
         activeDashboardTab: 'signer',
-        unlockPhrase: '',
-        generatedKeyset: null,
-        selectedGeneratedShareIdx: null,
-        pendingLoadConfirmation: null,
-        pendingOnboardConnection: null,
-        distributionSession: null,
-        runtimeSnapshot: null,
         settings: {
           remember_browser_state: true,
           auto_open_signer: true,
           prefer_install_prompt: true,
         },
         drafts: {
-          createForm: { groupName: '', threshold: '2', count: '3' },
-          profileForm: {
-            label: '',
-            password: '',
-            confirmPassword: '',
-            relayUrls: 'wss://relay.primal.net',
-          },
+          createForm: { mode: 'new', groupName: '', threshold: '2', count: '3' },
+          rotationForm: { sourceProfileId: '', sources: [{ packageText: '' }] },
+          profileForm: { label: '', relayUrls: 'wss://relay.primal.net' },
           distributionForms: {},
-          importProfileForm: { profileString: '', password: '' },
-          recoverProfileForm: { shareString: '', password: '' },
-          onboardConnectForm: { packageText: '', password: '' },
-          onboardSaveForm: {
-            label: 'Onboarded Device',
-            password: 'playwright-onboard-pass',
-            confirmPassword: 'playwright-onboard-pass',
-          },
+          importProfileForm: { profileString: '' },
+          recoverProfileForm: { shareString: '' },
+          onboardConnectForm: { packageText: '' },
+          onboardSaveForm: { label: 'Onboarded Device' },
+          rotateConnectForm: { packageText: '' },
         },
         peerPermissionStates: [],
       }),
@@ -342,77 +134,13 @@ describe('igloo-pwa app shell', () => {
     });
 
     latestStore?.updateOnboardConnectForm('packageText', `bfonboard1${'q'.repeat(96)}`);
-    latestStore?.updateOnboardConnectForm('password', 'playwright-onboard-pass');
+    latestStore?.updateOnboardConnectPassword('playwright-onboard-pass');
     await latestStore?.connectOnboardingPackage();
     latestStore?.updateOnboardSaveForm('label', 'Onboarded Device');
-    latestStore?.updateOnboardSaveForm('password', 'playwright-onboard-pass');
-    latestStore?.updateOnboardSaveForm('confirmPassword', 'playwright-onboard-pass');
+    latestStore?.updateOnboardSavePassword('password', 'playwright-onboard-pass');
+    latestStore?.updateOnboardSavePassword('confirmPassword', 'playwright-onboard-pass');
 
     await expect(latestStore?.finalizeOnboardedDevice()).rejects.toThrow(/already exists/i);
-  });
-
-  it('normalizes legacy onboard-confirm state to the combined save screen', async () => {
-    cleanup();
-    window.localStorage.setItem(
-      STORAGE_KEY,
-      JSON.stringify({
-        profiles: [],
-        selectedProfileId: '',
-        activeView: 'onboard-confirm',
-        activeDashboardTab: 'signer',
-        unlockPhrase: '',
-        generatedKeyset: null,
-        selectedGeneratedShareIdx: null,
-        pendingLoadConfirmation: null,
-        pendingOnboardConnection: {
-          preview: {
-            label: 'Onboarded Device',
-            share_public_key: '33'.repeat(32),
-            group_public_key: '22'.repeat(32),
-            relays: ['wss://relay.primal.net'],
-            group_package_json: '{"group_name":"Test Group","group_pk":"22","threshold":2,"members":[]}',
-            share_package_json: '{"idx":1,"seckey":"11"}',
-            source: 'bfonboard',
-          },
-          stored_password: 'pw',
-          package_text: 'bfonboard1demo',
-          profile_string: 'bfprofile1demo',
-          share_string: 'bfshare1demo',
-        },
-        distributionSession: null,
-        runtimeSnapshot: null,
-        settings: {
-          remember_browser_state: true,
-          auto_open_signer: true,
-          prefer_install_prompt: true,
-        },
-        drafts: {
-          createForm: {
-            groupName: '',
-            threshold: '2',
-            count: '3',
-          },
-          profileForm: {
-            label: '',
-            password: '',
-            confirmPassword: '',
-            relayUrls: 'wss://relay.primal.net',
-          },
-          distributionForms: {},
-          importProfileForm: { profileString: '', password: '' },
-          recoverProfileForm: { shareString: '', password: '' },
-          onboardConnectForm: { packageText: '', password: '' },
-          onboardSaveForm: { label: 'Onboarded Device', password: '', confirmPassword: '' },
-        },
-      }),
-    );
-
-    render(<App />);
-
-    await waitFor(() => {
-      expect(screen.getByRole('heading', { name: 'Review Onboarded Profile' })).toBeInTheDocument();
-      expect(screen.queryByText('Confirm Onboarded Profile')).not.toBeInTheDocument();
-    });
   });
 
   it('persists browser settings across reloads', async () => {
@@ -435,7 +163,7 @@ describe('igloo-pwa app shell', () => {
             encrypted_profile_ref: 'encrypted-profile-ref',
             state_path: '/tmp/igloo-pwa/profile-77',
             created_at: 1700000000000,
-            stored_password: 'pw',
+            encrypted_bfshare_artifact: 'bfshare1demo',
             profile_string: 'bfprofile1demo',
             share_string: 'bfshare1demo',
             signer_settings: {
@@ -451,35 +179,21 @@ describe('igloo-pwa app shell', () => {
         selectedProfileId: '77'.repeat(32),
         activeView: 'dashboard',
         activeDashboardTab: 'settings',
-        unlockPhrase: '',
-        generatedKeyset: null,
-        selectedGeneratedShareIdx: null,
-        pendingLoadConfirmation: null,
-        pendingOnboardConnection: null,
-        distributionSession: null,
-        runtimeSnapshot: null,
         settings: {
           remember_browser_state: true,
           auto_open_signer: true,
           prefer_install_prompt: true,
         },
         drafts: {
-          createForm: {
-            groupName: '',
-            threshold: '2',
-            count: '3',
-          },
-          profileForm: {
-            label: '',
-            password: '',
-            confirmPassword: '',
-            relayUrls: 'wss://relay.primal.net',
-          },
+          createForm: { mode: 'new', groupName: '', threshold: '2', count: '3' },
+          rotationForm: { sourceProfileId: '', sources: [{ packageText: '' }] },
+          profileForm: { label: '', relayUrls: 'wss://relay.primal.net' },
           distributionForms: {},
-          importProfileForm: { profileString: '', password: '' },
-          recoverProfileForm: { shareString: '', password: '' },
-          onboardConnectForm: { packageText: '', password: '' },
-          onboardSaveForm: { label: '', password: '', confirmPassword: '' },
+          importProfileForm: { profileString: '' },
+          recoverProfileForm: { shareString: '' },
+          onboardConnectForm: { packageText: '' },
+          onboardSaveForm: { label: '' },
+          rotateConnectForm: { packageText: '' },
         },
       }),
     );
@@ -487,10 +201,13 @@ describe('igloo-pwa app shell', () => {
     const toggle = screen.getByLabelText(/Open signer after import/i) as HTMLInputElement;
     expect(toggle.checked).toBe(true);
     fireEvent.click(toggle);
-    await waitFor(() => {
-      const stored = window.localStorage.getItem(STORAGE_KEY);
-      expect(stored).toContain('"auto_open_signer":false');
-    });
+    await waitFor(
+      () => {
+        const stored = window.localStorage.getItem(STORAGE_KEY);
+        expect(stored).toContain('"auto_open_signer":false');
+      },
+      { timeout: 2000 },
+    );
   });
 
   it('shows the unified settings actions and no reset control', () => {
@@ -514,7 +231,7 @@ describe('igloo-pwa app shell', () => {
             encrypted_profile_ref: 'encrypted-profile-ref',
             state_path: '/tmp/igloo-pwa/profile-77',
             created_at: 1700000000000,
-            stored_password: 'pw',
+            encrypted_bfshare_artifact: 'bfshare1demo',
             profile_string: 'bfprofile1demo',
             share_string: 'bfshare1demo',
             signer_settings: {
@@ -530,31 +247,21 @@ describe('igloo-pwa app shell', () => {
         selectedProfileId: '77'.repeat(32),
         activeView: 'dashboard',
         activeDashboardTab: 'settings',
-        unlockPhrase: '',
-        generatedKeyset: null,
-        selectedGeneratedShareIdx: null,
-        pendingLoadConfirmation: null,
-        pendingOnboardConnection: null,
-        distributionSession: null,
-        runtimeSnapshot: null,
         settings: {
           remember_browser_state: true,
           auto_open_signer: true,
           prefer_install_prompt: true,
         },
         drafts: {
-          createForm: { groupName: '', threshold: '2', count: '3' },
-          profileForm: {
-            label: '',
-            password: '',
-            confirmPassword: '',
-            relayUrls: 'wss://relay.primal.net',
-          },
+          createForm: { mode: 'new', groupName: '', threshold: '2', count: '3' },
+          rotationForm: { sourceProfileId: '', sources: [{ packageText: '' }] },
+          profileForm: { label: '', relayUrls: 'wss://relay.primal.net' },
           distributionForms: {},
-          importProfileForm: { profileString: '', password: '' },
-          recoverProfileForm: { shareString: '', password: '' },
-          onboardConnectForm: { packageText: '', password: '' },
-          onboardSaveForm: { label: '', password: '', confirmPassword: '' },
+          importProfileForm: { profileString: '' },
+          recoverProfileForm: { shareString: '' },
+          onboardConnectForm: { packageText: '' },
+          onboardSaveForm: { label: '' },
+          rotateConnectForm: { packageText: '' },
         },
       }),
     );
@@ -567,5 +274,194 @@ describe('igloo-pwa app shell', () => {
     expect(screen.getAllByRole('button', { name: 'logout' }).length).toBeGreaterThan(0);
     expect(screen.queryByRole('button', { name: /reset browser workspace/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /wipe/i })).not.toBeInTheDocument();
+  });
+});
+
+describe('v1 → v2 localStorage migration (D.1)', () => {
+  it('drops the legacy v1 blob on first load and does not migrate secrets', () => {
+    const legacyBlob = JSON.stringify({
+      profiles: [
+        {
+          id: '77'.repeat(32),
+          label: 'Legacy Device',
+          stored_password: 'SECRET-PW-LEAKED',
+          runtime_snapshot_json: JSON.stringify({
+            bootstrap: { share: { seckey: 'LEAK-SECKEY' } },
+          }),
+          share_string: 'bfshare1legacy',
+          profile_string: 'bfprofile1legacy',
+        },
+      ],
+      unlockPhrase: 'SECRET-PW-LEAKED',
+      generatedKeyset: {
+        shares: [{ name: 'Legacy Member 1', member_idx: 1, share_package_json: '{"idx":1,"seckey":"LEAK"}', share_public_key: '33'.repeat(32) }],
+        group_name: 'Legacy Group',
+        threshold: 2,
+        count: 3,
+        group_public_key: '22'.repeat(32),
+        group_package_json: '{}',
+      },
+    });
+    window.localStorage.setItem(LEGACY_STORAGE_KEY_V1, legacyBlob);
+
+    // First load boots through `loadPersistedState`, which deletes the
+    // v1 key.
+    const loaded = loadPersistedState();
+    expect(loaded).toBeNull();
+
+    expect(window.localStorage.getItem(LEGACY_STORAGE_KEY_V1)).toBeNull();
+
+    // A subsequent boot of the app also leaves the v1 key gone.
+    window.localStorage.setItem(LEGACY_STORAGE_KEY_V1, legacyBlob);
+    __resetLegacyCleanupSentinelForTests();
+    cleanupLegacyPersistedState();
+    expect(window.localStorage.getItem(LEGACY_STORAGE_KEY_V1)).toBeNull();
+  });
+
+  it('uses the v2 storage key for writes', () => {
+    expect(STORAGE_KEY).toBe('igloo-pwa.state.v2');
+    expect(LEGACY_STORAGE_KEY_V1).toBe('igloo-pwa.state.v1');
+  });
+});
+
+describe('toPersistable allow-list (D.1)', () => {
+  const secretMarker = 'SECRET-MARKER-DO-NOT-PERSIST';
+
+  function buildStateWithSecrets(): PwaPersistedState {
+    const profile = {
+      id: '77'.repeat(32),
+      label: 'Primary',
+      share_public_key: '33'.repeat(32),
+      group_public_key: '22'.repeat(32),
+      relays: ['wss://relay.example'],
+      group_package_json: '{}',
+      share_package_json: '{"idx":1,"seckey":"11"}',
+      source: 'generated',
+      relay_profile: 'browser',
+      group_ref: 'group-ref',
+      encrypted_profile_ref: 'encrypted-profile-ref',
+      state_path: '/tmp/profile',
+      created_at: 1700000000,
+      encrypted_bfshare_artifact: 'bfshare1valid',
+      profile_string: 'bfprofile1valid',
+      share_string: 'bfshare1valid',
+      signer_settings: {
+        sign_timeout_secs: 30,
+        ping_timeout_secs: 15,
+        request_ttl_secs: 300,
+        state_save_interval_secs: 30,
+        peer_selection_strategy: 'deterministic_sorted' as const,
+      },
+      // Synthesized secret-bearing field that must NOT appear in persistable:
+      stored_password: secretMarker,
+      runtime_snapshot_json: secretMarker,
+      onboarding_package: null,
+    } as unknown as PwaProfile;
+
+    return {
+      profiles: [profile],
+      peerPermissionStates: [],
+      runtimeWarning: null,
+      selectedProfileId: profile.id,
+      activeView: 'dashboard',
+      activeDashboardTab: 'signer',
+      unlockPassphrase: secretMarker,
+      pendingKeyset: null,
+      selectedGeneratedShareIdx: null,
+      pendingLoadConfirmation: null,
+      pendingOnboardConnection: null,
+      pendingRotationConnection: null,
+      distributionSession: null,
+      runtimeSnapshot: null,
+      settings: {
+        remember_browser_state: true,
+        auto_open_signer: true,
+        prefer_install_prompt: true,
+      },
+      drafts: {
+        createForm: { mode: 'new', groupName: '', threshold: '2', count: '3' },
+        rotationForm: { sourceProfileId: '', sources: [{ packageText: '' }] },
+        profileForm: { label: '', relayUrls: '' },
+        distributionForms: {},
+        importProfileForm: { profileString: '' },
+        recoverProfileForm: { shareString: '' },
+        onboardConnectForm: { packageText: '' },
+        onboardSaveForm: { label: '' },
+        rotateConnectForm: { packageText: '' },
+      },
+      draftSecrets: {
+        rotationSources: { 0: secretMarker },
+        profileFormPassword: secretMarker,
+        profileFormConfirm: secretMarker,
+        distributionPasswords: {},
+        importProfileFormPassword: secretMarker,
+        recoverProfileFormPassword: secretMarker,
+        onboardConnectFormPassword: secretMarker,
+        onboardSaveFormPassword: secretMarker,
+        onboardSaveFormConfirm: secretMarker,
+        rotateConnectFormPassword: secretMarker,
+      },
+    };
+  }
+
+  it('omits forbidden secret fields from the persisted shape', () => {
+    const state = buildStateWithSecrets();
+    const persistable = toPersistable(state);
+    const serialized = JSON.stringify(persistable);
+
+    expect(serialized).not.toContain('stored_password');
+    expect(serialized).not.toContain('runtime_snapshot_json');
+    expect(serialized).not.toContain('unlockPhrase');
+    expect(serialized).not.toContain('unlockPassphrase');
+    expect(serialized).not.toContain('generatedKeyset');
+    expect(serialized).not.toContain('pendingKeyset');
+    expect(serialized).not.toContain('pendingLoadConfirmation');
+    expect(serialized).not.toContain('pendingOnboardConnection');
+    expect(serialized).not.toContain('pendingRotationConnection');
+    expect(serialized).not.toContain('runtimeSnapshot');
+    expect(serialized).not.toContain('draftSecrets');
+    expect(serialized).not.toContain(secretMarker);
+  });
+
+  it('persists every allow-listed profile field', () => {
+    const state = buildStateWithSecrets();
+    const [persistedProfile] = toPersistable(state).profiles;
+    expect(persistedProfile.id).toBe(state.profiles[0].id);
+    expect(persistedProfile.encrypted_bfshare_artifact).toBe('bfshare1valid');
+    expect(persistedProfile.signer_settings.sign_timeout_secs).toBe(30);
+  });
+});
+
+describe('debounced persistor (D.1)', () => {
+  it('flush writes the latest scheduled state', () => {
+    let writeCount = 0;
+    let written: unknown = null;
+    const persistor = createDebouncedPersistor(
+      (value) => {
+        writeCount += 1;
+        written = value;
+      },
+      { wait: 1000, maxWait: 2000 },
+    );
+
+    persistor.schedule({ first: true } as unknown as PwaPersistedState);
+    persistor.schedule({ second: true } as unknown as PwaPersistedState);
+    persistor.flush();
+
+    expect(writeCount).toBe(1);
+    expect(written).toEqual({ second: true });
+  });
+
+  it('cancel clears pending writes', () => {
+    let writeCount = 0;
+    const persistor = createDebouncedPersistor(() => {
+      writeCount += 1;
+    }, { wait: 1000, maxWait: 2000 });
+
+    persistor.schedule({ a: 1 } as unknown as PwaPersistedState);
+    persistor.cancel();
+    persistor.flush();
+
+    expect(writeCount).toBe(0);
   });
 });

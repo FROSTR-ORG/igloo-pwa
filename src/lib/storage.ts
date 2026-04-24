@@ -23,6 +23,14 @@ export function cleanupLegacyPersistedState() {
   }
 }
 
+/**
+ * Test-only: reset the once-per-load sentinel so a test can exercise
+ * the cleanup path again. Do not call this from production code.
+ */
+export function __resetLegacyCleanupSentinelForTests() {
+  legacyCleanupDone = false;
+}
+
 export function loadPersistedState(): PwaPersistedState | null {
   if (typeof window === 'undefined') return null;
   cleanupLegacyPersistedState();

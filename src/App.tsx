@@ -325,7 +325,7 @@ function AppShell() {
 
   const selectedProfile = store.profiles.find((profile) => profile.id === store.selectedProfileId) ?? null;
   const selectedShare =
-    store.generatedKeyset?.shares.find((share) => share.member_idx === store.selectedGeneratedShareIdx) ?? null;
+    store.pendingKeyset?.shares.find((share) => share.member_idx === store.selectedGeneratedShareIdx) ?? null;
   const [operatorSettingsDraft, setOperatorSettingsDraft] = React.useState<OperatorSettingsDraft>(() =>
     buildOperatorSettingsDraft(selectedProfile),
   );
@@ -405,7 +405,15 @@ function AppShell() {
                   goToDashboard();
                   return;
                 }
-                await store.loadStoredProfile(profileId);
+                // D.1: `stored_password` is gone; passphrase must be
+                // re-entered on every session start. The prompt stays
+                // local — the value is handed to the store exactly
+                // once and never written to localStorage.
+                const passphrase = window.prompt('Enter the device passphrase to unlock this profile.');
+                if (passphrase == null || passphrase.length === 0) {
+                  return;
+                }
+                await store.loadStoredProfile(profileId, passphrase);
               })
             }
             onDelete={(profileId) =>
@@ -496,9 +504,9 @@ function AppShell() {
               id: profile.id,
               label: `${profile.label || 'Unnamed device'} (${shortProfileId(profile.id)})`,
             }))}
-            rotationSources={store.drafts.rotationForm.sources.map((source) => ({
+            rotationSources={store.drafts.rotationForm.sources.map((source, index) => ({
               packageText: source.packageText,
-              packagePassword: source.password,
+              packagePassword: store.draftSecrets.rotationSources[index] ?? '',
             }))}
             onChangeForm={(field, value) => {
               if (field === 'sourceProfileId') {
@@ -520,7 +528,7 @@ function AppShell() {
   }
 
   function renderCreateProfile() {
-    if (!store.generatedKeyset) return null;
+    if (!store.pendingKeyset) return null;
     return (
       <HostFlowShell
         title="Create Device Profile"
@@ -537,7 +545,7 @@ function AppShell() {
             </CardHeader>
             <CardContent className="igloo-stack">
               <CreateFlowSharePicker
-                shares={store.generatedKeyset.shares}
+                shares={store.pendingKeyset.shares}
                 selectedMemberIdx={store.selectedGeneratedShareIdx}
                 onSelect={(memberIdx) => store.selectGeneratedShare(memberIdx)}
               />
@@ -547,8 +555,8 @@ function AppShell() {
                   draft={{
                     label: store.drafts.profileForm.label,
                     relayUrls: store.drafts.profileForm.relayUrls,
-                    primarySecret: store.drafts.profileForm.password,
-                    secondarySecret: store.drafts.profileForm.confirmPassword,
+                    primarySecret: store.draftSecrets.profileFormPassword,
+                    secondarySecret: store.draftSecrets.profileFormConfirm,
                   }}
                   title="Local Browser Device"
                   subtitle={`Member ${selectedShare.member_idx}`}
@@ -559,8 +567,8 @@ function AppShell() {
                   actionLabel="Continue to Review"
                   actionVariant="default"
                   onLabelChange={(value) => store.updateProfileForm('label', value)}
-                  onPrimarySecretChange={(value) => store.updateProfileForm('password', value)}
-                  onSecondarySecretChange={(value) => store.updateProfileForm('confirmPassword', value)}
+                  onPrimarySecretChange={(value) => store.updateProfileFormPassword('password', value)}
+                  onSecondarySecretChange={(value) => store.updateProfileFormPassword('confirmPassword', value)}
                   onRelayUrlsChange={(value) => store.updateProfileForm('relayUrls', value)}
                   onAction={() => void run(() => store.reviewGeneratedProfile())}
                 />
@@ -573,7 +581,7 @@ function AppShell() {
   }
 
   function renderCreateConfirm() {
-    if (!store.generatedKeyset) return null;
+    if (!store.pendingKeyset) return null;
     return (
       <HostFlowShell
         title="Review Device Profile"
@@ -586,7 +594,7 @@ function AppShell() {
           <CreateFlowReviewPanel
             profileName={store.drafts.profileForm.label || selectedShare?.name || 'Device Profile'}
             sharePublicKey={selectedShare?.share_public_key ?? 'n/a'}
-            groupPublicKey={store.generatedKeyset.group_public_key}
+            groupPublicKey={store.pendingKeyset.group_public_key}
             relays={store.drafts.profileForm.relayUrls.split(/\r?\n/).map((value) => value.trim()).filter(Boolean)}
             actionLabel="Accept and Continue"
             onAccept={() => void run(() => store.acceptGeneratedProfile())}
@@ -597,8 +605,8 @@ function AppShell() {
   }
 
   function renderCreateDistribute() {
-    if (!store.generatedKeyset || !store.distributionSession || !selectedProfile) return null;
-    const remainingShares = store.generatedKeyset.shares.filter((share) =>
+    if (!store.pendingKeyset || !store.distributionSession || !selectedProfile) return null;
+    const remainingShares = store.pendingKeyset.shares.filter((share) =>
       store.distributionSession?.remaining_member_indices.includes(share.member_idx),
     );
     const distributionResults = deriveDistributionResults(
@@ -627,23 +635,34 @@ function AppShell() {
             sectionDescription="Each share can be copied, shown as a QR package, or downloaded as a `bfonboard` file."
             shares={remainingShares}
             drafts={Object.fromEntries(
-              Object.entries(store.drafts.distributionForms).map(([memberIdx, form]) => [
-                Number(memberIdx),
-                {
-                  label: form.label,
-                  packagePassword: form.password,
-                  confirmPassword: form.confirmPassword,
-                },
-              ]),
+              Object.entries(store.drafts.distributionForms).map(([memberIdx, form]) => {
+                const idx = Number(memberIdx);
+                const passwordSlot = store.draftSecrets.distributionPasswords[idx] ?? {
+                  password: '',
+                  confirmPassword: '',
+                };
+                return [
+                  idx,
+                  {
+                    label: form.label,
+                    packagePassword: passwordSlot.password,
+                    confirmPassword: passwordSlot.confirmPassword,
+                  },
+                ];
+              }),
             )}
             results={distributionResults}
-            onChangeDraft={(memberIdx, field, value) =>
-              store.updateDistributionForm(
-                memberIdx,
-                field === 'packagePassword' ? 'password' : field,
-                value,
-              )
-            }
+            onChangeDraft={(memberIdx, field, value) => {
+              if (field === 'label') {
+                store.updateDistributionForm(memberIdx, 'label', value);
+              } else {
+                store.updateDistributionPassword(
+                  memberIdx,
+                  field === 'packagePassword' ? 'password' : 'confirmPassword',
+                  value,
+                );
+              }
+            }}
             onDistribute={(memberIdx, kind) => void run(() => store.distributeShare(memberIdx, kind))}
             onFinish={() => store.finishDistribution()}
             beforeCards={(
@@ -762,8 +781,8 @@ function AppShell() {
                 Decryption Password
                 <input
                   type="password"
-                  value={store.drafts.importProfileForm.password}
-                  onChange={(event) => store.updateImportProfileForm('password', event.target.value)}
+                  value={store.draftSecrets.importProfileFormPassword}
+                  onChange={(event) => store.updateImportProfilePassword(event.target.value)}
                 />
               </label>
               <div className="igloo-button-row">
@@ -807,8 +826,8 @@ function AppShell() {
                 Decryption Password
                 <input
                   type="password"
-                  value={store.drafts.recoverProfileForm.password}
-                  onChange={(event) => store.updateRecoverProfileForm('password', event.target.value)}
+                  value={store.draftSecrets.recoverProfileFormPassword}
+                  onChange={(event) => store.updateRecoverProfilePassword(event.target.value)}
                 />
               </label>
               <div className="igloo-button-row">
@@ -888,8 +907,8 @@ function AppShell() {
                 Decryption Password
                 <input
                   type="password"
-                  value={store.drafts.onboardConnectForm.password}
-                  onChange={(event) => store.updateOnboardConnectForm('password', event.target.value)}
+                  value={store.draftSecrets.onboardConnectFormPassword}
+                  onChange={(event) => store.updateOnboardConnectPassword(event.target.value)}
                 />
               </label>
               <div className="igloo-button-row">
@@ -945,8 +964,8 @@ function AppShell() {
                   Password
                   <input
                     type="password"
-                    value={store.drafts.onboardSaveForm.password}
-                    onChange={(event) => store.updateOnboardSaveForm('password', event.target.value)}
+                    value={store.draftSecrets.onboardSaveFormPassword}
+                    onChange={(event) => store.updateOnboardSavePassword('password', event.target.value)}
                   />
                 </label>
               </div>
@@ -954,8 +973,8 @@ function AppShell() {
                 Confirm Password
                 <input
                   type="password"
-                  value={store.drafts.onboardSaveForm.confirmPassword}
-                  onChange={(event) => store.updateOnboardSaveForm('confirmPassword', event.target.value)}
+                  value={store.draftSecrets.onboardSaveFormConfirm}
+                  onChange={(event) => store.updateOnboardSavePassword('confirmPassword', event.target.value)}
                 />
               </label>
               <div className="igloo-button-row">
@@ -1006,8 +1025,8 @@ function AppShell() {
                 Package Password
                 <input
                   type="password"
-                  value={store.drafts.rotateConnectForm.password}
-                  onChange={(event) => store.updateRotateConnectForm('password', event.target.value)}
+                  value={store.draftSecrets.rotateConnectFormPassword}
+                  onChange={(event) => store.updateRotateConnectPassword(event.target.value)}
                 />
               </label>
               <div className="igloo-button-row">
@@ -1048,12 +1067,21 @@ function AppShell() {
             <span className="igloo-task-kicker">Same keyset, fresh device share</span>
             <p>This replacement keeps the same group public key and replaces this device with a new share and profile id.</p>
           </section>
+          <label>
+            Current Device Passphrase
+            <input
+              type="password"
+              value={store.unlockPassphrase}
+              onChange={(event) => store.setUnlockPassphrase(event.target.value)}
+              placeholder="Enter the passphrase for the active device"
+            />
+          </label>
           <div className="igloo-button-row">
             <Button
               type="button"
               size="sm"
               data-testid={CRITICAL_E2E_TEST_IDS.rotationConfirmSubmit}
-              onClick={() => void run(() => store.finalizeRotationUpdate())}
+              onClick={() => void run(() => store.finalizeRotationUpdate(store.unlockPassphrase))}
             >
               Replace Active Device
             </Button>
