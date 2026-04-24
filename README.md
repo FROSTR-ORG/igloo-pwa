@@ -63,6 +63,26 @@ Low-level maintenance/debug commands still exist:
 - `npm run build:browser-wasm`
 - `npm run build:ui`
 
+## Deployment
+
+The PWA ships a strict `Content-Security-Policy` meta tag in `index.html` and
+relies on cross-origin isolation for future WebAssembly/threading features.
+Production hosting **must** serve the following response headers on every
+HTML response alongside the bundled app:
+
+- `Cross-Origin-Opener-Policy: same-origin`
+- `Cross-Origin-Embedder-Policy: require-corp`
+- `Cross-Origin-Resource-Policy: same-origin`
+
+The Vite dev server sets these automatically (see `vite.config.ts`). Static
+hosts (e.g. nginx, Cloudflare Pages, Netlify) need equivalent header rules.
+Without them, `crossOriginIsolated` will be `false` and cross-origin window
+references will not be blocked by the browser.
+
+The shipped CSP rejects plaintext `ws://` / `http://` to non-loopback hosts;
+remote relays must use `wss://`. Loopback plaintext (`localhost`, `127.0.0.1`)
+is permitted so the local dev-relay and demo harness work out of the box.
+
 ## Project Docs
 
 - [TESTING.md](./TESTING.md)
