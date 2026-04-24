@@ -9,6 +9,7 @@ import {
 
 import * as adapter from './local-adapter';
 import { toPersistable } from './persist-allowlist';
+import { SessionController } from './session-controller';
 import {
   clearPersistedState,
   createDebouncedPersistor,
@@ -108,6 +109,22 @@ type AppState = PwaPersistedState & {
 };
 
 const AppStore = React.createContext<AppState | null>(null);
+
+/**
+ * Per-PwaStore SessionController. Exposed via context so tests and any
+ * future UI path can reach the same controller instance the adapter
+ * helpers were bound to. Replaces the module-global singleton that
+ * used to live in `profile-runtime.ts` (PR17 / D.4).
+ */
+const SessionControllerContext = React.createContext<SessionController | null>(null);
+
+export function useSessionController(): SessionController {
+  const controller = React.useContext(SessionControllerContext);
+  if (!controller) {
+    throw new Error('SessionControllerContext missing; wrap tree in <StoreProvider>.');
+  }
+  return controller;
+}
 
 const defaultDrafts: PwaDraftState = {
   createForm: {
@@ -297,6 +314,27 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     runtimeSnapshotRef.current = state.runtimeSnapshot;
   }, [state.runtimeSnapshot]);
 
+  // D.4: one SessionController per PwaStore instance. Created lazily
+  // via `useRef` so re-renders don't re-instantiate it, but the React
+  // tree keeps a stable reference for the lifetime of the provider.
+  // StrictMode double-mount cleans up via the effect below, which
+  // calls `controller.stop()` — idempotent on a fresh controller.
+  const controllerRef = React.useRef<SessionController | null>(null);
+  if (controllerRef.current == null) {
+    controllerRef.current = new SessionController();
+  }
+  const controller = controllerRef.current;
+
+  React.useEffect(
+    () => () => {
+      // Stop on unmount. Idempotent: a second stop returns false
+      // without throwing. StrictMode's simulated unmount/remount
+      // becomes start -> stop -> start, which is now safe.
+      void controller.stop();
+    },
+    [controller],
+  );
+
   // D.1: the v1 per-tick `savePersistedState(state)` effect is replaced
   // with a debounced persistor that writes ONLY the allow-list fields
   // produced by `toPersistable(state)`. Secrets, runtime snapshots, and
@@ -337,7 +375,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       if (!currentSnapshot?.active || currentSnapshot.profile?.id !== activeProfileId) return;
 
       try {
-        const runtimeSnapshot = await adapter.readSession(currentSnapshot);
+        const runtimeSnapshot = await adapter.readSession(currentSnapshot, controller);
         if (!runtimeSnapshot || cancelled) return;
         setState((current) => {
           if (!current.runtimeSnapshot?.active || current.runtimeSnapshot.profile?.id !== activeProfileId) {
@@ -370,7 +408,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       cancelled = true;
       window.clearInterval(interval);
     };
-  }, [state.runtimeSnapshot?.active, state.runtimeSnapshot?.profile?.id]);
+  }, [controller, state.runtimeSnapshot?.active, state.runtimeSnapshot?.profile?.id]);
 
   const ensureProfileIdAvailable = React.useCallback(
     (profile: Pick<PwaProfile, 'id' | 'label'>) => {
@@ -394,7 +432,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           : await saveBrowserProfileAndMaybeActivate({
               profile,
               autoStart: state.settings.auto_open_signer,
-              activate: async () => await adapter.startSession(profile, passphrase),
+              activate: async () => await adapter.startSession(profile, passphrase, controller),
             });
       const snapshot = saved.runtime;
       const storedProfile = (snapshot?.profile ?? saved.profile) as PwaProfile;
@@ -412,7 +450,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         unlockPassphrase: passphrase,
       }));
     },
-    [ensureProfileIdAvailable, state.settings.auto_open_signer],
+    [controller, ensureProfileIdAvailable, state.settings.auto_open_signer],
   );
 
   const value = React.useMemo<AppState>(
@@ -435,7 +473,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         if (!profile) {
           throw new Error('Profile not found.');
         }
-        const runtimeSnapshot = await adapter.startSession(profile, passphrase);
+        const runtimeSnapshot = await adapter.startSession(profile, passphrase, controller);
         setState((current) => ({
           ...current,
           selectedProfileId: profile.id,
@@ -664,7 +702,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         const saved = await saveBrowserProfileAndMaybeActivate({
           profile,
           autoStart: true,
-          activate: async () => await adapter.startSession(profile, password),
+          activate: async () => await adapter.startSession(profile, password, controller),
         });
         const runtimeSnapshot = saved.runtime;
         const remaining = state.pendingKeyset.shares
@@ -1090,7 +1128,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           throw new Error('Target profile passphrase is required to rotate.');
         }
         if (state.runtimeSnapshot?.active) {
-          await adapter.stopSession(state.runtimeSnapshot);
+          await adapter.stopSession(state.runtimeSnapshot, controller);
         }
         const profile = await adapter.finalizeRotationUpdateFromConnection({
           targetProfile: selectedProfile,
@@ -1102,7 +1140,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         const saved = await saveBrowserProfileAndMaybeActivate({
           profile,
           autoStart: true,
-          activate: async () => await adapter.startSession(profile, newPassphrase),
+          activate: async () => await adapter.startSession(profile, newPassphrase, controller),
         });
         const runtimeSnapshot = saved.runtime;
         setState((current) => ({
@@ -1139,7 +1177,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         await navigator.clipboard.writeText(packageText);
       },
       deleteProfile(profileId) {
-        void adapter.disposeRuntimeSessionForProfile(profileId);
+        void adapter.disposeRuntimeSessionForProfile(profileId, controller);
         setState((current) => ({
           ...current,
           profiles: current.profiles.filter((entry) => entry.id !== profileId),
@@ -1160,7 +1198,12 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           direction,
           method,
           value,
+          controller,
         );
+        // D.4: null return = session drift. Leave state untouched —
+        // the UI retains whatever runtimeSnapshot it last saw rather
+        // than surfacing a thrown error.
+        if (!runtimeSnapshot) return;
         setState((current) => ({
           ...current,
           peerPermissionStates:
@@ -1176,7 +1219,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         }));
       },
       async clearPeerPolicies() {
-        const runtimeSnapshot = await adapter.clearPeerPolicies(state.runtimeSnapshot);
+        const runtimeSnapshot = await adapter.clearPeerPolicies(state.runtimeSnapshot, controller);
+        if (!runtimeSnapshot) return;
         setState((current) => ({
           ...current,
           peerPermissionStates:
@@ -1196,7 +1240,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         if (!state.unlockPassphrase.trim()) {
           throw new Error('Enter the device passphrase to start the signer.');
         }
-        const runtimeSnapshot = await adapter.startSession(selectedProfile, state.unlockPassphrase);
+        const runtimeSnapshot = await adapter.startSession(selectedProfile, state.unlockPassphrase, controller);
         setState((current) => ({
           ...current,
           profiles:
@@ -1214,7 +1258,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         }));
       },
       async stopSigner() {
-        const runtimeSnapshot = await adapter.stopSession(state.runtimeSnapshot);
+        const runtimeSnapshot = await adapter.stopSession(state.runtimeSnapshot, controller);
         setState((current) => ({
           ...current,
           profiles:
@@ -1231,7 +1275,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         }));
       },
       async refreshSigner() {
-        const runtimeSnapshot = await adapter.refreshSession(state.runtimeSnapshot);
+        const runtimeSnapshot = await adapter.refreshSession(state.runtimeSnapshot, controller);
         setState((current) => ({
           ...current,
           profiles:
@@ -1248,7 +1292,14 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       },
       async saveOperatorSettings(input) {
         if (!selectedProfile) return;
-        const runtimeSnapshot = await adapter.applyOperatorSettings(selectedProfile, state.runtimeSnapshot, input);
+        const runtimeSnapshot = await adapter.applyOperatorSettings(
+          selectedProfile,
+          state.runtimeSnapshot,
+          input,
+          controller,
+        );
+        // D.4: null return = session drift. UI keeps its current view.
+        if (!runtimeSnapshot) return;
         setState((current) => ({
           ...current,
           profiles:
@@ -1267,7 +1318,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       },
       async logout() {
         const stoppedSnapshot = state.runtimeSnapshot?.active
-          ? await adapter.stopSession(state.runtimeSnapshot)
+          ? await adapter.stopSession(state.runtimeSnapshot, controller)
           : null;
         setState((current) => ({
           ...current,
@@ -1296,10 +1347,14 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         }));
       },
     }),
-    [persistProfileToDashboard, selectedProfile, state],
+    [controller, persistProfileToDashboard, selectedProfile, state],
   );
 
-  return <AppStore.Provider value={value}>{children}</AppStore.Provider>;
+  return (
+    <SessionControllerContext.Provider value={controller}>
+      <AppStore.Provider value={value}>{children}</AppStore.Provider>
+    </SessionControllerContext.Provider>
+  );
 }
 
 export function useStore() {

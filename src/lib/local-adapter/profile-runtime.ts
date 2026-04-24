@@ -1,10 +1,11 @@
 import { decodeBfSharePackage, sharePackageToWireJson } from 'igloo-shared';
 
-import {
-  startBrowserRuntimeSession,
-  type BrowserRuntimeSession,
-} from '../page-runtime-host';
 import type { PwaProfile, PwaRuntimeSnapshot } from '../types';
+import {
+  getDefaultSessionController,
+  SessionController,
+  type SessionEpoch,
+} from '../session-controller';
 import {
   normalizePwaSignerSettings,
   normalizeRelayList,
@@ -13,56 +14,61 @@ import {
   type OperatorSettingsInput,
 } from './common';
 
-let activeRuntimeSession: BrowserRuntimeSession | null = null;
-let activeRuntimeProfileId: string | null = null;
-
 /**
- * Module-scoped in-memory cache of the reconstructed `{idx, seckey}`
- * share package JSON per profile id. Populated on `startSession` after
- * the user's passphrase unlocks `encrypted_bfshare_artifact`, and read
- * by runtime-snapshot / rotation paths that need to re-derive the
- * profile payload. Cleared when the session stops or the profile is
- * deleted. This value CONTAINS THE RAW SHARE SECKEY and is never
- * serialized outside the tab (no localStorage, no postMessage).
+ * Resolve which controller a call should use. All adapter helpers now
+ * accept an optional controller so that the React store can inject a
+ * per-instance one while test code and a future background utility can
+ * fall back to the default module-scoped instance.
  */
-const sharePackageJsonByProfileId = new Map<string, string>();
-
-export function getSharePackageJsonForProfile(profileId: string): string | null {
-  return sharePackageJsonByProfileId.get(profileId) ?? null;
+function resolveController(controller?: SessionController | null): SessionController {
+  return controller ?? getDefaultSessionController();
 }
 
-export function requireSharePackageJsonForProfile(profileId: string): string {
-  const value = sharePackageJsonByProfileId.get(profileId);
+/**
+ * Profile-runtime extension to a `PwaRuntimeSnapshot`. Captures the
+ * monotonically-increasing `SessionEpoch` returned by
+ * `SessionController.start()`. Stored in React state so later read /
+ * refresh / policy calls can pass it back — stale epochs silently
+ * no-op instead of throwing on drift.
+ */
+export type PwaSessionEpoch = SessionEpoch;
+
+export function getSharePackageJsonForProfile(
+  profileId: string,
+  controller?: SessionController | null,
+): string | null {
+  return resolveController(controller).getSharePackageJson(profileId);
+}
+
+export function requireSharePackageJsonForProfile(
+  profileId: string,
+  controller?: SessionController | null,
+): string {
+  const value = resolveController(controller).getSharePackageJson(profileId);
   if (!value) {
     throw new Error('Signer session is not unlocked. Start the signer with the profile passphrase first.');
   }
   return value;
 }
 
-export function clearSharePackageJsonForProfile(profileId: string) {
-  sharePackageJsonByProfileId.delete(profileId);
+export function clearSharePackageJsonForProfile(
+  profileId: string,
+  controller?: SessionController | null,
+): void {
+  resolveController(controller).clearSharePackageJson(profileId);
 }
 
-async function clearActiveRuntimeSession() {
-  if (!activeRuntimeSession) return;
-  try {
-    activeRuntimeSession.stop();
-  } catch {
-    // Ignore stop failures while replacing or resetting the session.
-  }
-  if (activeRuntimeProfileId) {
-    sharePackageJsonByProfileId.delete(activeRuntimeProfileId);
-  }
-  activeRuntimeSession = null;
-  activeRuntimeProfileId = null;
-}
-
-export async function disposeRuntimeSessionForProfile(profileId?: string) {
-  if (!profileId || activeRuntimeProfileId === profileId) {
-    await clearActiveRuntimeSession();
+export async function disposeRuntimeSessionForProfile(
+  profileId?: string,
+  controller?: SessionController | null,
+): Promise<void> {
+  const target = resolveController(controller);
+  if (!profileId || target.getActiveProfileId() === profileId) {
+    // Idempotent stop; safe on a fresh controller or on drift.
+    await target.stop();
   }
   if (profileId) {
-    sharePackageJsonByProfileId.delete(profileId);
+    target.clearSharePackageJson(profileId);
   }
 }
 
@@ -94,7 +100,11 @@ export async function unlockShareFromArtifact(
   }
 }
 
-export async function startSession(profile: PwaProfile, passphrase: string): Promise<PwaRuntimeSnapshot> {
+export async function startSession(
+  profile: PwaProfile,
+  passphrase: string,
+  controller?: SessionController | null,
+): Promise<PwaRuntimeSnapshot> {
   if (!passphrase.trim()) {
     throw new Error('Passphrase is required.');
   }
@@ -106,10 +116,10 @@ export async function startSession(profile: PwaProfile, passphrase: string): Pro
     );
   }
 
+  const target = resolveController(controller);
   const sharePackageJson = await unlockShareFromArtifact(profile, passphrase);
 
-  await clearActiveRuntimeSession();
-  activeRuntimeSession = await startBrowserRuntimeSession({
+  const { session } = await target.start(profile.id, {
     groupName: profile.label,
     relays: profile.relays,
     groupPublicKey: profile.group_public_key,
@@ -119,29 +129,32 @@ export async function startSession(profile: PwaProfile, passphrase: string): Pro
     groupPackageJson: profile.group_package_json,
     sharePackageJson,
   });
-  activeRuntimeProfileId = profile.id;
-  sharePackageJsonByProfileId.set(profile.id, sharePackageJson);
 
-  return toRuntimeSnapshot(profile, activeRuntimeSession, true, sharePackageJson);
+  return toRuntimeSnapshot(profile, session, true, sharePackageJson);
 }
 
-export async function stopSession(current: PwaRuntimeSnapshot | null): Promise<PwaRuntimeSnapshot | null> {
+export async function stopSession(
+  current: PwaRuntimeSnapshot | null,
+  controller?: SessionController | null,
+): Promise<PwaRuntimeSnapshot | null> {
   if (!current?.profile) return null;
-  if (!activeRuntimeSession || activeRuntimeProfileId !== current.profile.id) {
-    // Idempotent: nothing active for this profile. Do not throw — callers
-    // may hit this legitimately under React StrictMode double-mount or
-    // after a reload.
+  const target = resolveController(controller);
+  if (target.getActiveProfileId() !== current.profile.id) {
+    // Idempotent: nothing active for this profile. Do not throw —
+    // callers hit this legitimately under React StrictMode double-mount
+    // or after a reload.
     return null;
   }
-  const sharePackageJson = sharePackageJsonByProfileId.get(current.profile.id);
+  const session = target.getActiveSession();
+  const sharePackageJson = target.getSharePackageJson(current.profile.id);
   // Capture a final stopped snapshot before clearing caches. If the
   // share JSON is already gone, fall back to `toRuntimeSnapshot` without
   // the projection refresh by passing an empty string — the runtime
   // will still surface logs and `active: false`.
-  const stoppedSnapshot = sharePackageJson
-    ? toRuntimeSnapshot(current.profile, activeRuntimeSession, false, sharePackageJson)
+  const stoppedSnapshot = session && sharePackageJson
+    ? toRuntimeSnapshot(current.profile, session, false, sharePackageJson)
     : { ...(current as PwaRuntimeSnapshot), active: false, runtime_log_lines: [] };
-  await clearActiveRuntimeSession();
+  await target.stop();
   return {
     ...stoppedSnapshot,
     active: false,
@@ -149,20 +162,35 @@ export async function stopSession(current: PwaRuntimeSnapshot | null): Promise<P
   };
 }
 
-export async function refreshSession(current: PwaRuntimeSnapshot | null): Promise<PwaRuntimeSnapshot | null> {
+export async function refreshSession(
+  current: PwaRuntimeSnapshot | null,
+  controller?: SessionController | null,
+): Promise<PwaRuntimeSnapshot | null> {
   if (!current?.profile) return null;
-  if (!activeRuntimeSession || activeRuntimeProfileId !== current.profile.id) {
+  const target = resolveController(controller);
+  const profileId = current.profile.id;
+  if (target.getActiveProfileId() !== profileId) {
     return null;
   }
-  const sharePackageJson = requireSharePackageJsonForProfile(current.profile.id);
-  const refreshed = await activeRuntimeSession.refreshPeers();
+  const sharePackageJson = target.getSharePackageJson(profileId);
+  if (!sharePackageJson) {
+    return null;
+  }
+  const refreshed = await target.refresh(profileId, target.currentEpoch());
+  if (!refreshed) {
+    return null;
+  }
   const runtimeProfile = toRuntimeProfile(current.profile, refreshed, sharePackageJson);
+  const session = target.getActiveSession();
   return {
     active: true,
     profile: runtimeProfile,
     runtime_status: refreshed.runtimeStatus,
     readiness: refreshed.readiness,
-    runtime_log_lines: [...activeRuntimeSession.collectLogs(), '[info] session refresh completed'],
+    runtime_log_lines: [
+      ...(session?.collectLogs() ?? []),
+      '[info] session refresh completed',
+    ],
     runtime_host: {
       profile_id: runtimeProfile.id,
       mode: 'browser',
@@ -173,19 +201,35 @@ export async function refreshSession(current: PwaRuntimeSnapshot | null): Promis
   };
 }
 
-export async function readSession(current: PwaRuntimeSnapshot | null): Promise<PwaRuntimeSnapshot | null> {
+export async function readSession(
+  current: PwaRuntimeSnapshot | null,
+  controller?: SessionController | null,
+): Promise<PwaRuntimeSnapshot | null> {
   if (!current?.profile) return null;
-  if (!activeRuntimeSession || activeRuntimeProfileId !== current.profile.id) {
+  const target = resolveController(controller);
+  const profileId = current.profile.id;
+  if (target.getActiveProfileId() !== profileId) {
     return null;
   }
-  const sharePackageJson = sharePackageJsonByProfileId.get(current.profile.id);
+  const sharePackageJson = target.getSharePackageJson(profileId);
   if (!sharePackageJson) {
     // Session exists but share JSON is gone — shouldn't happen in
     // practice but bail out rather than reading a stale profile.
     return null;
   }
-
-  return toRuntimeSnapshot(current.profile, activeRuntimeSession, true, sharePackageJson);
+  // `read()` returns null on stale epoch as well; here we use the
+  // current epoch because the store does not track an epoch for this
+  // code path yet, but the profile-id guard above is sufficient for
+  // correctness.
+  const snapshot = target.read(profileId, target.currentEpoch());
+  if (!snapshot) {
+    return null;
+  }
+  const session = target.getActiveSession();
+  if (!session) {
+    return null;
+  }
+  return toRuntimeSnapshot(current.profile, session, true, sharePackageJson);
 }
 
 
@@ -195,36 +239,53 @@ export async function applyPeerPolicy(
   direction: 'request' | 'respond',
   method: 'ping' | 'onboard' | 'sign' | 'ecdh',
   value: boolean,
-): Promise<PwaRuntimeSnapshot> {
-  if (!current?.profile) {
-    throw new Error('Load or onboard a device profile before editing peer policies.');
+  controller?: SessionController | null,
+): Promise<PwaRuntimeSnapshot | null> {
+  if (!current?.profile) return null;
+  const target = resolveController(controller);
+  const profileId = current.profile.id;
+  if (!current.active || target.getActiveProfileId() !== profileId) {
+    // Idempotent: drift between the snapshot in React state and the
+    // live session. Return null — the store leaves `runtimeSnapshot`
+    // untouched instead of throwing.
+    return null;
   }
-  if (!current.active || !activeRuntimeSession || activeRuntimeProfileId !== current.profile.id) {
-    throw new Error('Start the signer before editing live peer policies.');
-  }
-
-  await activeRuntimeSession.updatePeerPolicyOverride(pubkey, {
+  const applied = await target.applyPeerPolicy(profileId, target.currentEpoch(), {
+    pubkey,
     direction,
     method,
     value: value ? 'allow' : 'deny',
   });
-
-  const sharePackageJson = requireSharePackageJsonForProfile(current.profile.id);
-  return toRuntimeSnapshot(current.profile, activeRuntimeSession, true, sharePackageJson);
+  if (!applied) {
+    return null;
+  }
+  const sharePackageJson = target.getSharePackageJson(profileId);
+  const session = target.getActiveSession();
+  if (!sharePackageJson || !session) {
+    return null;
+  }
+  return toRuntimeSnapshot(current.profile, session, true, sharePackageJson);
 }
 
-export async function clearPeerPolicies(current: PwaRuntimeSnapshot | null): Promise<PwaRuntimeSnapshot> {
-  if (!current?.profile) {
-    throw new Error('Load or onboard a device profile before clearing peer policies.');
+export async function clearPeerPolicies(
+  current: PwaRuntimeSnapshot | null,
+  controller?: SessionController | null,
+): Promise<PwaRuntimeSnapshot | null> {
+  if (!current?.profile) return null;
+  const target = resolveController(controller);
+  const profileId = current.profile.id;
+  if (!current.active || target.getActiveProfileId() !== profileId) {
+    return null;
   }
-  if (!current.active || !activeRuntimeSession || activeRuntimeProfileId !== current.profile.id) {
-    throw new Error('Start the signer before clearing live peer policies.');
+  const cleared = await target.clearPeerPolicies(profileId, target.currentEpoch());
+  if (!cleared) {
+    return null;
   }
-
-  const session = activeRuntimeSession;
-  await session.clearPeerPolicyOverrides();
-
-  const sharePackageJson = requireSharePackageJsonForProfile(current.profile.id);
+  const sharePackageJson = target.getSharePackageJson(profileId);
+  const session = target.getActiveSession();
+  if (!sharePackageJson || !session) {
+    return null;
+  }
   return toRuntimeSnapshot(current.profile, session, true, sharePackageJson);
 }
 
@@ -232,9 +293,14 @@ export async function applyOperatorSettings(
   profile: PwaProfile,
   current: PwaRuntimeSnapshot | null,
   input: OperatorSettingsInput,
-): Promise<PwaRuntimeSnapshot> {
-  if (!current?.profile || !current.active || !activeRuntimeSession || activeRuntimeProfileId !== profile.id) {
-    throw new Error('Start the signer before applying live operator settings.');
+  controller?: SessionController | null,
+): Promise<PwaRuntimeSnapshot | null> {
+  if (!current?.profile || !current.active) {
+    return null;
+  }
+  const target = resolveController(controller);
+  if (target.getActiveProfileId() !== profile.id) {
+    return null;
   }
 
   const relays = normalizeRelayList(input.relays);
@@ -253,7 +319,15 @@ export async function applyOperatorSettings(
   const nextRelays = updatedProfile.relays.join('\n');
   const relayChanged = previousRelays !== nextRelays;
 
-  const sharePackageJson = requireSharePackageJsonForProfile(profile.id);
+  const sharePackageJson = target.getSharePackageJson(profile.id);
+  if (!sharePackageJson) {
+    return null;
+  }
+
+  const session = target.getActiveSession();
+  if (!session) {
+    return null;
+  }
 
   if (relayChanged) {
     // Relay change requires a fresh session bootstrap. With
@@ -262,9 +336,9 @@ export async function applyOperatorSettings(
     // the share. We preserve legacy behaviour for the in-memory
     // session: stop the current session and let the caller drive
     // re-start via the main start flow.
-    activeRuntimeSession.updateConfig(updatedProfile.signer_settings);
-    const snapshot = toRuntimeSnapshot(updatedProfile, activeRuntimeSession, true, sharePackageJson);
-    await clearActiveRuntimeSession();
+    target.updateConfig(profile.id, target.currentEpoch(), updatedProfile.signer_settings);
+    const snapshot = toRuntimeSnapshot(updatedProfile, session, true, sharePackageJson);
+    await target.stop();
     return {
       ...snapshot,
       active: false,
@@ -275,6 +349,6 @@ export async function applyOperatorSettings(
     };
   }
 
-  activeRuntimeSession.updateConfig(updatedProfile.signer_settings);
-  return toRuntimeSnapshot(updatedProfile, activeRuntimeSession, true, sharePackageJson);
+  target.updateConfig(profile.id, target.currentEpoch(), updatedProfile.signer_settings);
+  return toRuntimeSnapshot(updatedProfile, session, true, sharePackageJson);
 }
