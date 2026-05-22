@@ -67,8 +67,8 @@ describe('igloo-pwa app shell', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Connect' }));
 
     await waitFor(() => {
-      expect(screen.getByText('Save Onboarded Device')).toBeInTheDocument();
       expect(screen.getByText('Review Onboarded Profile')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Save Device' })).toBeInTheDocument();
     });
   });
 
@@ -224,6 +224,56 @@ describe('igloo-pwa app shell', () => {
     await waitFor(() => {
       expect(screen.getByRole('heading', { name: 'Review Onboarded Profile' })).toBeInTheDocument();
       expect(screen.queryByText('Confirm Onboarded Profile')).not.toBeInTheDocument();
+    });
+  });
+
+  it('normalizes transient onboarding states back to package entry', async () => {
+    cleanup();
+    window.localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({
+        profiles: [],
+        selectedProfileId: '',
+        activeView: 'onboard-handshake',
+        activeDashboardTab: 'signer',
+        unlockPhrase: '',
+        generatedKeyset: null,
+        selectedGeneratedShareIdx: null,
+        pendingLoadConfirmation: null,
+        pendingOnboardConnection: null,
+        distributionSession: null,
+        runtimeSnapshot: null,
+        settings: {
+          remember_browser_state: true,
+          auto_open_signer: true,
+          prefer_install_prompt: true,
+        },
+        drafts: {
+          createForm: {
+            groupName: '',
+            threshold: '2',
+            count: '3',
+          },
+          profileForm: {
+            label: '',
+            password: '',
+            confirmPassword: '',
+            relayUrls: 'wss://relay.primal.net',
+          },
+          distributionForms: {},
+          importProfileForm: { profileString: '', password: '' },
+          recoverProfileForm: { shareString: '', password: '' },
+          onboardConnectForm: { packageText: 'bfonboard1demo', password: 'package-pass' },
+          onboardSaveForm: { label: '', password: '', confirmPassword: '' },
+        },
+      }),
+    );
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: 'Enter bfonboard Package' })).toBeInTheDocument();
+      expect(screen.queryByRole('heading', { name: 'Connecting to Inviter' })).not.toBeInTheDocument();
     });
   });
 

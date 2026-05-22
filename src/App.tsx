@@ -13,6 +13,10 @@ import {
   CreateFlowGenerateCard,
   CreateFlowProfileSetup,
   CreateFlowReviewPanel,
+  OnboardCompletePanel,
+  OnboardFailedPanel,
+  OnboardHandshakePanel,
+  OnboardPackageEntry,
   RotateKeysetPanel,
   HostEntryTile,
   HostFlowShell,
@@ -605,8 +609,8 @@ function AppShell() {
           packageText: result.package_text,
         },
       ]),
-    ) as Record<number, { kind: 'prepared' | 'copied' | 'qr' | 'saved'; label: string; packageText?: string }>;
-    const allDistributed = remainingShares.length > 0 && remainingShares.every((share) => distributionResults[share.member_idx]);
+    ) as Record<number, { kind: 'package_ready' | 'handoff_pending' | 'completed'; label: string; packageText?: string }>;
+    const allDistributed = remainingShares.length > 0 && remainingShares.every((share) => distributionResults[share.member_idx]?.kind === 'completed');
     return (
       <>
         <PublicTaskShell>
@@ -836,114 +840,99 @@ function AppShell() {
 
   function renderOnboardConnect() {
     return (
-      <HostFlowShell
-        title="Onboard Device"
-        description="Connect with a password-protected onboarding package and complete the handshake."
-        onBack={goToLanding}
-        backTooltip="Back to landing"
-      >
-        <section className="igloo-flow-root igloo-stack">
-          <Card>
-            <CardHeader>
-              <CardTitle>Connect with bfonboard</CardTitle>
-              <CardDescription>
-                The onboarding device will dial out to the peer and negotiate the handshake before you save the
-                resulting device.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="igloo-stack">
-              <label>
-                bfonboard
-                <Textarea
-                  className="min-h-[112px]"
-                  value={store.drafts.onboardConnectForm.packageText}
-                  onChange={(event) => store.updateOnboardConnectForm('packageText', event.target.value)}
-                  placeholder="Paste bfonboard1..."
-                />
-              </label>
-              <label>
-                Decryption Password
-                <input
-                  type="password"
-                  value={store.drafts.onboardConnectForm.password}
-                  onChange={(event) => store.updateOnboardConnectForm('password', event.target.value)}
-                />
-              </label>
-              <div className="igloo-button-row">
-                <Button type="button" size="sm" onClick={() => void run(() => store.connectOnboardingPackage())}>
-                  Connect
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        </section>
-      </HostFlowShell>
+      <>
+        <PublicTaskShell>
+          <PageBackLink label="Back to Welcome" onBack={goToLanding} />
+          <PublicTaskTitle
+            title="Onboard Device"
+            description="Connect with a password-protected onboarding package and complete the handshake."
+          />
+          <section className="igloo-flow-root">
+            <OnboardPackageEntry
+              packageText={store.drafts.onboardConnectForm.packageText}
+              password={store.drafts.onboardConnectForm.password}
+              onPackageTextChange={(value) => store.updateOnboardConnectForm('packageText', value)}
+              onPasswordChange={(value) => store.updateOnboardConnectForm('password', value)}
+              onConnect={() => void run(() => store.connectOnboardingPackage())}
+            />
+          </section>
+        </PublicTaskShell>
+        <PublicFocusFooter />
+      </>
+    );
+  }
+
+  function renderOnboardHandshake() {
+    return (
+      <>
+        <PublicTaskShell>
+          <PageBackLink label="Back" onBack={() => store.setActiveView('onboard-connect')} />
+          <PublicTaskTitle
+            title="Onboarding Handshake"
+            description="The package is being decoded and the peer handshake is running."
+          />
+          <section className="igloo-flow-root">
+            <OnboardHandshakePanel />
+          </section>
+        </PublicTaskShell>
+        <PublicFocusFooter />
+      </>
+    );
+  }
+
+  function renderOnboardFailed() {
+    return (
+      <>
+        <PublicTaskShell>
+          <PageBackLink label="Back" onBack={() => store.setActiveView('onboard-connect')} />
+          <PublicTaskTitle
+            title="Onboarding Failed"
+            description="The onboarding package did not complete the recipient handshake."
+          />
+          <section className="igloo-flow-root">
+            <OnboardFailedPanel
+              message={uiError ?? 'The onboarding package could not be connected.'}
+              onRetry={() => {
+                setUiError(null);
+                store.setActiveView('onboard-connect');
+              }}
+            />
+          </section>
+        </PublicTaskShell>
+        <PublicFocusFooter />
+      </>
     );
   }
 
   function renderOnboardSave() {
     if (!store.pendingOnboardConnection) return null;
+    const preview = store.pendingOnboardConnection.preview;
     return (
-      <HostFlowShell
-        title="Save Onboarded Device"
-        description="Review the resolved profile details and choose the password used to store this device locally."
-        onBack={() => store.setActiveView('onboard-connect')}
-        backTooltip="Back to connect"
-      >
-        <section className="igloo-flow-root igloo-stack">
-          <ProfileConfirmationCard
-            title="Review Onboarded Profile"
-            profileName={store.pendingOnboardConnection.preview.label}
-            sharePublicKey={store.pendingOnboardConnection.preview.share_public_key}
-            groupPublicKey={store.pendingOnboardConnection.preview.group_public_key}
-            relays={store.pendingOnboardConnection.preview.relays}
+      <>
+        <PublicTaskShell>
+          <PageBackLink label="Back" onBack={() => store.setActiveView('onboard-connect')} />
+          <PublicTaskTitle
+            title="Onboarding Complete"
+            description="Review the resolved profile details and choose the password used to store this device locally."
           />
-          <section className="igloo-task-banner">
-            <span className="igloo-task-kicker">Handshake complete</span>
-            <p>
-              The onboarding package has been resolved. Confirm the read-only profile details, then save this device locally.
-            </p>
+          <section className="igloo-flow-root">
+            <OnboardCompletePanel
+              preview={{
+                label: preview.label,
+                sharePublicKey: preview.share_public_key,
+                groupPublicKey: preview.group_public_key,
+                relays: preview.relays,
+              }}
+              draft={store.drafts.onboardSaveForm}
+              onLabelChange={(value) => store.updateOnboardSaveForm('label', value)}
+              onPasswordChange={(value) => store.updateOnboardSaveForm('password', value)}
+              onConfirmPasswordChange={(value) => store.updateOnboardSaveForm('confirmPassword', value)}
+              onSave={() => void run(() => store.finalizeOnboardedDevice())}
+            />
           </section>
-          <Card>
-            <CardHeader>
-              <CardTitle>Finalize Device</CardTitle>
-              <CardDescription>This device name and password are used when storing the profile locally.</CardDescription>
-            </CardHeader>
-            <CardContent className="igloo-stack">
-              <div className="igloo-two-up">
-                <label>
-                  Device Name
-                  <input
-                    value={store.drafts.onboardSaveForm.label}
-                    onChange={(event) => store.updateOnboardSaveForm('label', event.target.value)}
-                  />
-                </label>
-                <label>
-                  Password
-                  <input
-                    type="password"
-                    value={store.drafts.onboardSaveForm.password}
-                    onChange={(event) => store.updateOnboardSaveForm('password', event.target.value)}
-                  />
-                </label>
-              </div>
-              <label>
-                Confirm Password
-                <input
-                  type="password"
-                  value={store.drafts.onboardSaveForm.confirmPassword}
-                  onChange={(event) => store.updateOnboardSaveForm('confirmPassword', event.target.value)}
-                />
-              </label>
-              <div className="igloo-button-row">
-                <Button type="button" size="sm" onClick={() => void run(() => store.finalizeOnboardedDevice())}>
-                  Save Device
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        </section>
-      </HostFlowShell>
+        </PublicTaskShell>
+        <PublicFocusFooter />
+      </>
     );
   }
 
@@ -1288,6 +1277,8 @@ function AppShell() {
       {store.activeView === 'load-recover' ? renderLoadRecover() : null}
       {store.activeView === 'load-confirm' ? renderLoadConfirm() : null}
       {store.activeView === 'onboard-connect' ? renderOnboardConnect() : null}
+      {store.activeView === 'onboard-handshake' ? renderOnboardHandshake() : null}
+      {store.activeView === 'onboard-failed' ? renderOnboardFailed() : null}
       {store.activeView === 'onboard-save' ? renderOnboardSave() : null}
       {store.activeView === 'rotate-connect' ? renderRotateConnect() : null}
       {store.activeView === 'rotate-save' ? renderRotateSave() : null}

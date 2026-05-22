@@ -49,7 +49,7 @@ type AppState = PwaPersistedState & {
     field: keyof PwaDraftState['distributionForms'][number],
     value: string,
   ) => void;
-  distributeShare: (memberIdx: number, kind: 'prepare' | 'copy' | 'qr' | 'save') => Promise<void>;
+  distributeShare: (memberIdx: number, kind: 'prepare' | 'copy' | 'qr' | 'save' | 'mark') => Promise<void>;
   closeQrPackage: () => void;
   finishDistribution: () => void;
   startLoadChoice: () => void;
@@ -228,6 +228,9 @@ function normalizeLoadedState(): PwaPersistedState {
 
   if (loadedActiveView === 'onboard-confirm') {
     normalized.activeView = normalized.pendingOnboardConnection ? 'onboard-save' : 'onboard-connect';
+  }
+  if (loadedActiveView === 'onboard-handshake') {
+    normalized.activeView = 'onboard-connect';
   }
 
   return normalized;
@@ -676,6 +679,28 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         if (!state.generatedKeyset || !state.distributionSession || !selectedProfile) {
           throw new Error('Create the primary device profile before distributing shares.');
         }
+        if (kind === 'mark') {
+          const existing = state.distributionSession.results[memberIdx];
+          if (!existing) {
+            throw new Error('Create the onboarding package before marking it distributed.');
+          }
+          setState((current) => ({
+            ...current,
+            distributionSession: current.distributionSession
+              ? {
+                  ...current.distributionSession,
+                  results: {
+                    ...current.distributionSession.results,
+                    [memberIdx]: {
+                      ...existing,
+                      kind: 'completed',
+                    },
+                  },
+                }
+              : current.distributionSession,
+          }));
+          return;
+        }
         const form = ensureDistributionForm(
           state.drafts.distributionForms,
           memberIdx,
@@ -715,7 +740,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
                 results: {
                   ...current.distributionSession.results,
                   [memberIdx]: {
-                    kind: kind === 'prepare' ? 'prepared' : kind === 'copy' ? 'copied' : kind === 'save' ? 'saved' : 'qr',
+                    kind: kind === 'copy' || kind === 'qr' ? 'handoff_pending' : 'package_ready',
                     member_idx: memberIdx,
                     label: form.label,
                     package_text: result.package_text,
@@ -828,19 +853,32 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         }));
       },
       async connectOnboardingPackage() {
-        const connection = await adapter.connectOnboardingPackage(state.drafts.onboardConnectForm);
         setState((current) => ({
           ...current,
-          pendingOnboardConnection: connection,
-          activeView: 'onboard-save',
-          drafts: {
-            ...current.drafts,
-            onboardSaveForm: {
-              ...current.drafts.onboardSaveForm,
-              label: connection.preview.label,
-            },
-          },
+          activeView: 'onboard-handshake',
+          pendingOnboardConnection: null,
         }));
+        try {
+          const connection = await adapter.connectOnboardingPackage(state.drafts.onboardConnectForm);
+          setState((current) => ({
+            ...current,
+            pendingOnboardConnection: connection,
+            activeView: 'onboard-save',
+            drafts: {
+              ...current.drafts,
+              onboardSaveForm: {
+                ...current.drafts.onboardSaveForm,
+                label: connection.preview.label,
+              },
+            },
+          }));
+        } catch (error) {
+          setState((current) => ({
+            ...current,
+            activeView: 'onboard-failed',
+          }));
+          throw error;
+        }
       },
       updateOnboardSaveForm(field, value) {
         setState((current) => ({

@@ -16,6 +16,8 @@ export type PwaView =
   | 'load-recover'
   | 'load-confirm'
   | 'onboard-connect'
+  | 'onboard-handshake'
+  | 'onboard-failed'
   | 'onboard-save'
   | 'rotate-connect'
   | 'rotate-save'
@@ -152,7 +154,7 @@ export type PwaOnboardConnection = {
 
 export type PwaDistributionActionResult =
   | {
-      kind: 'prepared' | 'copied' | 'qr' | 'saved';
+      kind: 'package_ready' | 'handoff_pending' | 'completed';
       member_idx: number;
       label: string;
       package_text: string;
