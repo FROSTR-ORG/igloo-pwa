@@ -152,7 +152,7 @@ export type PwaOnboardConnection = {
 
 export type PwaDistributionActionResult =
   | {
-      kind: 'copied' | 'qr' | 'saved';
+      kind: 'prepared' | 'copied' | 'qr' | 'saved';
       member_idx: number;
       label: string;
       package_text: string;

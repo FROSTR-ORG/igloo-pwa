@@ -10,7 +10,6 @@ import {
   CardTitle,
   ContentCard,
   CreateFlowDistributionSection,
-  CreateFlowDistributionCards,
   CreateFlowGenerateCard,
   CreateFlowProfileSetup,
   CreateFlowReviewPanel,
@@ -570,14 +569,14 @@ function AppShell() {
   function renderCreateConfirm() {
     if (!store.generatedKeyset) return null;
     return (
-      <HostFlowShell
-        title="Review Device Profile"
-        description="Step 3 of 4 · review the read-only profile details before initializing this device."
-        onBack={() => store.setActiveView('create-profile')}
-        backTooltip="Back to device profile"
-      >
-        <section className="igloo-flow-root igloo-stack">
-          <StepProgress steps={['Generate', 'Create profile', 'Review', 'Distribute']} active={2} />
+      <>
+        <PublicTaskShell>
+          <StepProgress steps={['Create Keyset', 'Setup Profile', 'Onboard Devices']} active={1} />
+          <PageBackLink label="Back" onBack={() => store.setActiveView('create-profile')} />
+          <PublicTaskTitle
+            title="Review Device Profile"
+            description="Confirm the local profile details before this browser initializes the signer and prepares remote bfonboard packages."
+          />
           <CreateFlowReviewPanel
             profileName={store.drafts.profileForm.label || selectedShare?.name || 'Device Profile'}
             sharePublicKey={selectedShare?.share_public_key ?? 'n/a'}
@@ -586,8 +585,9 @@ function AppShell() {
             actionLabel="Accept and Continue"
             onAccept={() => void run(() => store.acceptGeneratedProfile())}
           />
-        </section>
-      </HostFlowShell>
+        </PublicTaskShell>
+        <PublicFocusFooter />
+      </>
     );
   }
 
@@ -596,22 +596,37 @@ function AppShell() {
     const remainingShares = store.generatedKeyset.shares.filter((share) =>
       store.distributionSession?.remaining_member_indices.includes(share.member_idx),
     );
+    const distributionResults = Object.fromEntries(
+      Object.entries(store.distributionSession?.results ?? {}).map(([memberIdx, result]) => [
+        Number(memberIdx),
+        {
+          kind: result.kind,
+          label: result.label,
+          packageText: result.package_text,
+        },
+      ]),
+    ) as Record<number, { kind: 'prepared' | 'copied' | 'qr' | 'saved'; label: string; packageText?: string }>;
+    const allDistributed = remainingShares.length > 0 && remainingShares.every((share) => distributionResults[share.member_idx]);
     return (
-      <HostFlowShell
-        title="Distribute the Keyset"
-        description="Step 4 of 4 · the signing device is running, and the remaining shares can now be distributed."
-        onBack={() => store.setActiveView('create-confirm')}
-        backTooltip="Back to review"
-      >
-        <section className="igloo-flow-root igloo-stack">
-          <StepProgress steps={['Generate', 'Create profile', 'Review', 'Distribute']} active={3} />
+      <>
+        <PublicTaskShell>
+          <StepProgress steps={['Create Keyset', 'Setup Profile', 'Onboard Devices']} active={1} />
+          <PageBackLink label="Back" onBack={() => store.setActiveView('create-confirm')} />
+          <PublicTaskTitle
+            title={allDistributed ? 'Distribution Completion' : 'Distribute Shares'}
+            description={
+              allDistributed
+                ? 'Track remote bfonboard packages as they are handed off. Finish once each target device is ready to adopt its fresh share.'
+                : 'Create each remote bfonboard package by setting its password, then hand off the package and password by copy or QR.'
+            }
+          />
           <CreateFlowDistributionSection
-            bannerKicker="Distribute the Keyset"
-            bannerDescription="This device is initialized and connected. The remaining shares can now be distributed as `bfonboard` packages."
+            bannerKicker="How this step works"
+            bannerDescription=""
             bannerPoints={[
-              '`Copy`, `QR`, and `Save` all produce `bfonboard` packages.',
-              '`Save` downloads a `bfonboard` text file instead of creating another local profile.',
-              'Finish when you are done to reach the device dashboard.',
+              'Set password: saving a password creates the bfonboard package for that device.',
+              'Distribute: copy package/password or show QR once the package exists.',
+              'Complete: mark distributed when handoff is done.',
             ]}
             sectionTitle="Remaining Shares"
             sectionDescription="Each share can be copied, shown as a QR package, or downloaded as a `bfonboard` file."
@@ -626,14 +641,7 @@ function AppShell() {
                 },
               ]),
             )}
-            results={
-              Object.fromEntries(
-                Object.entries(store.distributionSession?.results ?? {}).map(([memberIdx, result]) => [
-                  Number(memberIdx),
-                  result,
-                ]),
-              ) as Record<number, { kind: 'copied' | 'qr' | 'saved'; label: string }>
-            }
+            results={distributionResults}
             onChangeDraft={(memberIdx, field, value) =>
               store.updateDistributionForm(
                 memberIdx,
@@ -643,19 +651,8 @@ function AppShell() {
             }
             onDistribute={(memberIdx, kind) => void run(() => store.distributeShare(memberIdx, kind))}
             onFinish={() => store.finishDistribution()}
-            beforeCards={(
-              <OperatorSignerPanel
-                view={deriveSignerDashboardView(selectedProfile, store.runtimeSnapshot, store.peerPermissionStates)}
-                introMessage="The primary browser signer is initialized and connected so the remaining shares can be distributed."
-                runtimeControlLabel={store.runtimeSnapshot?.active ? 'Stop Signer' : 'Start Signer'}
-                onPrimaryAction={() =>
-                  void run(() => (store.runtimeSnapshot?.active ? store.stopSigner() : store.startSigner()))
-                }
-                primaryActionVariant={store.runtimeSnapshot?.active ? 'destructive' : 'success'}
-                onRefreshPeers={() => void run(() => store.refreshSigner())}
-                refreshPeersDisabled={!store.runtimeSnapshot?.active}
-              />
-            )}
+            localShare={selectedShare}
+            localProfileName={selectedProfile.label || 'Igloo Web'}
           />
           <QrPayloadModal
             open={Boolean(store.distributionSession.qr_package)}
@@ -664,8 +661,9 @@ function AppShell() {
             label={store.distributionSession.qr_package?.label}
             payload={store.distributionSession.qr_package?.package_text ?? ''}
           />
-        </section>
-      </HostFlowShell>
+        </PublicTaskShell>
+        <PublicFocusFooter />
+      </>
     );
   }
 

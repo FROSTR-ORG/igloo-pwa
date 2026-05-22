@@ -50,7 +50,7 @@ describe('igloo-pwa app shell', () => {
     });
     fireEvent.click(screen.getByRole('button', { name: 'Continue to Review' }));
     await waitFor(() => {
-      expect(screen.getByText('Preview and Confirm')).toBeInTheDocument();
+      expect(screen.getByRole('heading', { name: 'Review Device Profile', level: 2 })).toBeInTheDocument();
     });
   });
 

@@ -49,7 +49,7 @@ type AppState = PwaPersistedState & {
     field: keyof PwaDraftState['distributionForms'][number],
     value: string,
   ) => void;
-  distributeShare: (memberIdx: number, kind: 'copy' | 'qr' | 'save') => Promise<void>;
+  distributeShare: (memberIdx: number, kind: 'prepare' | 'copy' | 'qr' | 'save') => Promise<void>;
   closeQrPackage: () => void;
   finishDistribution: () => void;
   startLoadChoice: () => void;
@@ -715,7 +715,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
                 results: {
                   ...current.distributionSession.results,
                   [memberIdx]: {
-                    kind: kind === 'copy' ? 'copied' : kind === 'save' ? 'saved' : 'qr',
+                    kind: kind === 'prepare' ? 'prepared' : kind === 'copy' ? 'copied' : kind === 'save' ? 'saved' : 'qr',
                     member_idx: memberIdx,
                     label: form.label,
                     package_text: result.package_text,
