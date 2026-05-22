@@ -23,17 +23,18 @@ function StoreHarness({ onReady }: { onReady: (store: ReturnType<typeof useStore
 describe('igloo-pwa app shell', () => {
   it('renders the landing page by default', () => {
     renderApp();
-    expect(screen.getByText('Choose one path to initialize this browser workspace.')).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Create / Rotate Keyset' })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Load Profile' })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Onboard Device' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Igloo Web' })).toBeInTheDocument();
+    expect(screen.getByText('Split your Nostr key. Sign from anywhere.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'New Keyset' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Import Device Profile' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Onboard' })).toBeInTheDocument();
   });
 
   it('opens the create flow and generates a review workspace', async () => {
     renderApp();
-    fireEvent.click(screen.getByRole('button', { name: 'Start' }));
+    fireEvent.click(screen.getByRole('button', { name: 'New Keyset' }));
     fireEvent.change(screen.getByLabelText('Group Name'), { target: { value: 'Playwright Treasury' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Generate Keyset' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Create Keyset' }));
     await waitFor(() => {
       expect(screen.getByText('Select the Device Share')).toBeInTheDocument();
     });
@@ -55,7 +56,7 @@ describe('igloo-pwa app shell', () => {
   it('accepts a real-looking bfonboard package and advances directly to save', async () => {
     renderApp();
 
-    fireEvent.click(screen.getAllByRole('button', { name: 'Continue Onboarding' })[0]);
+    fireEvent.click(screen.getByRole('button', { name: 'Onboard' }));
     fireEvent.change(screen.getByLabelText('bfonboard'), {
       target: { value: `bfonboard1${'q'.repeat(96)}` },
     });

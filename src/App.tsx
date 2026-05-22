@@ -16,7 +16,6 @@ import {
   CreateFlowReviewPanel,
   RotateKeysetPanel,
   CreateFlowSharePicker,
-  CreateFlowTaskBanner,
   HostEntryTile,
   HostFlowShell,
   OperatorDashboardTabs,
@@ -24,7 +23,11 @@ import {
   OperatorSettingsPanel,
   OperatorSignerPanel,
   PageLayout,
+  PageBackLink,
   ProfileConfirmationCard,
+  PublicFocusFooter,
+  PublicTaskShell,
+  PublicTaskTitle,
   QrPayloadModal,
   StepProgress,
   Textarea,
@@ -296,7 +299,15 @@ function deriveHeaderMode(activeView: ReturnType<typeof useStore>['activeView'])
 }
 
 function isPaperWelcomeSurface(store: ReturnType<typeof useStore>) {
-  return store.activeView === 'landing';
+  return store.activeView === 'landing' || store.activeView === 'create-generate';
+}
+
+function deriveHeaderTaskLabel(activeView: ReturnType<typeof useStore>['activeView']) {
+  if (activeView.startsWith('create')) return 'Create';
+  if (activeView.startsWith('rotate')) return 'Rotate';
+  if (activeView.startsWith('onboard')) return 'Onboard';
+  if (activeView.startsWith('load')) return 'Import';
+  return 'Installable browser workspace';
 }
 
 function deriveWelcomeReturningProfile(profile: ReturnType<typeof useStore>['profiles'][number]) {
@@ -461,30 +472,24 @@ function AppShell() {
 
   function renderCreateGenerate() {
     return (
-      <HostFlowShell
-        title="Create / Rotate Keyset"
-        description="Step 1 of 4 · create a new keyset or rotate an existing one before selecting the local device share."
-        onBack={goToLanding}
-        backTooltip="Back to landing"
-      >
-        <section className="igloo-flow-root igloo-stack">
-          <StepProgress steps={['Generate', 'Create profile', 'Review', 'Distribute']} active={0} />
-          <CreateFlowTaskBanner
-            kicker="Create or Rotate"
-            description="Provide the group name and threshold geometry, then either create fresh shares or rebuild from threshold bfshare inputs."
-            points={[
-              'Threshold defaults to 2, total keys defaults to 3.',
-              'Rotation preserves the same group public key and issues fresh device shares.',
-            ]}
+      <>
+        <PublicTaskShell>
+          <PageBackLink label="Back to Welcome" onBack={goToLanding} />
+          <StepProgress steps={['Create Keyset', 'Setup Profile', 'Onboard Devices']} active={0} />
+          <PublicTaskTitle
+            title="Create New Keyset"
+            description="Define the group profile for a new keyset. After generation, choose which share stays on this device, then distribute the rest."
           />
-          <CreateFlowGenerateCard
-            groupName={store.drafts.createForm.groupName}
-            threshold={store.drafts.createForm.threshold}
-            count={store.drafts.createForm.count}
-            onChangeForm={(field, value) => store.updateCreateForm(field, value)}
-            onGenerate={() => void run(() => store.generateKeyset())}
-          />
-          <div className="igloo-button-row" role="group" aria-label="Keyset action mode">
+          {store.drafts.createForm.mode === 'new' ? (
+            <CreateFlowGenerateCard
+              groupName={store.drafts.createForm.groupName}
+              threshold={store.drafts.createForm.threshold}
+              count={store.drafts.createForm.count}
+              onChangeForm={(field, value) => store.updateCreateForm(field, value)}
+              onGenerate={() => void run(() => store.generateKeyset())}
+            />
+          ) : null}
+          <div className="igloo-button-row igloo-button-row-tight" role="group" aria-label="Keyset action mode">
             <Button
               type="button"
               size="sm"
@@ -522,8 +527,9 @@ function AppShell() {
               onRotate={() => void run(() => store.generateKeyset())}
             />
           ) : null}
-        </section>
-      </HostFlowShell>
+        </PublicTaskShell>
+        <PublicFocusFooter />
+      </>
     );
   }
 
@@ -1273,7 +1279,7 @@ function AppShell() {
         <AppHeader
           mode={deriveHeaderMode(store.activeView)}
           logoSrc="/igloo-paper-mark.png"
-          taskLabel="Installable browser workspace"
+          taskLabel={deriveHeaderTaskLabel(store.activeView)}
           profileName={selectedProfile?.label}
         />
       }
