@@ -14,6 +14,7 @@ import {
   CreateFlowGenerateCard,
   CreateFlowLocalSaveCard,
   CreateFlowReviewPanel,
+  RotateKeysetPanel,
   CreateFlowSharePicker,
   CreateFlowTaskBanner,
   HostEntryTile,
@@ -28,21 +29,25 @@ import {
   StepProgress,
   StoredProfilesLandingCard,
   Textarea,
+  WelcomeEntryHero,
+  WelcomeReturningHero,
   CRITICAL_E2E_TEST_IDS,
-  type LogEntry,
+  type EventLogRowModel,
   type PeerPolicy,
+  type PolicyDashboardViewModel,
+  type SignerDashboardViewModel,
 } from 'igloo-ui';
 import { shortProfileId } from 'igloo-shared';
 
 import { StoreProvider, useStore } from './lib/store';
 
-function toPwaLogEntries(lines: string[] = []): LogEntry[] {
+function toPwaEventRows(lines: string[] = []): EventLogRowModel[] {
   return lines.map((line, index) => ({
     id: `pwa-log-${index}-${line}`,
-    time: 'live',
-    level: line.startsWith('[error]') ? 'ERROR' : line.startsWith('[warn]') ? 'WARN' : 'INFO',
+    badgeLabel: line.startsWith('[error]') ? 'error' : line.startsWith('[warn]') ? 'warn' : 'info',
+    badgeTone: line.startsWith('[error]') ? 'danger' : line.startsWith('[warn]') ? 'warning' : 'info',
     message: line.replace(/^\[[^\]]+\]\s*/, ''),
-    data: { raw: line },
+    timestampLabel: 'live',
   }));
 }
 
@@ -205,41 +210,19 @@ function derivePwaPeers(
 function derivePendingOperations(runtimeStatus: unknown) {
   const summary = (runtimeStatus ?? null) as PwaRuntimeStatus | null;
   return (summary?.pending_operations ?? []).map((operation) => ({
-    request_id: operation.request_id,
-    op_type: operation.op_type,
-    threshold: operation.threshold,
-    started_at: operation.started_at,
-    timeout_at: operation.timeout_at,
-    collected_responses: Array.isArray(operation.collected_responses) ? operation.collected_responses.length : 0,
-    target_peers: Array.isArray(operation.target_peers) ? operation.target_peers : [],
+    id: operation.request_id,
+    operationLabel: operation.op_type,
+    thresholdLabel: `threshold ${operation.threshold}`,
+    startedLabel: formatRuntimeTimestamp(operation.started_at),
+    timeoutLabel: formatRuntimeTimestamp(operation.timeout_at),
+    responseLabel: `${Array.isArray(operation.collected_responses) ? operation.collected_responses.length : 0} responses`,
   }));
 }
 
-function deriveActivationStage(runtimeSnapshot: ReturnType<typeof useStore>['runtimeSnapshot']) {
-  if (!runtimeSnapshot?.active) return 'idle';
-  const readiness = (runtimeSnapshot.readiness ?? null) as PwaRuntimeReadiness | null;
-  if (!readiness) return 'running';
-  if (!readiness.restore_complete) return 'restoring';
-  if (readiness.sign_ready && readiness.ecdh_ready) return 'ready';
-  if (readiness.sign_ready) return 'sign-ready';
-  if (readiness.ecdh_ready) return 'ecdh-ready';
-  if (readiness.runtime_ready) return 'runtime-ready';
-  return 'degraded';
-}
-
-function deriveActivationUpdatedAt(runtimeSnapshot: ReturnType<typeof useStore>['runtimeSnapshot']) {
-  const readiness = (runtimeSnapshot?.readiness ?? null) as PwaRuntimeReadiness | null;
-  if (typeof readiness?.last_refresh_at === 'number') {
-    return readiness.last_refresh_at > 10_000_000_000
-      ? readiness.last_refresh_at
-      : readiness.last_refresh_at * 1000;
-  }
-  const summary = (runtimeSnapshot?.runtime_status ?? null) as PwaRuntimeStatus | null;
-  const lastActive = summary?.status?.last_active;
-  if (typeof lastActive === 'number') {
-    return lastActive > 10_000_000_000 ? lastActive : lastActive * 1000;
-  }
-  return null;
+function formatRuntimeTimestamp(value: number | null) {
+  if (typeof value !== 'number') return 'n/a';
+  const normalized = value > 10_000_000_000 ? value : value * 1000;
+  return new Date(normalized).toLocaleString();
 }
 
 function deriveRuntimeSummaryLabel(runtimeSnapshot: ReturnType<typeof useStore>['runtimeSnapshot']) {
@@ -249,6 +232,105 @@ function deriveRuntimeSummaryLabel(runtimeSnapshot: ReturnType<typeof useStore>[
     return 'Signer Running (Degraded)';
   }
   return 'Signer Running';
+}
+
+function deriveSignerDashboardView(
+  profile: ReturnType<typeof useStore>['profiles'][number] | null,
+  runtimeSnapshot: ReturnType<typeof useStore>['runtimeSnapshot'],
+  peerPermissionStates: ReturnType<typeof useStore>['peerPermissionStates'],
+): SignerDashboardViewModel | null {
+  if (!profile) return null;
+
+  const summary = (runtimeSnapshot?.runtime_status ?? null) as PwaRuntimeStatus | null;
+  const readiness = (runtimeSnapshot?.readiness ?? null) as (PwaRuntimeReadiness & { threshold?: number }) | null;
+  const peerTotal = summary?.metadata?.peers?.length ? summary.metadata.peers.length + 1 : null;
+  const thresholdLabel =
+    typeof readiness?.threshold === 'number' && peerTotal ? `${readiness.threshold}/${peerTotal}` : 'threshold n/a';
+
+  return {
+    profileName: profile.label || 'Unnamed device',
+    thresholdLabel,
+    publicKeyLabel: profile.group_public_key,
+    shareLabel: profile.share_public_key,
+    readinessLabel: deriveRuntimeSummaryLabel(runtimeSnapshot),
+    relaySummary: runtimeSnapshot?.active ? 'Browser runtime connected' : 'Runtime stopped',
+    peerRows: derivePwaPeers(peerPermissionStates, runtimeSnapshot?.runtime_status).map((peer) => ({
+      id: peer.pubkey,
+      alias: peer.alias,
+      pubkey: peer.pubkey,
+      state: peer.state,
+      statusLabel: peer.statusLabel ?? peer.state,
+      incomingAvailable: peer.incomingAvailable,
+      outgoingAvailable: peer.outgoingAvailable,
+      outgoingSpent: peer.outgoingSpent,
+    })),
+    pendingOperationRows: derivePendingOperations(runtimeSnapshot?.runtime_status),
+    eventRows: toPwaEventRows(runtimeSnapshot?.runtime_log_lines),
+  };
+}
+
+function derivePolicyDashboardView(
+  active: boolean,
+  peerPermissionStates: ReturnType<typeof useStore>['peerPermissionStates'],
+): PolicyDashboardViewModel {
+  return {
+    peerRows: active
+      ? peerPermissionStates.map((policy) => ({
+          pubkey: policy.pubkey,
+          request: policy.effective_policy.request,
+          respond: policy.effective_policy.respond,
+          manualOverride: {
+            request: policy.manual_override.request,
+            respond: policy.manual_override.respond,
+          },
+        }))
+      : [],
+  };
+}
+
+function deriveHeaderMode(activeView: ReturnType<typeof useStore>['activeView']) {
+  if (activeView === 'landing') return 'welcome';
+  if (activeView === 'dashboard') return 'dashboard';
+  return 'task';
+}
+
+function isPaperWelcomeSurface(store: ReturnType<typeof useStore>) {
+  return store.activeView === 'landing' && store.profiles.length <= 1;
+}
+
+function deriveWelcomeReturningProfile(profile: ReturnType<typeof useStore>['profiles'][number]) {
+  const groupPackage = parseJsonObject(profile.group_package_json);
+  const sharePackage = parseJsonObject(profile.share_package_json);
+  const threshold = typeof groupPackage?.threshold === 'number' ? groupPackage.threshold : 2;
+  const memberCount = Array.isArray(groupPackage?.members) ? groupPackage.members.length : 3;
+  const memberIdx =
+    typeof sharePackage?.idx === 'number'
+      ? sharePackage.idx
+      : typeof sharePackage?.idx === 'string'
+        ? Number.parseInt(sharePackage.idx, 10)
+        : 0;
+
+  return {
+    id: profile.id,
+    label: profile.label || 'My Signing Key',
+    thresholdLabel: `${threshold}/${memberCount}`,
+    memberLabel: `#${Number.isFinite(memberIdx) ? memberIdx : 0}`,
+    publicKeyLabel: formatWelcomeKey(profile.share_public_key || profile.id),
+  };
+}
+
+function parseJsonObject(value: string) {
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === 'object' ? parsed as Record<string, unknown> : null;
+  } catch {
+    return null;
+  }
+}
+
+function formatWelcomeKey(value: string) {
+  if (value.length <= 16) return value;
+  return `${value.slice(0, 8)}...${value.slice(-4)}`;
 }
 
 function AppShell() {
@@ -303,6 +385,35 @@ function AppShell() {
   function renderLanding() {
     const landingSelectedProfileId = store.selectedProfileId || store.profiles[0]?.id || '';
 
+    if (store.profiles.length === 0) {
+      return (
+        <WelcomeEntryHero
+          logoSrc="/igloo-paper-mark.png"
+          onNewKeyset={() => store.setActiveView('create-generate')}
+          onImportProfile={() => store.startLoadChoice()}
+          onOnboard={() => store.setActiveView('onboard-connect')}
+        />
+      );
+    }
+
+    if (store.profiles.length === 1) {
+      const profile = store.profiles[0];
+      return (
+        <WelcomeReturningHero
+          logoSrc="/igloo-paper-mark.png"
+          profile={deriveWelcomeReturningProfile(profile)}
+          onUnlock={(profileId) => void run(() => store.loadStoredProfile(profileId))}
+          onRotate={(profileId) => {
+            store.selectProfile(profileId);
+            store.setActiveView('rotate-connect');
+          }}
+          onNewKeyset={() => store.setActiveView('create-generate')}
+          onImportProfile={() => store.startLoadChoice()}
+          onOnboard={() => store.setActiveView('onboard-connect')}
+        />
+      );
+    }
+
     return (
       <ContentCard title="Welcome to Igloo" description="Choose one path to initialize this browser workspace.">
         <section className="igloo-flow-root igloo-pwa-entry-shell">
@@ -315,18 +426,17 @@ function AppShell() {
             profiles={store.profiles.map((profile) => ({
               id: profile.id,
               label: profile.label || 'Unnamed device',
-              subtitle:
+              shortId: shortProfileId(profile.id),
+              publicKeyLabel: shortProfileId(profile.group_public_key),
+              state:
                 store.runtimeSnapshot?.active && store.runtimeSnapshot.profile?.id === profile.id
-                  ? `${shortProfileId(profile.id)} · signer active`
-                  : shortProfileId(profile.id),
-              statusLabel:
-                store.runtimeSnapshot?.active && store.runtimeSnapshot.profile?.id === profile.id
-                  ? 'Active'
-                  : 'Available',
-              loadLabel:
+                  ? 'active'
+                  : 'available',
+              primaryActionLabel:
                 store.runtimeSnapshot?.active && store.runtimeSnapshot.profile?.id === profile.id
                   ? 'Open Dashboard'
                   : 'Load Profile',
+              destructiveActionLabel: 'Delete',
             }))}
             selectedProfileId={landingSelectedProfileId}
             description="Stored profiles stay available while logged out. Select one, then choose whether to load it or remove it from this browser."
@@ -420,32 +530,50 @@ function AppShell() {
             ]}
           />
           <CreateFlowGenerateCard
-            form={{
-              ...store.drafts.createForm,
-              sourceProfileId: store.drafts.rotationForm.sourceProfileId,
-            }}
-            availableProfiles={store.profiles.map((profile) => ({
-              id: profile.id,
-              label: `${profile.label || 'Unnamed device'} (${shortProfileId(profile.id)})`,
-            }))}
-            rotationSources={store.drafts.rotationForm.sources.map((source) => ({
-              packageText: source.packageText,
-              packagePassword: source.password,
-            }))}
-            onChangeForm={(field, value) => {
-              if (field === 'sourceProfileId') {
-                store.updateRotationForm('sourceProfileId', value);
-                return;
-              }
-              store.updateCreateForm(field, value);
-            }}
-            onChangeRotationSource={(index, field, value) =>
-              store.updateRotationSource(index, field === 'packagePassword' ? 'password' : 'packageText', value)
-            }
-            onAddRotationSource={() => store.addRotationSource()}
-            onRemoveRotationSource={(index) => store.removeRotationSource(index)}
+            groupName={store.drafts.createForm.groupName}
+            threshold={store.drafts.createForm.threshold}
+            count={store.drafts.createForm.count}
+            onChangeForm={(field, value) => store.updateCreateForm(field, value)}
             onGenerate={() => void run(() => store.generateKeyset())}
           />
+          <div className="igloo-button-row" role="group" aria-label="Keyset action mode">
+            <Button
+              type="button"
+              size="sm"
+              variant={store.drafts.createForm.mode === 'new' ? 'default' : 'secondary'}
+              onClick={() => store.updateCreateForm('mode', 'new')}
+            >
+              New Keyset
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant={store.drafts.createForm.mode === 'rotate' ? 'default' : 'secondary'}
+              onClick={() => store.updateCreateForm('mode', 'rotate')}
+            >
+              Rotate Existing
+            </Button>
+          </div>
+          {store.drafts.createForm.mode === 'rotate' ? (
+            <RotateKeysetPanel
+              sourceProfileId={store.drafts.rotationForm.sourceProfileId}
+              availableProfiles={store.profiles.map((profile) => ({
+                id: profile.id,
+                label: `${profile.label || 'Unnamed device'} (${shortProfileId(profile.id)})`,
+              }))}
+              rotationSources={store.drafts.rotationForm.sources.map((source) => ({
+                packageText: source.packageText,
+                packagePassword: source.password,
+              }))}
+              onChangeSourceProfile={(profileId) => store.updateRotationForm('sourceProfileId', profileId)}
+              onChangeRotationSource={(index, field, value) =>
+                store.updateRotationSource(index, field === 'packagePassword' ? 'password' : 'packageText', value)
+              }
+              onAddRotationSource={() => store.addRotationSource()}
+              onRemoveRotationSource={(index) => store.removeRotationSource(index)}
+              onRotate={() => void run(() => store.generateKeyset())}
+            />
+          ) : null}
         </section>
       </HostFlowShell>
     );
@@ -582,26 +710,15 @@ function AppShell() {
             onFinish={() => store.finishDistribution()}
             beforeCards={(
               <OperatorSignerPanel
-                profile={{
-                  name: selectedProfile.label,
-                  groupPublicKey: selectedProfile.group_public_key,
-                  sharePublicKey: selectedProfile.share_public_key,
-                }}
+                view={deriveSignerDashboardView(selectedProfile, store.runtimeSnapshot, store.peerPermissionStates)}
                 introMessage="The primary browser signer is initialized and connected so the remaining shares can be distributed."
-                runtimeState={store.runtimeSnapshot?.active ? 'running' : 'stopped'}
                 runtimeControlLabel={store.runtimeSnapshot?.active ? 'Stop Signer' : 'Start Signer'}
-                runtimeSummaryLabel={deriveRuntimeSummaryLabel(store.runtimeSnapshot)}
-                sharePublicKey={selectedProfile.share_public_key}
-                groupPublicKey={selectedProfile.group_public_key}
                 onPrimaryAction={() =>
                   void run(() => (store.runtimeSnapshot?.active ? store.stopSigner() : store.startSigner()))
                 }
                 primaryActionVariant={store.runtimeSnapshot?.active ? 'destructive' : 'success'}
                 onRefreshPeers={() => void run(() => store.refreshSigner())}
                 refreshPeersDisabled={!store.runtimeSnapshot?.active}
-                peers={derivePwaPeers(store.peerPermissionStates, store.runtimeSnapshot?.runtime_status)}
-                pendingOperations={derivePendingOperations(store.runtimeSnapshot?.runtime_status)}
-                logs={toPwaLogEntries(store.runtimeSnapshot?.runtime_log_lines)}
               />
             )}
           />
@@ -991,15 +1108,10 @@ function AppShell() {
   }
 
   function renderDashboard() {
-    const operatorProfile = selectedProfile
-      ? {
-          name: selectedProfile.label,
-          groupPublicKey: selectedProfile.group_public_key,
-          sharePublicKey: selectedProfile.share_public_key,
-        }
-      : null;
     const runtimeState = store.runtimeSnapshot?.active ? 'running' : 'stopped';
     const runtimeControlLabel = runtimeState === 'running' ? 'Stop Signer' : 'Start Signer';
+    const signerView = deriveSignerDashboardView(selectedProfile, store.runtimeSnapshot, store.peerPermissionStates);
+    const policyView = derivePolicyDashboardView(Boolean(store.runtimeSnapshot?.active), store.peerPermissionStates);
 
     return (
       <ContentCard
@@ -1020,25 +1132,16 @@ function AppShell() {
           {store.activeDashboardTab === 'signer' ? (
             <div role="tabpanel" id="operator-panel-signer" aria-labelledby="operator-tab-signer">
               <OperatorSignerPanel
-                profile={operatorProfile}
+                view={signerView}
                 introMessage="The browser signer runs locally inside the PWA workbench. This dashboard mirrors the operator workflow used by igloo-chrome."
                 emptyDescription="Load or onboard a device profile before opening the signer dashboard."
-                runtimeState={runtimeState}
                 runtimeControlLabel={runtimeControlLabel}
-                runtimeSummaryLabel={deriveRuntimeSummaryLabel(store.runtimeSnapshot)}
-                activationStage={deriveActivationStage(store.runtimeSnapshot)}
-                activationUpdatedAt={deriveActivationUpdatedAt(store.runtimeSnapshot)}
-                sharePublicKey={selectedProfile?.share_public_key ?? null}
-                groupPublicKey={selectedProfile?.group_public_key ?? null}
                 onPrimaryAction={() =>
                   void run(() => (store.runtimeSnapshot?.active ? store.stopSigner() : store.startSigner()))
                 }
                 primaryActionVariant={store.runtimeSnapshot?.active ? 'destructive' : 'success'}
                 onRefreshPeers={() => void run(() => store.refreshSigner())}
                 refreshPeersDisabled={!store.runtimeSnapshot?.active}
-                peers={derivePwaPeers(store.peerPermissionStates, store.runtimeSnapshot?.runtime_status)}
-                pendingOperations={derivePendingOperations(store.runtimeSnapshot?.runtime_status)}
-                logs={toPwaLogEntries(store.runtimeSnapshot?.runtime_log_lines)}
               />
             </div>
           ) : null}
@@ -1046,33 +1149,10 @@ function AppShell() {
           {store.activeDashboardTab === 'permissions' ? (
             <div role="tabpanel" id="operator-panel-permissions" aria-labelledby="operator-tab-permissions">
               <OperatorPermissionsPanel
-                peerPermissions={[]}
-                peerPermissionStates={
-                  store.runtimeSnapshot?.active
-                    ? store.peerPermissionStates.map((policy) => ({
-                        pubkey: policy.pubkey,
-                        manualOverride: {
-                          request: policy.manual_override.request,
-                          respond: policy.manual_override.respond,
-                        },
-                        remoteObservation: policy.remote_observation
-                          ? {
-                              request: policy.remote_observation.request,
-                              respond: policy.remote_observation.respond,
-                              updated: policy.remote_observation.updated,
-                              revision: policy.remote_observation.revision,
-                            }
-                          : null,
-                        effectivePolicy: {
-                          request: policy.effective_policy.request,
-                          respond: policy.effective_policy.respond,
-                        },
-                      }))
-                    : []
-                }
+                view={policyView}
                 onRefresh={() => void run(() => store.refreshSigner())}
                 onClearAllPeerPermissions={() => void run(() => store.clearPeerPolicies())}
-                onPeerPermissionOverrideChange={(pubkey, direction, method, value) =>
+                onPeerPolicyOverrideChange={(pubkey, direction, method, value) =>
                   void run(() => store.updatePeerPolicy(pubkey, direction, method, value === 'allow'))
                 }
                 peerClearAllLabel="Remove Overrides"
@@ -1239,8 +1319,15 @@ function AppShell() {
 
   return (
     <PageLayout
+      surface={isPaperWelcomeSurface(store) ? 'welcome' : 'default'}
+      maxWidth={isPaperWelcomeSurface(store) ? 'max-w-none' : undefined}
       header={
-        <AppHeader title="Igloo" centered subtitle="Installable browser workspace for FROSTR V2." />
+        <AppHeader
+          mode={deriveHeaderMode(store.activeView)}
+          logoSrc="/igloo-paper-mark.png"
+          taskLabel="Installable browser workspace"
+          profileName={selectedProfile?.label}
+        />
       }
     >
       {renderError()}
