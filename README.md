@@ -45,6 +45,10 @@ For local development:
 npm run dev
 ```
 
+`npm run dev` uses checked-in browser WASM artifacts and does not rebuild the
+Rust WASM crates. Use `make browser-wasm-sync` only when intentionally
+refreshing those artifacts; that path requires `wasm-pack`.
+
 ## Test
 
 Repo-local checks:
