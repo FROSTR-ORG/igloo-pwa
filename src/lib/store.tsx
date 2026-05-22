@@ -28,7 +28,7 @@ type AppState = PwaPersistedState & {
   setDashboardTab: (tab: PwaDashboardTab) => void;
   setUnlockPhrase: (value: string) => void;
   selectProfile: (profileId: string) => void;
-  loadStoredProfile: (profileId: string) => Promise<void>;
+  loadStoredProfile: (profileId: string, unlockPhrase?: string) => Promise<void>;
   startCreateChoice: () => void;
   updateCreateForm: (field: keyof PwaDraftState['createForm'], value: string) => void;
   updateRotationForm: (field: keyof PwaDraftState['rotationForm'], value: string) => void;
@@ -404,18 +404,19 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       selectProfile(profileId) {
         setState((current) => ({ ...current, selectedProfileId: profileId }));
       },
-      async loadStoredProfile(profileId) {
+      async loadStoredProfile(profileId, unlockPhrase) {
         const profile = state.profiles.find((entry) => entry.id === profileId);
         if (!profile) {
           throw new Error('Profile not found.');
         }
-        const runtimeSnapshot = await adapter.startSession(profile, profile.stored_password);
+        const password = unlockPhrase ?? profile.stored_password;
+        const runtimeSnapshot = await adapter.startSession(profile, password);
         setState((current) => ({
           ...current,
           selectedProfileId: profile.id,
           activeView: 'dashboard',
           activeDashboardTab: 'signer',
-          unlockPhrase: profile.stored_password,
+          unlockPhrase: password,
           runtimeSnapshot,
           runtimeWarning: null,
           peerPermissionStates:

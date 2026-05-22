@@ -27,15 +27,16 @@ import {
   ProfileConfirmationCard,
   QrPayloadModal,
   StepProgress,
-  StoredProfilesLandingCard,
   Textarea,
   WelcomeEntryHero,
   WelcomeReturningHero,
+  WelcomeUnlockModal,
   CRITICAL_E2E_TEST_IDS,
   type EventLogRowModel,
   type PeerPolicy,
   type PolicyDashboardViewModel,
   type SignerDashboardViewModel,
+  type WelcomeReturningProfileModel,
 } from 'igloo-ui';
 import { shortProfileId } from 'igloo-shared';
 
@@ -295,7 +296,7 @@ function deriveHeaderMode(activeView: ReturnType<typeof useStore>['activeView'])
 }
 
 function isPaperWelcomeSurface(store: ReturnType<typeof useStore>) {
-  return store.activeView === 'landing' && store.profiles.length <= 1;
+  return store.activeView === 'landing';
 }
 
 function deriveWelcomeReturningProfile(profile: ReturnType<typeof useStore>['profiles'][number]) {
@@ -333,11 +334,25 @@ function formatWelcomeKey(value: string) {
   return `${value.slice(0, 8)}...${value.slice(-4)}`;
 }
 
+function deriveWelcomeReturningLayout(profileCount: number) {
+  if (profileCount === 1) return 'single';
+  if (profileCount <= 3) return 'multi';
+  return 'many';
+}
+
 function AppShell() {
   const store = useStore();
   const [uiError, setUiError] = React.useState<string | null>(null);
+  const [welcomeUnlockProfileId, setWelcomeUnlockProfileId] = React.useState<string | null>(null);
+  const [welcomeUnlockPassword, setWelcomeUnlockPassword] = React.useState('');
+  const [welcomeUnlockError, setWelcomeUnlockError] = React.useState<string | null>(null);
+  const [welcomeUnlockSubmitting, setWelcomeUnlockSubmitting] = React.useState(false);
 
   const selectedProfile = store.profiles.find((profile) => profile.id === store.selectedProfileId) ?? null;
+  const welcomeUnlockProfile = React.useMemo<WelcomeReturningProfileModel | null>(() => {
+    const profile = store.profiles.find((entry) => entry.id === welcomeUnlockProfileId);
+    return profile ? deriveWelcomeReturningProfile(profile) : null;
+  }, [store.profiles, welcomeUnlockProfileId]);
   const selectedShare =
     store.generatedKeyset?.shares.find((share) => share.member_idx === store.selectedGeneratedShareIdx) ?? null;
   const [operatorSettingsDraft, setOperatorSettingsDraft] = React.useState<OperatorSettingsDraft>(() =>
@@ -372,6 +387,39 @@ function AppShell() {
     store.setActiveView('dashboard');
   }, [store]);
 
+  const closeWelcomeUnlock = React.useCallback(() => {
+    setWelcomeUnlockProfileId(null);
+    setWelcomeUnlockPassword('');
+    setWelcomeUnlockError(null);
+    setWelcomeUnlockSubmitting(false);
+  }, []);
+
+  const openWelcomeUnlock = React.useCallback((profileId: string) => {
+    setWelcomeUnlockProfileId(profileId);
+    setWelcomeUnlockPassword('');
+    setWelcomeUnlockError(null);
+    setWelcomeUnlockSubmitting(false);
+  }, []);
+
+  const submitWelcomeUnlock = React.useCallback(
+    async (event: React.FormEvent<HTMLFormElement>) => {
+      event.preventDefault();
+      if (!welcomeUnlockProfileId) return;
+
+      try {
+        setWelcomeUnlockSubmitting(true);
+        setWelcomeUnlockError(null);
+        await store.loadStoredProfile(welcomeUnlockProfileId, welcomeUnlockPassword);
+        closeWelcomeUnlock();
+      } catch {
+        setWelcomeUnlockError('Incorrect password. Please try again.');
+      } finally {
+        setWelcomeUnlockSubmitting(false);
+      }
+    },
+    [closeWelcomeUnlock, store, welcomeUnlockPassword, welcomeUnlockProfileId],
+  );
+
   function renderError() {
     if (!uiError) return null;
     return <div className="igloo-shell-alert">{uiError}</div>;
@@ -383,8 +431,6 @@ function AppShell() {
   }
 
   function renderLanding() {
-    const landingSelectedProfileId = store.selectedProfileId || store.profiles[0]?.id || '';
-
     if (store.profiles.length === 0) {
       return (
         <WelcomeEntryHero
@@ -396,118 +442,20 @@ function AppShell() {
       );
     }
 
-    if (store.profiles.length === 1) {
-      const profile = store.profiles[0];
-      return (
-        <WelcomeReturningHero
-          logoSrc="/igloo-paper-mark.png"
-          profile={deriveWelcomeReturningProfile(profile)}
-          onUnlock={(profileId) => void run(() => store.loadStoredProfile(profileId))}
-          onRotate={(profileId) => {
-            store.selectProfile(profileId);
-            store.setActiveView('rotate-connect');
-          }}
-          onNewKeyset={() => store.setActiveView('create-generate')}
-          onImportProfile={() => store.startLoadChoice()}
-          onOnboard={() => store.setActiveView('onboard-connect')}
-        />
-      );
-    }
-
     return (
-      <ContentCard title="Welcome to Igloo" description="Choose one path to initialize this browser workspace.">
-        <section className="igloo-flow-root igloo-pwa-entry-shell">
-          <div className="igloo-pwa-entry-intro">
-            <p className="igloo-pwa-entry-lead">
-              Create or rotate a keyset, load an existing profile, or finish onboarding a device from an accepted package.
-            </p>
-          </div>
-          <StoredProfilesLandingCard
-            profiles={store.profiles.map((profile) => ({
-              id: profile.id,
-              label: profile.label || 'Unnamed device',
-              shortId: shortProfileId(profile.id),
-              publicKeyLabel: shortProfileId(profile.group_public_key),
-              state:
-                store.runtimeSnapshot?.active && store.runtimeSnapshot.profile?.id === profile.id
-                  ? 'active'
-                  : 'available',
-              primaryActionLabel:
-                store.runtimeSnapshot?.active && store.runtimeSnapshot.profile?.id === profile.id
-                  ? 'Open Dashboard'
-                  : 'Load Profile',
-              destructiveActionLabel: 'Delete',
-            }))}
-            selectedProfileId={landingSelectedProfileId}
-            description="Stored profiles stay available while logged out. Select one, then choose whether to load it or remove it from this browser."
-            onSelect={store.selectProfile}
-            onLoad={(profileId) =>
-              void run(async () => {
-                if (store.runtimeSnapshot?.active && store.runtimeSnapshot.profile?.id === profileId) {
-                  goToDashboard();
-                  return;
-                }
-                await store.loadStoredProfile(profileId);
-              })
-            }
-            onDelete={(profileId) =>
-              void run(async () => {
-                const profile = store.profiles.find((entry) => entry.id === profileId);
-                const confirmed = window.confirm(
-                  `Delete stored profile ${profile?.label || 'Unnamed device'} (${shortProfileId(profileId)})?`,
-                );
-                if (!confirmed) {
-                  return;
-                }
-                store.deleteProfile(profileId);
-              })
-            }
-          />
-          <div className="igloo-pwa-entry-grid">
-            <HostEntryTile
-              kicker="Fresh Setup"
-              title="Create / Rotate Keyset"
-              description="Generate a new keyset or rotate an existing one, create one local device profile, and distribute the remaining shares."
-              actionLabel="Start"
-              tone="primary"
-              onAction={() => store.setActiveView('create-generate')}
-              icon={(
-                <svg viewBox="0 0 24 24" role="presentation">
-                  <path d="M7 10a5 5 0 1 1 9.74 1.58L21 15v2h-2v2h-2v2h-3v-3.17a5 5 0 0 1-7-4.83Z" />
-                  <circle cx="10" cy="10" r="1.25" />
-                </svg>
-              )}
-            />
-            <HostEntryTile
-              kicker="Existing Material"
-              title="Load Profile"
-              description="Import a `bfprofile` string or recover your device profile from a password-protected `bfshare`."
-              actionLabel="Load Profile"
-              onAction={() => store.startLoadChoice()}
-              icon={(
-                <svg viewBox="0 0 24 24" role="presentation">
-                  <path d="M12 3 4 7v5c0 4.97 3.06 8.77 8 10 4.94-1.23 8-5.03 8-10V7l-8-4Z" />
-                  <path d="M12 8v6m0 0 3-3m-3 3-3-3" />
-                </svg>
-              )}
-            />
-            <HostEntryTile
-              kicker="Accepted Invite"
-              title="Onboard Device"
-              description="Connect with a password-protected `bfonboard` package, confirm the profile data, and save this device."
-              actionLabel="Continue Onboarding"
-              testId={CRITICAL_E2E_TEST_IDS.landingContinueOnboarding}
-              onAction={() => store.setActiveView('onboard-connect')}
-              icon={(
-                <svg viewBox="0 0 24 24" role="presentation">
-                  <rect x="6" y="3" width="12" height="18" rx="2" />
-                  <path d="M9 8h6M9 12h6M12 16h.01" />
-                </svg>
-              )}
-            />
-          </div>
-        </section>
-      </ContentCard>
+      <WelcomeReturningHero
+        logoSrc="/igloo-paper-mark.png"
+        layout={deriveWelcomeReturningLayout(store.profiles.length)}
+        profiles={store.profiles.map(deriveWelcomeReturningProfile)}
+        onUnlock={openWelcomeUnlock}
+        onRotate={(profileId) => {
+          store.selectProfile(profileId);
+          store.setActiveView('rotate-connect');
+        }}
+        onNewKeyset={() => store.setActiveView('create-generate')}
+        onImportProfile={() => store.startLoadChoice()}
+        onOnboard={() => store.setActiveView('onboard-connect')}
+      />
     );
   }
 
@@ -1332,6 +1280,19 @@ function AppShell() {
     >
       {renderError()}
       {renderRuntimeWarning()}
+      <WelcomeUnlockModal
+        open={Boolean(welcomeUnlockProfileId)}
+        profile={welcomeUnlockProfile}
+        password={welcomeUnlockPassword}
+        error={welcomeUnlockError}
+        submitting={welcomeUnlockSubmitting}
+        onPasswordChange={(value) => {
+          setWelcomeUnlockPassword(value);
+          setWelcomeUnlockError(null);
+        }}
+        onSubmit={(event) => void submitWelcomeUnlock(event)}
+        onClose={closeWelcomeUnlock}
+      />
       {store.activeView === 'landing' ? renderLanding() : null}
       {store.activeView === 'create-generate' ? renderCreateGenerate() : null}
       {store.activeView === 'create-profile' ? renderCreateProfile() : null}
