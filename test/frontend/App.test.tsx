@@ -36,7 +36,8 @@ describe('igloo-pwa app shell', () => {
     fireEvent.change(screen.getByLabelText('Group Name'), { target: { value: 'Playwright Treasury' } });
     fireEvent.click(screen.getByRole('button', { name: 'Create Keyset' }));
     await waitFor(() => {
-      expect(screen.getByText('Select the Device Share')).toBeInTheDocument();
+      expect(screen.getByRole('heading', { name: 'Create Profile' })).toBeInTheDocument();
+      expect(screen.getByText('Choose Local Share')).toBeInTheDocument();
     });
     fireEvent.change(screen.getByLabelText('Device Profile Name'), {
       target: { value: 'Primary Browser Device' },

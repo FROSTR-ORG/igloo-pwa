@@ -12,10 +12,9 @@ import {
   CreateFlowDistributionSection,
   CreateFlowDistributionCards,
   CreateFlowGenerateCard,
-  CreateFlowLocalSaveCard,
+  CreateFlowProfileSetup,
   CreateFlowReviewPanel,
   RotateKeysetPanel,
-  CreateFlowSharePicker,
   HostEntryTile,
   HostFlowShell,
   OperatorDashboardTabs,
@@ -536,53 +535,35 @@ function AppShell() {
   function renderCreateProfile() {
     if (!store.generatedKeyset) return null;
     return (
-      <HostFlowShell
-        title="Create Device Profile"
-        description="Step 2 of 3 · choose one share for this device and enter the local profile details."
-        onBack={() => store.setActiveView('create-generate')}
-        backTooltip="Back to keyset generation"
-      >
-        <section className="igloo-flow-root igloo-stack">
-          <StepProgress steps={['Generate', 'Create profile', 'Review', 'Distribute']} active={1} />
-          <Card>
-            <CardHeader>
-              <CardTitle>Select the Device Share</CardTitle>
-              <CardDescription>Choose which generated share should become the local signing device.</CardDescription>
-            </CardHeader>
-            <CardContent className="igloo-stack">
-              <CreateFlowSharePicker
-                shares={store.generatedKeyset.shares}
-                selectedMemberIdx={store.selectedGeneratedShareIdx}
-                onSelect={(memberIdx) => store.selectGeneratedShare(memberIdx)}
-              />
-              {selectedShare ? (
-                <CreateFlowLocalSaveCard
-                  share={selectedShare}
-                  draft={{
-                    label: store.drafts.profileForm.label,
-                    relayUrls: store.drafts.profileForm.relayUrls,
-                    primarySecret: store.drafts.profileForm.password,
-                    secondarySecret: store.drafts.profileForm.confirmPassword,
-                  }}
-                  title="Local Browser Device"
-                  subtitle={`Member ${selectedShare.member_idx}`}
-                  labelInputLabel="Device Profile Name"
-                  relayLabel="Relays"
-                  primarySecretLabel="Device Password"
-                  secondarySecretLabel="Confirm Password"
-                  actionLabel="Continue to Review"
-                  actionVariant="default"
-                  onLabelChange={(value) => store.updateProfileForm('label', value)}
-                  onPrimarySecretChange={(value) => store.updateProfileForm('password', value)}
-                  onSecondarySecretChange={(value) => store.updateProfileForm('confirmPassword', value)}
-                  onRelayUrlsChange={(value) => store.updateProfileForm('relayUrls', value)}
-                  onAction={() => void run(() => store.reviewGeneratedProfile())}
-                />
-              ) : null}
-            </CardContent>
-          </Card>
-        </section>
-      </HostFlowShell>
+      <>
+        <PublicTaskShell>
+          <StepProgress steps={['Create Keyset', 'Setup Profile', 'Onboard Devices']} active={1} />
+          <PageBackLink label="Back" onBack={() => store.setActiveView('create-generate')} />
+          <PublicTaskTitle
+            title="Create Profile"
+            description="Choose which share stays on this device, then configure the local profile before distributing the rest."
+          />
+          <CreateFlowProfileSetup
+            shares={store.generatedKeyset.shares}
+            selectedMemberIdx={store.selectedGeneratedShareIdx}
+            keysetName={store.generatedKeyset.group_name}
+            draft={{
+              label: store.drafts.profileForm.label,
+              relayUrls: store.drafts.profileForm.relayUrls,
+              primarySecret: store.drafts.profileForm.password,
+              secondarySecret: store.drafts.profileForm.confirmPassword,
+            }}
+            actionLabel="Continue to Review"
+            onSelectShare={(memberIdx) => store.selectGeneratedShare(memberIdx)}
+            onLabelChange={(value) => store.updateProfileForm('label', value)}
+            onPrimarySecretChange={(value) => store.updateProfileForm('password', value)}
+            onSecondarySecretChange={(value) => store.updateProfileForm('confirmPassword', value)}
+            onRelayUrlsChange={(value) => store.updateProfileForm('relayUrls', value)}
+            onAction={() => void run(() => store.reviewGeneratedProfile())}
+          />
+        </PublicTaskShell>
+        <PublicFocusFooter />
+      </>
     );
   }
 

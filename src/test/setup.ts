@@ -26,6 +26,48 @@ const mockRuntimeSnapshot = JSON.stringify({
   }
 });
 
+function createMemoryStorage(): Storage {
+  const values = new Map<string, string>();
+  return {
+    get length() {
+      return values.size;
+    },
+    clear() {
+      values.clear();
+    },
+    getItem(key: string) {
+      return values.has(key) ? values.get(key) ?? null : null;
+    },
+    key(index: number) {
+      return Array.from(values.keys())[index] ?? null;
+    },
+    removeItem(key: string) {
+      values.delete(key);
+    },
+    setItem(key: string, value: string) {
+      values.set(key, String(value));
+    },
+  };
+}
+
+function ensureLocalStorage() {
+  const candidate = window.localStorage as Storage | undefined;
+  if (
+    candidate &&
+    typeof candidate.clear === 'function' &&
+    typeof candidate.getItem === 'function' &&
+    typeof candidate.setItem === 'function' &&
+    typeof candidate.removeItem === 'function'
+  ) {
+    return;
+  }
+
+  Object.defineProperty(window, 'localStorage', {
+    configurable: true,
+    value: createMemoryStorage(),
+  });
+}
+
 class MockWasmBridgeRuntime {
   init_runtime() {}
   restore_runtime() {}
@@ -52,6 +94,7 @@ class MockWasmBridgeRuntime {
 }
 
 beforeEach(() => {
+  ensureLocalStorage();
   setInjectedWasmBridgeModuleForTests({
     WasmBridgeRuntime: MockWasmBridgeRuntime,
     create_onboarding_request_bundle: (_shareSecret, _peerPubkey32Hex, _eventKind, sentAtSeconds) =>
