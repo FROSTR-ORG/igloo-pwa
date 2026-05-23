@@ -491,24 +491,26 @@ function AppShell() {
               onGenerate={() => void run(() => store.generateKeyset())}
             />
           ) : null}
-          <div className="igloo-button-row igloo-button-row-tight" role="group" aria-label="Keyset action mode">
-            <Button
-              type="button"
-              size="sm"
-              variant={store.drafts.createForm.mode === 'new' ? 'default' : 'secondary'}
-              onClick={() => store.updateCreateForm('mode', 'new')}
-            >
-              New Keyset
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              variant={store.drafts.createForm.mode === 'rotate' ? 'default' : 'secondary'}
-              onClick={() => store.updateCreateForm('mode', 'rotate')}
-            >
-              Rotate Existing
-            </Button>
-          </div>
+          {store.profiles.length > 0 ? (
+            <div className="igloo-button-row igloo-button-row-tight" role="group" aria-label="Keyset action mode">
+              <Button
+                type="button"
+                size="sm"
+                variant={store.drafts.createForm.mode === 'new' ? 'default' : 'secondary'}
+                onClick={() => store.updateCreateForm('mode', 'new')}
+              >
+                New Keyset
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant={store.drafts.createForm.mode === 'rotate' ? 'default' : 'secondary'}
+                onClick={() => store.updateCreateForm('mode', 'rotate')}
+              >
+                Rotate Existing
+              </Button>
+            </div>
+          ) : null}
           {store.drafts.createForm.mode === 'rotate' ? (
             <RotateKeysetPanel
               sourceProfileId={store.drafts.rotationForm.sourceProfileId}
@@ -844,8 +846,8 @@ function AppShell() {
         <PublicTaskShell>
           <PageBackLink label="Back to Welcome" onBack={goToLanding} />
           <PublicTaskTitle
-            title="Onboard Device"
-            description="Connect with a password-protected onboarding package and complete the handshake."
+            title="Enter Onboarding Package"
+            description="Import a valid onboarding package to receive this device's share."
           />
           <section className="igloo-flow-root">
             <OnboardPackageEntry

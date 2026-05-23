@@ -61,10 +61,10 @@ describe('igloo-pwa app shell', () => {
     fireEvent.change(screen.getByLabelText('bfonboard'), {
       target: { value: `bfonboard1${'q'.repeat(96)}` },
     });
-    fireEvent.change(screen.getByLabelText('Decryption Password'), {
+    fireEvent.change(screen.getByLabelText('Package Password'), {
       target: { value: 'playwright-onboard-pass' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Connect' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Apply Onboarding Package' }));
 
     await waitFor(() => {
       expect(screen.getByText('Review Onboarded Profile')).toBeInTheDocument();
@@ -272,7 +272,7 @@ describe('igloo-pwa app shell', () => {
     render(<App />);
 
     await waitFor(() => {
-      expect(screen.getByRole('heading', { name: 'Enter bfonboard Package' })).toBeInTheDocument();
+      expect(screen.getByRole('heading', { name: 'Enter Onboarding Package' })).toBeInTheDocument();
       expect(screen.queryByRole('heading', { name: 'Connecting to Inviter' })).not.toBeInTheDocument();
     });
   });

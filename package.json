@@ -4,8 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "prepare:dev": "bash ../../scripts/test-prebuild.sh ensure ui && npm run build:browser-wasm",
-    "prepare:workspace": "bash ../../scripts/test-prebuild.sh ensure ui browser-wasm",
+    "prepare:dev": "bash ../../scripts/test-prebuild.sh ensure pwa-runtime",
+    "prepare:workspace": "bash ../../scripts/test-prebuild.sh ensure pwa-runtime",
     "prepare:e2e": "bash ../../scripts/test-prebuild.sh ensure pwa home",
     "build:ui": "npm --prefix ../igloo-ui run build",
     "build:browser-wasm": "node ./scripts/sync-bridge-wasm.mjs",
