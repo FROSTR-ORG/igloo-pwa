@@ -342,9 +342,49 @@ function parseJsonObject(value: string) {
   }
 }
 
+function readNumber(value: unknown, fallback: number) {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string') {
+    const parsed = Number.parseInt(value, 10);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return fallback;
+}
+
 function formatWelcomeKey(value: string) {
   if (value.length <= 16) return value;
   return `${value.slice(0, 8)}...${value.slice(-4)}`;
+}
+
+function derivePaperCreatePeerPermissions(shares: Array<{ name: string; share_public_key: string }>) {
+  return shares.map((share, index) => ({
+    label: `Peer #${index}`,
+    detail: formatWelcomeKey(share.share_public_key),
+    enabled: ['sign', 'ecdh', 'ping', 'onboard'] as Array<'sign' | 'ecdh' | 'ping' | 'onboard'>,
+  }));
+}
+
+function derivePaperOnboardSummary(preview: {
+  label: string;
+  group_package_json: string;
+  share_package_json: string;
+  relays: string[];
+}) {
+  const groupPackage = parseJsonObject(preview.group_package_json);
+  const sharePackage = parseJsonObject(preview.share_package_json);
+  const threshold = readNumber(groupPackage?.threshold, 2);
+  const memberCount = Array.isArray(groupPackage?.members) ? groupPackage.members.length : 3;
+  const shareIdx = readNumber(sharePackage?.idx, 0);
+  const groupName = typeof groupPackage?.group_name === 'string' && groupPackage.group_name
+    ? groupPackage.group_name
+    : 'My Signing Key';
+
+  return {
+    groupName,
+    thresholdLabel: `${threshold} of ${memberCount}`,
+    shareLabel: `#${shareIdx} (Index ${shareIdx})`,
+    peerPolicyCount: memberCount,
+  };
 }
 
 function deriveWelcomeReturningLayout(profileCount: number) {
@@ -552,6 +592,7 @@ function AppShell() {
             shares={store.generatedKeyset.shares}
             selectedMemberIdx={store.selectedGeneratedShareIdx}
             keysetName={store.generatedKeyset.group_name}
+            peerPermissions={derivePaperCreatePeerPermissions(store.generatedKeyset.shares)}
             draft={{
               label: store.drafts.profileForm.label,
               relayUrls: store.drafts.profileForm.relayUrls,
@@ -630,9 +671,9 @@ function AppShell() {
             bannerKicker="How this step works"
             bannerDescription=""
             bannerPoints={[
-              'Set password: saving a password creates the bfonboard package for that device.',
-              'Distribute: copy package/password or show QR once the package exists.',
-              'Complete: mark distributed when handoff is done.',
+              'Set password Saving a password creates the bfonboard package for that device.',
+              'Distribute Copy package/password or show QR once the package exists.',
+              'Complete Echo turns the row green, or mark distributed manually when handoff is done.',
             ]}
             sectionTitle="Remaining Shares"
             sectionDescription="Each share can be copied, shown as a QR package, or downloaded as a `bfonboard` file."
@@ -868,13 +909,14 @@ function AppShell() {
     return (
       <>
         <PublicTaskShell>
-          <PageBackLink label="Back" onBack={() => store.setActiveView('onboard-connect')} />
-          <PublicTaskTitle
-            title="Onboarding Handshake"
-            description="The package is being decoded and the peer handshake is running."
-          />
           <section className="igloo-flow-root">
-            <OnboardHandshakePanel />
+            <OnboardHandshakePanel
+              packageText={store.drafts.onboardConnectForm.packageText}
+              keysetName="My Signing Key"
+              thresholdLabel="2/3"
+              activeStep="applying"
+              onCancel={() => store.setActiveView('onboard-connect')}
+            />
           </section>
         </PublicTaskShell>
         <PublicFocusFooter />
@@ -886,14 +928,12 @@ function AppShell() {
     return (
       <>
         <PublicTaskShell>
-          <PageBackLink label="Back" onBack={() => store.setActiveView('onboard-connect')} />
           <PublicTaskTitle
             title="Onboarding Failed"
-            description="The onboarding package did not complete the recipient handshake."
+            description={null}
           />
           <section className="igloo-flow-root">
             <OnboardFailedPanel
-              message={uiError ?? 'The onboarding package could not be connected.'}
               onRetry={() => {
                 setUiError(null);
                 store.setActiveView('onboard-connect');
@@ -909,14 +949,10 @@ function AppShell() {
   function renderOnboardSave() {
     if (!store.pendingOnboardConnection) return null;
     const preview = store.pendingOnboardConnection.preview;
+    const paperSummary = derivePaperOnboardSummary(preview);
     return (
       <>
         <PublicTaskShell>
-          <PageBackLink label="Back" onBack={() => store.setActiveView('onboard-connect')} />
-          <PublicTaskTitle
-            title="Onboarding Complete"
-            description="Review the resolved profile details and choose the password used to store this device locally."
-          />
           <section className="igloo-flow-root">
             <OnboardCompletePanel
               preview={{
@@ -925,6 +961,10 @@ function AppShell() {
                 groupPublicKey: preview.group_public_key,
                 relays: preview.relays,
               }}
+              groupName={paperSummary.groupName}
+              thresholdLabel={paperSummary.thresholdLabel}
+              shareLabel={paperSummary.shareLabel}
+              peerPolicyCount={paperSummary.peerPolicyCount}
               draft={store.drafts.onboardSaveForm}
               onLabelChange={(value) => store.updateOnboardSaveForm('label', value)}
               onPasswordChange={(value) => store.updateOnboardSaveForm('password', value)}

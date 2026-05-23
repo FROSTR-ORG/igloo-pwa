@@ -67,8 +67,8 @@ describe('igloo-pwa app shell', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Apply Onboarding Package' }));
 
     await waitFor(() => {
-      expect(screen.getByText('Review Onboarded Profile')).toBeInTheDocument();
-      expect(screen.getByRole('button', { name: 'Save Device' })).toBeInTheDocument();
+      expect(screen.getByRole('heading', { name: 'Onboarding Complete' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Save & Launch Signer' })).toBeInTheDocument();
     });
   });
 
@@ -222,7 +222,7 @@ describe('igloo-pwa app shell', () => {
     render(<App />);
 
     await waitFor(() => {
-      expect(screen.getByRole('heading', { name: 'Review Onboarded Profile' })).toBeInTheDocument();
+      expect(screen.getByRole('heading', { name: 'Onboarding Complete' })).toBeInTheDocument();
       expect(screen.queryByText('Confirm Onboarded Profile')).not.toBeInTheDocument();
     });
   });
