@@ -671,9 +671,9 @@ function AppShell() {
             bannerKicker="How this step works"
             bannerDescription=""
             bannerPoints={[
-              'Set password Saving a password creates the bfonboard package for that device.',
-              'Distribute Copy package/password or show QR once the package exists.',
-              'Complete Echo turns the row green, or mark distributed manually when handoff is done.',
+              'Set password|Saving a password creates the bfonboard package for that device.',
+              'Distribute|Copy package/password or show QR once the package exists.',
+              'Complete|Echo turns the row green, or mark distributed manually when handoff is done.',
             ]}
             sectionTitle="Remaining Shares"
             sectionDescription="Each share can be copied, shown as a QR package, or downloaded as a `bfonboard` file."

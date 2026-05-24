@@ -23,6 +23,8 @@ import type {
   PwaView,
 } from './types';
 
+const ONBOARD_HANDSHAKE_MINIMUM_MS = 350;
+
 type AppState = PwaPersistedState & {
   setActiveView: (view: PwaView) => void;
   setDashboardTab: (tab: PwaDashboardTab) => void;
@@ -859,6 +861,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           pendingOnboardConnection: null,
         }));
         try {
+          await new Promise((resolve) => window.setTimeout(resolve, ONBOARD_HANDSHAKE_MINIMUM_MS));
           const connection = await adapter.connectOnboardingPackage(state.drafts.onboardConnectForm);
           setState((current) => ({
             ...current,
