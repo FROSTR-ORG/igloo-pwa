@@ -69,6 +69,7 @@ describe('igloo-pwa app shell', () => {
 
     await waitFor(() => {
       expect(screen.getByRole('heading', { name: 'Onboarding Complete' })).toBeInTheDocument();
+      expect(screen.getByLabelText('Device Name')).toHaveValue('Onboarded Device');
       expect(screen.getByRole('button', { name: 'Save & Launch Signer' })).toBeInTheDocument();
     });
   });
