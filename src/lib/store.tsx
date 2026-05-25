@@ -142,6 +142,16 @@ const defaultSettings: PwaSettings = {
 
 const ACTIVE_RUNTIME_POLL_INTERVAL_MS = 1_000;
 
+function readProfileGroupName(profile: PwaProfile | null) {
+  if (!profile) return '';
+  try {
+    const parsed = JSON.parse(profile.group_package_json) as { group_name?: unknown };
+    return typeof parsed.group_name === 'string' ? parsed.group_name.trim() : '';
+  } catch {
+    return '';
+  }
+}
+
 function createDefaultState(): PwaPersistedState {
   return {
     profiles: [],
@@ -506,10 +516,15 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           state.drafts.createForm.mode === 'rotate'
             ? state.profiles.find((profile) => profile.id === state.drafts.rotationForm.sourceProfileId) ?? null
             : null;
+        const rotationGroupName =
+          state.drafts.createForm.groupName.trim()
+          || readProfileGroupName(sourceProfile)
+          || sourceProfile?.label
+          || '';
         const keyset =
           state.drafts.createForm.mode === 'rotate'
             ? await adapter.createRotatedKeyset({
-                groupName: state.drafts.createForm.groupName,
+                groupName: rotationGroupName,
                 threshold,
                 count,
                 sources: state.drafts.rotationForm.sources

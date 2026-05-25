@@ -25,14 +25,15 @@ describe('igloo-pwa app shell', () => {
     renderApp();
     expect(screen.getByRole('heading', { name: 'Igloo Web' })).toBeInTheDocument();
     expect(screen.getByText('Split your Nostr key. Sign from anywhere.')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'New Keyset' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Import Device Profile' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Onboard' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Generate New Keyset' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Generate' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Import Existing Device' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Onboard New Device' })).toBeInTheDocument();
   });
 
   it('opens the create flow and generates a review workspace', async () => {
     renderApp();
-    fireEvent.click(screen.getByRole('button', { name: 'New Keyset' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Generate' }));
     fireEvent.change(screen.getByLabelText('Group Name'), { target: { value: 'Playwright Treasury' } });
     fireEvent.click(screen.getByRole('button', { name: 'Create Keyset' }));
     await waitFor(() => {
@@ -57,7 +58,7 @@ describe('igloo-pwa app shell', () => {
   it('accepts a real-looking bfonboard package and advances directly to save', async () => {
     renderApp();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Onboard' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Onboard New Device' }));
     fireEvent.change(screen.getByLabelText('bfonboard'), {
       target: { value: `bfonboard1${'q'.repeat(96)}` },
     });
