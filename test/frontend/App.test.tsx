@@ -1,8 +1,8 @@
 import * as React from 'react';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
-import App from '@/App';
+import App, { RecoverPrivateKeyView } from '@/App';
 import { STORAGE_KEY } from '@/lib/storage';
 import { StoreProvider, useStore } from '@/lib/store';
 
@@ -86,6 +86,79 @@ describe('igloo-pwa app shell', () => {
       expect(screen.queryByText('Disposable Key')).not.toBeInTheDocument();
       expect(screen.getByRole('button', { name: 'Generate Keyset' })).toBeInTheDocument();
     });
+  });
+
+  it('opens the recover-key Collect Shares flow from the returning card menu', () => {
+    cleanup();
+    window.localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({
+        profiles: [
+          {
+            id: '99'.repeat(32),
+            label: 'Recoverable Key',
+            share_public_key: '66'.repeat(32),
+            group_public_key: '77'.repeat(32),
+            relays: ['wss://relay.primal.net'],
+            group_package_json:
+              '{"group_name":"Recoverable Key","group_pk":"77","threshold":2,"members":[{"idx":0},{"idx":1},{"idx":2}]}',
+            share_package_json: '{"idx":0}',
+            source: 'generated',
+            relay_profile: 'browser',
+            group_ref: 'group-ref',
+            encrypted_profile_ref: 'encrypted-profile-ref',
+            state_path: '/tmp/igloo-pwa/recoverable',
+            created_at: 1700000000000,
+            stored_password: 'pw',
+            profile_string: 'bfprofile1demo',
+            share_string: 'bfshare1demo',
+            signer_settings: {
+              sign_timeout_secs: 30,
+              ping_timeout_secs: 15,
+              request_ttl_secs: 300,
+              state_save_interval_secs: 30,
+              peer_selection_strategy: 'deterministic_sorted',
+            },
+            onboarding_package: null,
+          },
+        ],
+        selectedProfileId: '99'.repeat(32),
+        activeView: 'landing',
+        activeDashboardTab: 'signer',
+        peerPermissionStates: [],
+      }),
+    );
+
+    render(<App />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'More actions' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Recover' }));
+
+    expect(screen.getByRole('heading', { name: 'Collect Shares' })).toBeInTheDocument();
+    expect(screen.getByText('Recover Key')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Next Step' })).toBeInTheDocument();
+  });
+
+  it('reveals, masks, and clears the recovered private key', () => {
+    cleanup();
+    const onClear = vi.fn();
+    const recovered = { nsec: `nsec1${'q'.repeat(58)}`, signingKeyHex: '11'.repeat(32) };
+    render(<RecoverPrivateKeyView recovered={recovered} onClear={onClear} />);
+
+    // Masked by default — the full nsec is not shown.
+    expect(screen.queryByText(recovered.nsec)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Reveal' }));
+    expect(screen.getByText(recovered.nsec)).toBeInTheDocument();
+
+    // Encrypt Key reveals the password fields.
+    expect(screen.queryByLabelText('Password')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText(/Encrypt Key/i));
+    expect(screen.getByLabelText('Password')).toBeInTheDocument();
+    expect(screen.getByLabelText('Confirm Password')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Clear' }));
+    expect(onClear).toHaveBeenCalledTimes(1);
   });
 
   it('routes Import Existing Device directly into the 2-step Import Device Profile flow', () => {

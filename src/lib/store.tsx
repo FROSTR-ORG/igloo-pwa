@@ -72,6 +72,15 @@ type AppState = PwaPersistedState & {
   updateRotateConnectForm: (field: keyof PwaDraftState['rotateConnectForm'], value: string) => void;
   connectRotationPackage: () => Promise<void>;
   finalizeRotationUpdate: () => Promise<void>;
+  startRecoverKey: (profileId: string) => void;
+  updateRecoverSource: (
+    index: number,
+    field: keyof PwaDraftState['recoverKeyForm']['sources'][number],
+    value: string,
+  ) => void;
+  addRecoverSource: () => void;
+  removeRecoverSource: (index: number) => void;
+  recoverKeyFromShares: () => Promise<{ nsec: string; signingKeyHex: string }>;
   copyProfilePackage: (profileId: string, format: 'bfprofile' | 'bfshare') => Promise<void>;
   deleteProfile: (profileId: string) => void;
   updatePeerPolicy: (
@@ -104,6 +113,10 @@ const defaultDrafts: PwaDraftState = {
     privateKey: '',
   },
   rotationForm: {
+    sourceProfileId: '',
+    sources: [{ packageText: '', password: '' }],
+  },
+  recoverKeyForm: {
     sourceProfileId: '',
     sources: [{ packageText: '', password: '' }],
   },
@@ -219,6 +232,14 @@ function normalizeLoadedState(): PwaPersistedState {
           loaded.drafts?.rotationForm?.sources?.length
             ? loaded.drafts.rotationForm.sources
             : defaultDrafts.rotationForm.sources,
+      },
+      recoverKeyForm: {
+        ...defaultDrafts.recoverKeyForm,
+        ...loaded.drafts?.recoverKeyForm,
+        sources:
+          loaded.drafts?.recoverKeyForm?.sources?.length
+            ? loaded.drafts.recoverKeyForm.sources
+            : defaultDrafts.recoverKeyForm.sources,
       },
       profileForm: { ...defaultDrafts.profileForm, ...loaded.drafts?.profileForm },
       distributionForms: loaded.drafts?.distributionForms ?? {},
@@ -527,6 +548,82 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
             },
           },
         }));
+      },
+      startRecoverKey(profileId) {
+        setState((current) => ({
+          ...current,
+          selectedProfileId: profileId,
+          activeView: 'recover-collect',
+          drafts: {
+            ...current.drafts,
+            recoverKeyForm: {
+              sourceProfileId: profileId,
+              sources: [{ packageText: '', password: '' }],
+            },
+          },
+        }));
+      },
+      updateRecoverSource(index, field, value) {
+        setState((current) => ({
+          ...current,
+          drafts: {
+            ...current.drafts,
+            recoverKeyForm: {
+              ...current.drafts.recoverKeyForm,
+              sources: current.drafts.recoverKeyForm.sources.map((entry, sourceIndex) =>
+                sourceIndex === index ? { ...entry, [field]: value } : entry,
+              ),
+            },
+          },
+        }));
+      },
+      addRecoverSource() {
+        setState((current) => ({
+          ...current,
+          drafts: {
+            ...current.drafts,
+            recoverKeyForm: {
+              ...current.drafts.recoverKeyForm,
+              sources: [...current.drafts.recoverKeyForm.sources, { packageText: '', password: '' }],
+            },
+          },
+        }));
+      },
+      removeRecoverSource(index) {
+        setState((current) => ({
+          ...current,
+          drafts: {
+            ...current.drafts,
+            recoverKeyForm: {
+              ...current.drafts.recoverKeyForm,
+              sources:
+                current.drafts.recoverKeyForm.sources.length > 1
+                  ? current.drafts.recoverKeyForm.sources.filter((_, sourceIndex) => sourceIndex !== index)
+                  : current.drafts.recoverKeyForm.sources,
+            },
+          },
+        }));
+      },
+      async recoverKeyFromShares() {
+        const recovered = await adapter.recoverNsecFromShares({
+          sources: state.drafts.recoverKeyForm.sources
+            .map((source) => ({
+              packageText: source.packageText.trim(),
+              password: source.password,
+            }))
+            .filter((source) => source.packageText && source.password),
+        });
+        // The reconstructed key is never persisted; it is returned to the caller for
+        // in-memory display and the source inputs are cleared immediately.
+        setState((current) => ({
+          ...current,
+          activeView: 'recover-key',
+          drafts: {
+            ...current.drafts,
+            recoverKeyForm: defaultDrafts.recoverKeyForm,
+          },
+        }));
+        return recovered;
       },
       async generateKeyset() {
         const threshold = Number.parseInt(state.drafts.createForm.threshold, 10);

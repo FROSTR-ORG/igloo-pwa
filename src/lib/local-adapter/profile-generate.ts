@@ -5,6 +5,8 @@ import {
   groupPackageToWireJson,
   normalizeHex32,
   publicKeyFromSecret,
+  recoverRotationSourceFromBfshare,
+  recoverSecretKeyFromShares,
   sharePackageToWireJson,
   type BrowserOnboardPackagePayload,
 } from 'igloo-shared';
@@ -125,6 +127,19 @@ export async function createRotatedKeyset(input: {
     group_package_json: groupPackageJson,
     shares,
   };
+}
+
+export async function recoverNsecFromShares(input: {
+  sources: Array<{ packageText: string; password: string }>;
+}): Promise<{ nsec: string; signingKeyHex: string }> {
+  const recoveredSources = await Promise.all(
+    input.sources
+      .filter((source) => source.packageText.trim() && source.password)
+      .map((source) =>
+        recoverRotationSourceFromBfshare(source.packageText.trim(), source.password),
+      ),
+  );
+  return await recoverSecretKeyFromShares({ sources: recoveredSources });
 }
 
 export async function createDeviceProfileFromGeneratedShare(

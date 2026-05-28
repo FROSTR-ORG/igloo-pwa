@@ -162,6 +162,7 @@ beforeEach(() => {
         },
       }),
     derive_group_id: (_groupJson) => 'aa'.repeat(32),
+    recover_secret_key_from_shares: (_inputJson) => '11'.repeat(32),
   });
   setInjectedWasmProfileModuleForTests({
     bf_package_version: () => 1,

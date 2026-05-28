@@ -21,6 +21,8 @@ export type PwaView =
   | 'onboard-save'
   | 'rotate-connect'
   | 'rotate-save'
+  | 'recover-collect'
+  | 'recover-key'
   | 'dashboard'
   | 'settings';
 
@@ -177,6 +179,10 @@ export type PwaDraftState = {
     privateKey: string;
   };
   rotationForm: {
+    sourceProfileId: string;
+    sources: Array<{ packageText: string; password: string }>;
+  };
+  recoverKeyForm: {
     sourceProfileId: string;
     sources: Array<{ packageText: string; password: string }>;
   };

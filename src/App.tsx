@@ -50,6 +50,7 @@ import { StoreProvider, useStore } from './lib/store';
 const CREATE_FLOW_STEPS = ['Create Keyset', 'Select Share', 'Save Profile', 'Distribute Shares'];
 const IMPORT_FLOW_STEPS = ['Import Profile', 'Save Profile'];
 const ONBOARD_FLOW_STEPS = ['Input Package', 'Onboard Device', 'Save Profile'];
+const RECOVER_FLOW_STEPS = ['Collect Shares', 'Recover Key'];
 
 function toPwaEventRows(lines: string[] = []): EventLogRowModel[] {
   return lines.map((line, index) => ({
@@ -366,6 +367,114 @@ function deriveWelcomeReturningLayout(profileCount: number) {
   return 'many';
 }
 
+export function RecoverPrivateKeyView({
+  recovered,
+  onClear,
+}: {
+  recovered: { nsec: string; signingKeyHex: string };
+  onClear: () => void;
+}) {
+  const [revealed, setRevealed] = React.useState(false);
+  const [copied, setCopied] = React.useState(false);
+  const [qrOpen, setQrOpen] = React.useState(false);
+  const [encrypt, setEncrypt] = React.useState(false);
+  const [password, setPassword] = React.useState('');
+  const [confirmPassword, setConfirmPassword] = React.useState('');
+
+  const masked = `${recovered.nsec.slice(0, 10)}${'•'.repeat(32)}`;
+
+  function copyKey() {
+    void navigator.clipboard?.writeText(recovered.nsec);
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1500);
+  }
+
+  function saveKey() {
+    const blob = new Blob([recovered.nsec], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = 'recovered-nsec.txt';
+    anchor.click();
+    URL.revokeObjectURL(url);
+  }
+
+  return (
+    <HostFlowShell
+      title="Recover Private Key"
+      description="Your private key has been recovered. Please handle it with care!"
+      onBack={onClear}
+      backTooltip="Back to Welcome"
+    >
+      <section className="igloo-flow-root igloo-stack">
+        <StepProgress steps={RECOVER_FLOW_STEPS} active={1} />
+        <section className="igloo-task-banner">
+          <span className="igloo-task-kicker">Security Warning</span>
+          <ul>
+            <li>This key grants full control of the account — never share it.</li>
+            <li>Avoid screenshots; copy it straight into a password manager.</li>
+            <li>This value is held only in memory and clears when you leave this screen.</li>
+          </ul>
+        </section>
+
+        <label>
+          Recovered NSEC
+          <div className="igloo-recover-key-field">
+            <span>{revealed ? recovered.nsec : masked}</span>
+          </div>
+        </label>
+
+        <div className="igloo-button-row">
+          <Button type="button" size="sm" onClick={copyKey}>
+            {copied ? 'Copied!' : 'Copy'}
+          </Button>
+          <Button type="button" size="sm" variant="secondary" onClick={saveKey}>
+            Save
+          </Button>
+          <Button type="button" size="sm" variant="secondary" onClick={() => setQrOpen(true)}>
+            QR code
+          </Button>
+          <Button type="button" size="sm" variant="secondary" onClick={() => setRevealed((value) => !value)}>
+            {revealed ? 'Hide' : 'Reveal'}
+          </Button>
+          <Button type="button" size="sm" variant="secondary" onClick={onClear}>
+            Clear
+          </Button>
+        </div>
+
+        <label className="igloo-recover-encrypt-toggle">
+          <input type="checkbox" checked={encrypt} onChange={(event) => setEncrypt(event.target.checked)} />
+          Encrypt Key before saving
+        </label>
+        {encrypt ? (
+          <div className="igloo-stack">
+            <label>
+              Password
+              <input type="password" value={password} onChange={(event) => setPassword(event.target.value)} />
+            </label>
+            <label>
+              Confirm Password
+              <input
+                type="password"
+                value={confirmPassword}
+                onChange={(event) => setConfirmPassword(event.target.value)}
+              />
+            </label>
+          </div>
+        ) : null}
+      </section>
+
+      <QrPayloadModal
+        open={qrOpen}
+        onClose={() => setQrOpen(false)}
+        title="Recovered NSEC"
+        payload={recovered.nsec}
+        label="Scan to import the recovered private key"
+      />
+    </HostFlowShell>
+  );
+}
+
 function AppShell() {
   const store = useStore();
   const [uiError, setUiError] = React.useState<string | null>(null);
@@ -374,6 +483,7 @@ function AppShell() {
   const [welcomeUnlockError, setWelcomeUnlockError] = React.useState<string | null>(null);
   const [welcomeUnlockSubmitting, setWelcomeUnlockSubmitting] = React.useState(false);
   const [welcomeDeleteProfileId, setWelcomeDeleteProfileId] = React.useState<string | null>(null);
+  const [recoveredKey, setRecoveredKey] = React.useState<{ nsec: string; signingKeyHex: string } | null>(null);
 
   const selectedProfile = store.profiles.find((profile) => profile.id === store.selectedProfileId) ?? null;
   const welcomeUnlockProfile = React.useMemo<WelcomeReturningProfileModel | null>(() => {
@@ -410,6 +520,7 @@ function AppShell() {
 
   const goToLanding = React.useCallback(() => {
     setUiError(null);
+    setRecoveredKey(null);
     store.setActiveView('landing');
   }, [store]);
 
@@ -496,6 +607,10 @@ function AppShell() {
         onRotate={(profileId) => {
           store.selectProfile(profileId);
           store.setActiveView('rotate-connect');
+        }}
+        onRecover={(profileId) => {
+          setRecoveredKey(null);
+          store.startRecoverKey(profileId);
         }}
         onDelete={openWelcomeDelete}
         onNewKeyset={() => store.setActiveView('create-generate')}
@@ -1060,6 +1175,54 @@ function AppShell() {
     );
   }
 
+  function renderRecoverCollect() {
+    return (
+      <HostFlowShell
+        title="Collect Shares"
+        description="Provide enough source packages to reconstruct this keyset's private key."
+        onBack={goToLanding}
+        backTooltip="Back to Welcome"
+      >
+        <section className="igloo-flow-root igloo-stack">
+          <StepProgress steps={RECOVER_FLOW_STEPS} active={0} />
+          <RotateKeysetPanel
+            title="Source Packages"
+            description="Add threshold source packages (bfprofile or bfshare) to reconstruct the private key."
+            actionLabel="Next Step"
+            sourceProfileId={store.drafts.recoverKeyForm.sourceProfileId}
+            availableProfiles={store.profiles.map((profile) => ({
+              id: profile.id,
+              label: `${profile.label || 'Unnamed device'} (${shortProfileId(profile.id)})`,
+            }))}
+            rotationSources={store.drafts.recoverKeyForm.sources.map((source) => ({
+              packageText: source.packageText,
+              packagePassword: source.password,
+            }))}
+            onChangeSourceProfile={() => {
+              /* recovery targets a specific profile; the source picker is inert here */
+            }}
+            onChangeRotationSource={(index, field, value) =>
+              store.updateRecoverSource(index, field === 'packagePassword' ? 'password' : 'packageText', value)
+            }
+            onAddRotationSource={() => store.addRecoverSource()}
+            onRemoveRotationSource={(index) => store.removeRecoverSource(index)}
+            onRotate={() =>
+              void run(async () => {
+                const recovered = await store.recoverKeyFromShares();
+                setRecoveredKey(recovered);
+              })
+            }
+          />
+        </section>
+      </HostFlowShell>
+    );
+  }
+
+  function renderRecoverKey() {
+    if (!recoveredKey) return null;
+    return <RecoverPrivateKeyView recovered={recoveredKey} onClear={goToLanding} />;
+  }
+
   function renderDashboard() {
     const runtimeState = store.runtimeSnapshot?.active ? 'running' : 'stopped';
     const runtimeControlLabel = runtimeState === 'running' ? 'Stop Signer' : 'Start Signer';
@@ -1319,6 +1482,8 @@ function AppShell() {
       {store.activeView === 'onboard-save' ? renderOnboardSave() : null}
       {store.activeView === 'rotate-connect' ? renderRotateConnect() : null}
       {store.activeView === 'rotate-save' ? renderRotateSave() : null}
+      {store.activeView === 'recover-collect' ? renderRecoverCollect() : null}
+      {store.activeView === 'recover-key' ? renderRecoverKey() : null}
       {store.activeView === 'dashboard' ? renderDashboard() : null}
     </PageLayout>
   );
