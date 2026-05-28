@@ -28,6 +28,7 @@ export type GeneratedKeysetInput = {
   groupName: string;
   threshold: number;
   count: number;
+  privateKey?: string;
 };
 
 export type GeneratedProfileInput = {

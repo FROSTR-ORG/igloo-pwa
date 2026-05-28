@@ -8,6 +8,7 @@ import {
   sharePackageToWireJson,
   type BrowserOnboardPackagePayload,
 } from 'igloo-shared';
+import { nip19 } from 'nostr-tools';
 
 import type {
   PwaGeneratedKeyset,
@@ -24,6 +25,29 @@ import {
   type GeneratedProfileInput,
 } from './common';
 
+
+function hexToByteArray(hex: string) {
+  const normalized = normalizeHex32(hex, 'private key');
+  const bytes: number[] = [];
+  for (let index = 0; index < normalized.length; index += 2) {
+    bytes.push(Number.parseInt(normalized.slice(index, index + 2), 16));
+  }
+  return bytes;
+}
+
+function optionalSigningKeyBytes(value?: string) {
+  const trimmed = value?.trim();
+  if (!trimmed) return undefined;
+  if (/^[0-9a-fA-F]{64}$/.test(trimmed)) {
+    return hexToByteArray(trimmed);
+  }
+  const decoded = nip19.decode(trimmed);
+  if (decoded.type !== 'nsec' || !(decoded.data instanceof Uint8Array)) {
+    throw new Error('Existing private key must be an nsec or 64-character hex key.');
+  }
+  return Array.from(decoded.data);
+}
+
 export async function createGeneratedKeyset(input: GeneratedKeysetInput): Promise<PwaGeneratedKeyset> {
   if (!input.groupName.trim()) {
     throw new Error('Group name is required.');
@@ -33,6 +57,7 @@ export async function createGeneratedKeyset(input: GeneratedKeysetInput): Promis
     group_name: input.groupName.trim(),
     threshold: input.threshold,
     count: input.count,
+    signing_key32: optionalSigningKeyBytes(input.privateKey),
   }));
   const bundle = JSON.parse(raw) as {
     group: {
