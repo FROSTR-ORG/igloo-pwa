@@ -8,8 +8,8 @@ export type PwaView =
   | 'landing'
   | 'create-choice'
   | 'create-generate'
-  | 'create-profile'
-  | 'create-confirm'
+  | 'create-select-share'
+  | 'create-save-profile'
   | 'create-distribute'
   | 'load-choice'
   | 'load-import'
@@ -174,6 +174,7 @@ export type PwaDraftState = {
     groupName: string;
     threshold: string;
     count: string;
+    privateKey: string;
   };
   rotationForm: {
     sourceProfileId: string;
@@ -186,9 +187,16 @@ export type PwaDraftState = {
     relayUrls: string;
   };
   distributionForms: Record<number, { label: string; password: string; confirmPassword: string }>;
+  distributionPermissions: Record<number, Array<'sign' | 'ecdh' | 'ping' | 'onboard'>>;
   importProfileForm: {
     profileString: string;
     password: string;
+  };
+  importSaveForm: {
+    label: string;
+    password: string;
+    confirmPassword: string;
+    relayUrls: string;
   };
   recoverProfileForm: {
     shareString: string;
@@ -202,6 +210,7 @@ export type PwaDraftState = {
     label: string;
     password: string;
     confirmPassword: string;
+    relayUrls: string;
   };
   rotateConnectForm: {
     packageText: string;

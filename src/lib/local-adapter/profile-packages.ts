@@ -50,13 +50,14 @@ export async function recoverProfileFromBfShare(input: RecoverInput): Promise<Pw
 export async function finalizeLoadedProfile(
   input: PwaLoadConfirmation,
   existingProfileIds: string[] = [],
+  localPassword?: string,
 ): Promise<PwaProfile> {
   if (!input.profile_payload) {
     throw new Error('Missing canonical profile payload.');
   }
   return await createStoredProfileFromPayload({
     payload: input.profile_payload,
-    password: input.stored_password,
+    password: localPassword ?? input.stored_password,
     source: input.kind,
     existingProfileIds,
     profileString: input.kind === 'bfprofile' ? input.profile_string : undefined,

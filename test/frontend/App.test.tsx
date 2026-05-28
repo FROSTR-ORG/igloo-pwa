@@ -26,19 +26,97 @@ describe('igloo-pwa app shell', () => {
     expect(screen.getByRole('heading', { name: 'Igloo Web' })).toBeInTheDocument();
     expect(screen.getByText('Split your Nostr key. Sign from anywhere.')).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Generate New Keyset' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Generate' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Generate Keyset' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Import Existing Device' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Onboard New Device' })).toBeInTheDocument();
   });
 
-  it('opens the create flow and generates a review workspace', async () => {
-    renderApp();
-    fireEvent.click(screen.getByRole('button', { name: 'Generate' }));
-    fireEvent.change(screen.getByLabelText('Group Name'), { target: { value: 'Playwright Treasury' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Create Keyset' }));
+  it('deletes a returning profile via the card menu after confirmation', async () => {
+    cleanup();
+    window.localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({
+        profiles: [
+          {
+            id: '88'.repeat(32),
+            label: 'Disposable Key',
+            share_public_key: '44'.repeat(32),
+            group_public_key: '55'.repeat(32),
+            relays: ['wss://relay.primal.net'],
+            group_package_json:
+              '{"group_name":"Disposable Key","group_pk":"55","threshold":2,"members":[{"idx":0},{"idx":1},{"idx":2}]}',
+            share_package_json: '{"idx":0}',
+            source: 'generated',
+            relay_profile: 'browser',
+            group_ref: 'group-ref',
+            encrypted_profile_ref: 'encrypted-profile-ref',
+            state_path: '/tmp/igloo-pwa/disposable',
+            created_at: 1700000000000,
+            stored_password: 'pw',
+            profile_string: 'bfprofile1demo',
+            share_string: 'bfshare1demo',
+            signer_settings: {
+              sign_timeout_secs: 30,
+              ping_timeout_secs: 15,
+              request_ttl_secs: 300,
+              state_save_interval_secs: 30,
+              peer_selection_strategy: 'deterministic_sorted',
+            },
+            onboarding_package: null,
+          },
+        ],
+        selectedProfileId: '88'.repeat(32),
+        activeView: 'landing',
+        activeDashboardTab: 'signer',
+        peerPermissionStates: [],
+      }),
+    );
+
+    render(<App />);
+
+    expect(screen.getByText('Disposable Key')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'More actions' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Delete' }));
+
+    // Confirmation modal guards the destructive action.
+    expect(screen.getByRole('heading', { name: 'Delete Profile' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Delete Profile' }));
+
     await waitFor(() => {
-      expect(screen.getByRole('heading', { name: 'Create Profile' })).toBeInTheDocument();
+      expect(screen.queryByText('Disposable Key')).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Generate Keyset' })).toBeInTheDocument();
+    });
+  });
+
+  it('routes Import Existing Device directly into the 2-step Import Device Profile flow', () => {
+    renderApp();
+    fireEvent.click(screen.getByRole('button', { name: 'Import Existing Device' }));
+
+    expect(screen.getByRole('heading', { name: 'Import Device Profile' })).toBeInTheDocument();
+    // 2-step progress bar: Import Profile -> Save Profile
+    expect(screen.getByText('Import Profile')).toBeInTheDocument();
+    expect(screen.getByText('Save Profile')).toBeInTheDocument();
+    expect(screen.getByLabelText('Profile Backup')).toBeInTheDocument();
+    expect(screen.getByLabelText('Backup Password')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Next Step' })).toBeInTheDocument();
+  });
+
+  it('opens the hard-cut create flow and launches the signer from distribution', async () => {
+    renderApp();
+    fireEvent.click(screen.getByRole('button', { name: 'Generate Keyset' }));
+    fireEvent.change(screen.getByLabelText('Group Name'), { target: { value: 'Playwright Treasury' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Next Step' }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: 'Select Share' })).toBeInTheDocument();
       expect(screen.getByText('Choose Local Share')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Copy group public key' })).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Next Step' }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: 'Save Profile' })).toBeInTheDocument();
+      expect(screen.queryByText('Peer Permissions')).not.toBeInTheDocument();
     });
     fireEvent.change(screen.getByLabelText('Device Profile Name'), {
       target: { value: 'Primary Browser Device' },
@@ -49,9 +127,18 @@ describe('igloo-pwa app shell', () => {
     fireEvent.change(screen.getByLabelText('Confirm Password'), {
       target: { value: 'playwright-browser-pass' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Continue to Review' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Next Step' }));
+
     await waitFor(() => {
-      expect(screen.getByRole('heading', { name: 'Review Device Profile', level: 2 })).toBeInTheDocument();
+      expect(screen.getByRole('heading', { name: 'Distribute Shares' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Launch Signer' })).toBeInTheDocument();
+      expect(screen.queryByText('Distribution Completion')).not.toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Launch Signer' }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/Device Dashboard/)).toBeInTheDocument();
+      expect(screen.getByRole('tab', { name: /Signer\s+runtime console/i })).toBeInTheDocument();
     });
   });
 
@@ -65,12 +152,12 @@ describe('igloo-pwa app shell', () => {
     fireEvent.change(screen.getByLabelText('Package Password'), {
       target: { value: 'playwright-onboard-pass' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Apply Onboarding Package' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Next Step' }));
 
     await waitFor(() => {
-      expect(screen.getByRole('heading', { name: 'Onboarding Complete' })).toBeInTheDocument();
-      expect(screen.getByLabelText('Device Name')).toHaveValue('Onboarded Device');
-      expect(screen.getByRole('button', { name: 'Save & Launch Signer' })).toBeInTheDocument();
+      expect(screen.getByRole('heading', { name: 'Save Profile' })).toBeInTheDocument();
+      expect(screen.getByLabelText('Device Profile Name')).toHaveValue('Onboarded Device');
+      expect(screen.getByRole('button', { name: 'Launch Signer' })).toBeInTheDocument();
     });
   });
 
@@ -224,7 +311,7 @@ describe('igloo-pwa app shell', () => {
     render(<App />);
 
     await waitFor(() => {
-      expect(screen.getByRole('heading', { name: 'Onboarding Complete' })).toBeInTheDocument();
+      expect(screen.getByRole('heading', { name: 'Save Profile' })).toBeInTheDocument();
       expect(screen.queryByText('Confirm Onboarded Profile')).not.toBeInTheDocument();
     });
   });
@@ -274,7 +361,7 @@ describe('igloo-pwa app shell', () => {
     render(<App />);
 
     await waitFor(() => {
-      expect(screen.getByRole('heading', { name: 'Enter Onboarding Package' })).toBeInTheDocument();
+      expect(screen.getByRole('heading', { name: 'Input Package' })).toBeInTheDocument();
       expect(screen.queryByRole('heading', { name: 'Connecting to Inviter' })).not.toBeInTheDocument();
     });
   });

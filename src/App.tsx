@@ -12,8 +12,7 @@ import {
   CreateFlowDistributionSection,
   CreateFlowGenerateCard,
   CreateFlowProfileSetup,
-  CreateFlowReviewPanel,
-  OnboardCompletePanel,
+  CreateFlowShareSelection,
   OnboardFailedPanel,
   OnboardHandshakePanel,
   OnboardPackageEntry,
@@ -35,6 +34,7 @@ import {
   Textarea,
   WelcomeEntryHero,
   WelcomeReturningHero,
+  WelcomeDeleteModal,
   WelcomeUnlockModal,
   CRITICAL_E2E_TEST_IDS,
   type EventLogRowModel,
@@ -46,6 +46,10 @@ import {
 import { shortProfileId } from 'igloo-shared';
 
 import { StoreProvider, useStore } from './lib/store';
+
+const CREATE_FLOW_STEPS = ['Create Keyset', 'Select Share', 'Save Profile', 'Distribute Shares'];
+const IMPORT_FLOW_STEPS = ['Import Profile', 'Save Profile'];
+const ONBOARD_FLOW_STEPS = ['Input Package', 'Onboard Device', 'Save Profile'];
 
 function toPwaEventRows(lines: string[] = []): EventLogRowModel[] {
   return lines.map((line, index) => ({
@@ -356,37 +360,6 @@ function formatWelcomeKey(value: string) {
   return `${value.slice(0, 8)}...${value.slice(-4)}`;
 }
 
-function derivePaperCreatePeerPermissions(shares: Array<{ name: string; share_public_key: string }>) {
-  return shares.map((share, index) => ({
-    label: `Peer #${index}`,
-    detail: formatWelcomeKey(share.share_public_key),
-    enabled: ['sign', 'ecdh', 'ping', 'onboard'] as Array<'sign' | 'ecdh' | 'ping' | 'onboard'>,
-  }));
-}
-
-function derivePaperOnboardSummary(preview: {
-  label: string;
-  group_package_json: string;
-  share_package_json: string;
-  relays: string[];
-}) {
-  const groupPackage = parseJsonObject(preview.group_package_json);
-  const sharePackage = parseJsonObject(preview.share_package_json);
-  const threshold = readNumber(groupPackage?.threshold, 2);
-  const memberCount = Array.isArray(groupPackage?.members) ? groupPackage.members.length : 3;
-  const shareIdx = readNumber(sharePackage?.idx, 0);
-  const groupName = typeof groupPackage?.group_name === 'string' && groupPackage.group_name
-    ? groupPackage.group_name
-    : 'My Signing Key';
-
-  return {
-    groupName,
-    thresholdLabel: `${threshold} of ${memberCount}`,
-    shareLabel: `#${shareIdx} (Index ${shareIdx})`,
-    peerPolicyCount: memberCount,
-  };
-}
-
 function deriveWelcomeReturningLayout(profileCount: number) {
   if (profileCount === 1) return 'single';
   if (profileCount <= 3) return 'multi';
@@ -400,12 +373,17 @@ function AppShell() {
   const [welcomeUnlockPassword, setWelcomeUnlockPassword] = React.useState('');
   const [welcomeUnlockError, setWelcomeUnlockError] = React.useState<string | null>(null);
   const [welcomeUnlockSubmitting, setWelcomeUnlockSubmitting] = React.useState(false);
+  const [welcomeDeleteProfileId, setWelcomeDeleteProfileId] = React.useState<string | null>(null);
 
   const selectedProfile = store.profiles.find((profile) => profile.id === store.selectedProfileId) ?? null;
   const welcomeUnlockProfile = React.useMemo<WelcomeReturningProfileModel | null>(() => {
     const profile = store.profiles.find((entry) => entry.id === welcomeUnlockProfileId);
     return profile ? deriveWelcomeReturningProfile(profile) : null;
   }, [store.profiles, welcomeUnlockProfileId]);
+  const welcomeDeleteProfile = React.useMemo<WelcomeReturningProfileModel | null>(() => {
+    const profile = store.profiles.find((entry) => entry.id === welcomeDeleteProfileId);
+    return profile ? deriveWelcomeReturningProfile(profile) : null;
+  }, [store.profiles, welcomeDeleteProfileId]);
   const selectedShare =
     store.generatedKeyset?.shares.find((share) => share.member_idx === store.selectedGeneratedShareIdx) ?? null;
   const [operatorSettingsDraft, setOperatorSettingsDraft] = React.useState<OperatorSettingsDraft>(() =>
@@ -454,6 +432,20 @@ function AppShell() {
     setWelcomeUnlockSubmitting(false);
   }, []);
 
+  const openWelcomeDelete = React.useCallback((profileId: string) => {
+    setWelcomeDeleteProfileId(profileId);
+  }, []);
+
+  const closeWelcomeDelete = React.useCallback(() => {
+    setWelcomeDeleteProfileId(null);
+  }, []);
+
+  const confirmWelcomeDelete = React.useCallback(() => {
+    if (!welcomeDeleteProfileId) return;
+    store.deleteProfile(welcomeDeleteProfileId);
+    setWelcomeDeleteProfileId(null);
+  }, [store, welcomeDeleteProfileId]);
+
   const submitWelcomeUnlock = React.useCallback(
     async (event: React.FormEvent<HTMLFormElement>) => {
       event.preventDefault();
@@ -489,7 +481,7 @@ function AppShell() {
         <WelcomeEntryHero
           logoSrc="/igloo-paper-mark.png"
           onNewKeyset={() => store.setActiveView('create-generate')}
-          onImportProfile={() => store.startLoadChoice()}
+          onImportProfile={() => store.startLoadImport()}
           onOnboard={() => store.setActiveView('onboard-connect')}
         />
       );
@@ -505,8 +497,9 @@ function AppShell() {
           store.selectProfile(profileId);
           store.setActiveView('rotate-connect');
         }}
+        onDelete={openWelcomeDelete}
         onNewKeyset={() => store.setActiveView('create-generate')}
-        onImportProfile={() => store.startLoadChoice()}
+        onImportProfile={() => store.startLoadImport()}
         onOnboard={() => store.setActiveView('onboard-connect')}
       />
     );
@@ -517,9 +510,9 @@ function AppShell() {
       <>
         <PublicTaskShell>
           <PageBackLink label="Back to Welcome" onBack={goToLanding} />
-          <StepProgress steps={['Create Keyset', 'Setup Profile', 'Onboard Devices']} active={0} />
+          <StepProgress steps={CREATE_FLOW_STEPS} active={0} />
           <PublicTaskTitle
-            title="Create New Keyset"
+            title="Create Keyset"
             description="Define the group profile for a new keyset. After generation, choose which share stays on this device, then distribute the rest."
           />
           {store.drafts.createForm.mode === 'new' ? (
@@ -527,6 +520,7 @@ function AppShell() {
               groupName={store.drafts.createForm.groupName}
               threshold={store.drafts.createForm.threshold}
               count={store.drafts.createForm.count}
+              privateKey={store.drafts.createForm.privateKey}
               onChangeForm={(field, value) => store.updateCreateForm(field, value)}
               onGenerate={() => void run(() => store.generateKeyset())}
             />
@@ -577,35 +571,29 @@ function AppShell() {
     );
   }
 
-  function renderCreateProfile() {
+  function renderCreateSelectShare() {
     if (!store.generatedKeyset) return null;
     return (
       <>
         <PublicTaskShell>
-          <StepProgress steps={['Create Keyset', 'Setup Profile', 'Onboard Devices']} active={1} />
+          <StepProgress steps={CREATE_FLOW_STEPS} active={1} />
           <PageBackLink label="Back" onBack={() => store.setActiveView('create-generate')} />
           <PublicTaskTitle
-            title="Create Profile"
-            description="Choose which share stays on this device, then configure the local profile before distributing the rest."
+            title="Select Share"
+            description="Choose which share stays on this device. The group public key identifies the shared signer for every device."
           />
-          <CreateFlowProfileSetup
+          <CreateFlowShareSelection
             shares={store.generatedKeyset.shares}
             selectedMemberIdx={store.selectedGeneratedShareIdx}
             keysetName={store.generatedKeyset.group_name}
-            peerPermissions={derivePaperCreatePeerPermissions(store.generatedKeyset.shares)}
-            draft={{
-              label: store.drafts.profileForm.label,
-              relayUrls: store.drafts.profileForm.relayUrls,
-              primarySecret: store.drafts.profileForm.password,
-              secondarySecret: store.drafts.profileForm.confirmPassword,
-            }}
-            actionLabel="Continue to Review"
+            groupPublicKey={store.generatedKeyset.group_public_key}
             onSelectShare={(memberIdx) => store.selectGeneratedShare(memberIdx)}
-            onLabelChange={(value) => store.updateProfileForm('label', value)}
-            onPrimarySecretChange={(value) => store.updateProfileForm('password', value)}
-            onSecondarySecretChange={(value) => store.updateProfileForm('confirmPassword', value)}
-            onRelayUrlsChange={(value) => store.updateProfileForm('relayUrls', value)}
-            onAction={() => void run(() => store.reviewGeneratedProfile())}
+            onCopyGroupPublicKey={() => {
+              if (navigator.clipboard?.writeText) {
+                void navigator.clipboard.writeText(store.generatedKeyset?.group_public_key ?? '');
+              }
+            }}
+            onAction={() => void run(() => store.continueToSaveProfile())}
           />
         </PublicTaskShell>
         <PublicFocusFooter />
@@ -613,24 +601,30 @@ function AppShell() {
     );
   }
 
-  function renderCreateConfirm() {
+  function renderCreateSaveProfile() {
     if (!store.generatedKeyset) return null;
     return (
       <>
         <PublicTaskShell>
-          <StepProgress steps={['Create Keyset', 'Setup Profile', 'Onboard Devices']} active={1} />
-          <PageBackLink label="Back" onBack={() => store.setActiveView('create-profile')} />
+          <StepProgress steps={CREATE_FLOW_STEPS} active={2} />
+          <PageBackLink label="Back" onBack={() => store.setActiveView('create-select-share')} />
           <PublicTaskTitle
-            title="Review Device Profile"
-            description="Confirm the local profile details before this browser initializes the signer and prepares remote bfonboard packages."
+            title="Save Profile"
+            description="Name and protect the local profile before remote shares are packaged for distribution."
           />
-          <CreateFlowReviewPanel
-            profileName={store.drafts.profileForm.label || selectedShare?.name || 'Device Profile'}
-            sharePublicKey={selectedShare?.share_public_key ?? 'n/a'}
-            groupPublicKey={store.generatedKeyset.group_public_key}
-            relays={store.drafts.profileForm.relayUrls.split(/\r?\n/).map((value) => value.trim()).filter(Boolean)}
-            actionLabel="Accept and Continue"
-            onAccept={() => void run(() => store.acceptGeneratedProfile())}
+          <CreateFlowProfileSetup
+            draft={{
+              label: store.drafts.profileForm.label,
+              relayUrls: store.drafts.profileForm.relayUrls,
+              primarySecret: store.drafts.profileForm.password,
+              secondarySecret: store.drafts.profileForm.confirmPassword,
+            }}
+            actionLabel="Next Step"
+            onLabelChange={(value) => store.updateProfileForm('label', value)}
+            onPrimarySecretChange={(value) => store.updateProfileForm('password', value)}
+            onSecondarySecretChange={(value) => store.updateProfileForm('confirmPassword', value)}
+            onRelayUrlsChange={(value) => store.updateProfileForm('relayUrls', value)}
+            onAction={() => void run(() => store.acceptGeneratedProfile())}
           />
         </PublicTaskShell>
         <PublicFocusFooter />
@@ -653,30 +647,18 @@ function AppShell() {
         },
       ]),
     ) as Record<number, { kind: 'package_ready' | 'handoff_pending' | 'completed'; label: string; packageText?: string }>;
-    const allDistributed = remainingShares.length > 0 && remainingShares.every((share) => distributionResults[share.member_idx]?.kind === 'completed');
     return (
       <>
         <PublicTaskShell>
-          <StepProgress steps={['Create Keyset', 'Setup Profile', 'Onboard Devices']} active={1} />
-          <PageBackLink label="Back" onBack={() => store.setActiveView('create-confirm')} />
+          <StepProgress steps={CREATE_FLOW_STEPS} active={3} />
+          <PageBackLink label="Back" onBack={() => store.setActiveView('create-save-profile')} />
           <PublicTaskTitle
-            title={allDistributed ? 'Distribution Completion' : 'Distribute Shares'}
-            description={
-              allDistributed
-                ? 'Track remote bfonboard packages as they are handed off. Finish once each target device is ready to adopt its fresh share.'
-                : 'Create each remote bfonboard package by setting its password, then hand off the package and password by copy or QR.'
-            }
+            title="Distribute Shares"
+            description="Create each remote onboarding package, set its peer permissions, and mark it done when the package has been handed off."
           />
           <CreateFlowDistributionSection
-            bannerKicker="How this step works"
-            bannerDescription=""
-            bannerPoints={[
-              'Set password|Saving a password creates the bfonboard package for that device.',
-              'Distribute|Copy package/password or show QR once the package exists.',
-              'Complete|Echo turns the row green, or mark distributed manually when handoff is done.',
-            ]}
-            sectionTitle="Remaining Shares"
-            sectionDescription="Each share can be copied, shown as a QR package, or downloaded as a `bfonboard` file."
+            sectionTitle="Remote Shares"
+            sectionDescription="Each share can be copied, saved, shown as a QR package, or marked done after handoff."
             shares={remainingShares}
             drafts={Object.fromEntries(
               Object.entries(store.drafts.distributionForms).map(([memberIdx, form]) => [
@@ -689,6 +671,10 @@ function AppShell() {
               ]),
             )}
             results={distributionResults}
+            permissions={store.drafts.distributionPermissions}
+            onTogglePermission={(memberIdx, permission, enabled) =>
+              void run(() => store.updateDistributionPermission(memberIdx, permission, enabled))
+            }
             onChangeDraft={(memberIdx, field, value) =>
               store.updateDistributionForm(
                 memberIdx,
@@ -760,21 +746,21 @@ function AppShell() {
   function renderLoadImport() {
     return (
       <HostFlowShell
-        title="Import Profile"
-        description="Paste a password-protected `bfprofile` string and confirm the decoded device profile."
-        onBack={() => store.startLoadChoice()}
-        backTooltip="Back to load profile"
+        title="Import Device Profile"
+        description="Load a device profile backup and enter its password to continue."
+        onBack={goToLanding}
+        backTooltip="Back to Welcome"
       >
         <section className="igloo-flow-root igloo-stack">
-          <StepProgress steps={['Import or recover', 'Review', 'Load device']} active={0} />
+          <StepProgress steps={IMPORT_FLOW_STEPS} active={0} />
           <Card>
             <CardHeader>
-              <CardTitle>Import a bfprofile</CardTitle>
-              <CardDescription>Provide the encoded profile string and the password that decrypts it.</CardDescription>
+              <CardTitle>Profile Backup</CardTitle>
+              <CardDescription>Paste a bfprofile1... backup string and the password that decrypts it.</CardDescription>
             </CardHeader>
             <CardContent className="igloo-stack">
               <label>
-                bfprofile
+                Profile Backup
                 <Textarea
                   className="min-h-[112px]"
                   value={store.drafts.importProfileForm.profileString}
@@ -783,7 +769,7 @@ function AppShell() {
                 />
               </label>
               <label>
-                Decryption Password
+                Backup Password
                 <input
                   type="password"
                   value={store.drafts.importProfileForm.password}
@@ -792,7 +778,7 @@ function AppShell() {
               </label>
               <div className="igloo-button-row">
                 <Button type="button" size="sm" onClick={() => void run(() => store.loadBfProfile())}>
-                  Inspect Profile
+                  Next Step
                 </Button>
               </div>
             </CardContent>
@@ -851,31 +837,28 @@ function AppShell() {
     if (!store.pendingLoadConfirmation) return null;
     return (
       <HostFlowShell
-        title="Confirm Profile"
-        description="Review the decoded profile information before loading this device."
+        title="Save Profile"
+        description="Name and protect this profile on the device before launching the signer."
         onBack={() => store.setActiveView(store.pendingLoadConfirmation?.kind === 'bfprofile' ? 'load-import' : 'load-recover')}
         backTooltip="Back"
       >
         <section className="igloo-flow-root igloo-stack">
-          <StepProgress steps={['Import or recover', 'Review', 'Load device']} active={1} />
-          <ProfileConfirmationCard
-            title="Review Loaded Profile"
-            profileName={store.pendingLoadConfirmation.preview.label}
-            sharePublicKey={store.pendingLoadConfirmation.preview.share_public_key}
-            groupPublicKey={store.pendingLoadConfirmation.preview.group_public_key}
-            relays={store.pendingLoadConfirmation.preview.relays}
+          <StepProgress steps={IMPORT_FLOW_STEPS} active={1} />
+          <CreateFlowProfileSetup
+            draft={{
+              label: store.drafts.importSaveForm.label,
+              relayUrls: store.drafts.importSaveForm.relayUrls,
+              primarySecret: store.drafts.importSaveForm.password,
+              secondarySecret: store.drafts.importSaveForm.confirmPassword,
+            }}
+            lockIdentity
+            actionLabel="Launch Signer"
+            onLabelChange={(value) => store.updateImportSaveForm('label', value)}
+            onPrimarySecretChange={(value) => store.updateImportSaveForm('password', value)}
+            onSecondarySecretChange={(value) => store.updateImportSaveForm('confirmPassword', value)}
+            onRelayUrlsChange={(value) => store.updateImportSaveForm('relayUrls', value)}
+            onAction={() => void run(() => store.acceptPendingLoadConfirmation())}
           />
-          <section className="igloo-task-banner">
-            <span className="igloo-task-kicker">Load device</span>
-            <p>
-              If these details are correct, accept the profile and move directly into the device dashboard.
-            </p>
-          </section>
-          <div className="igloo-button-row">
-            <Button type="button" size="sm" onClick={() => void run(() => store.acceptPendingLoadConfirmation())}>
-              Accept and Load Device
-            </Button>
-          </div>
         </section>
       </HostFlowShell>
     );
@@ -885,10 +868,11 @@ function AppShell() {
     return (
       <>
         <PublicTaskShell>
+          <StepProgress steps={ONBOARD_FLOW_STEPS} active={0} />
           <PageBackLink label="Back to Welcome" onBack={goToLanding} />
           <PublicTaskTitle
-            title="Enter Onboarding Package"
-            description="Import a valid onboarding package to receive this device's share."
+            title="Input Package"
+            description="Receive this device's share from an onboarding package."
           />
           <section className="igloo-flow-root">
             <OnboardPackageEntry
@@ -897,6 +881,7 @@ function AppShell() {
               onPackageTextChange={(value) => store.updateOnboardConnectForm('packageText', value)}
               onPasswordChange={(value) => store.updateOnboardConnectForm('password', value)}
               onConnect={() => void run(() => store.connectOnboardingPackage())}
+              actionLabel="Next Step"
             />
           </section>
         </PublicTaskShell>
@@ -909,8 +894,10 @@ function AppShell() {
     return (
       <>
         <PublicTaskShell>
+          <StepProgress steps={ONBOARD_FLOW_STEPS} active={1} />
           <section className="igloo-flow-root">
             <OnboardHandshakePanel
+              title="Onboard Device"
               packageText={store.drafts.onboardConnectForm.packageText}
               keysetName="My Signing Key"
               thresholdLabel="2/3"
@@ -928,6 +915,7 @@ function AppShell() {
     return (
       <>
         <PublicTaskShell>
+          <StepProgress steps={ONBOARD_FLOW_STEPS} active={1} />
           <PublicTaskTitle
             title="Onboarding Failed"
             description={null}
@@ -948,28 +936,29 @@ function AppShell() {
 
   function renderOnboardSave() {
     if (!store.pendingOnboardConnection) return null;
-    const preview = store.pendingOnboardConnection.preview;
-    const paperSummary = derivePaperOnboardSummary(preview);
     return (
       <>
         <PublicTaskShell>
+          <StepProgress steps={ONBOARD_FLOW_STEPS} active={2} />
+          <PublicTaskTitle
+            title="Save Profile"
+            description="Name and protect this profile on the device before launching the signer."
+          />
           <section className="igloo-flow-root">
-            <OnboardCompletePanel
-              preview={{
-                label: preview.label,
-                sharePublicKey: preview.share_public_key,
-                groupPublicKey: preview.group_public_key,
-                relays: preview.relays,
+            <CreateFlowProfileSetup
+              draft={{
+                label: store.drafts.onboardSaveForm.label,
+                relayUrls: store.drafts.onboardSaveForm.relayUrls,
+                primarySecret: store.drafts.onboardSaveForm.password,
+                secondarySecret: store.drafts.onboardSaveForm.confirmPassword,
               }}
-              groupName={paperSummary.groupName}
-              thresholdLabel={paperSummary.thresholdLabel}
-              shareLabel={paperSummary.shareLabel}
-              peerPolicyCount={paperSummary.peerPolicyCount}
-              draft={store.drafts.onboardSaveForm}
+              lockIdentity
+              actionLabel="Launch Signer"
               onLabelChange={(value) => store.updateOnboardSaveForm('label', value)}
-              onPasswordChange={(value) => store.updateOnboardSaveForm('password', value)}
-              onConfirmPasswordChange={(value) => store.updateOnboardSaveForm('confirmPassword', value)}
-              onSave={() => void run(() => store.finalizeOnboardedDevice())}
+              onPrimarySecretChange={(value) => store.updateOnboardSaveForm('password', value)}
+              onSecondarySecretChange={(value) => store.updateOnboardSaveForm('confirmPassword', value)}
+              onRelayUrlsChange={(value) => store.updateOnboardSaveForm('relayUrls', value)}
+              onAction={() => void run(() => store.finalizeOnboardedDevice())}
             />
           </section>
         </PublicTaskShell>
@@ -1309,10 +1298,16 @@ function AppShell() {
         onSubmit={(event) => void submitWelcomeUnlock(event)}
         onClose={closeWelcomeUnlock}
       />
+      <WelcomeDeleteModal
+        open={Boolean(welcomeDeleteProfileId)}
+        profile={welcomeDeleteProfile}
+        onConfirm={confirmWelcomeDelete}
+        onClose={closeWelcomeDelete}
+      />
       {store.activeView === 'landing' ? renderLanding() : null}
       {store.activeView === 'create-generate' ? renderCreateGenerate() : null}
-      {store.activeView === 'create-profile' ? renderCreateProfile() : null}
-      {store.activeView === 'create-confirm' ? renderCreateConfirm() : null}
+      {store.activeView === 'create-select-share' ? renderCreateSelectShare() : null}
+      {store.activeView === 'create-save-profile' ? renderCreateSaveProfile() : null}
       {store.activeView === 'create-distribute' ? renderCreateDistribute() : null}
       {store.activeView === 'load-choice' ? renderLoadChoice() : null}
       {store.activeView === 'load-import' ? renderLoadImport() : null}

@@ -44,7 +44,7 @@ type AppState = PwaPersistedState & {
   generateKeyset: () => Promise<void>;
   selectGeneratedShare: (memberIdx: number) => void;
   updateProfileForm: (field: keyof PwaDraftState['profileForm'], value: string) => void;
-  reviewGeneratedProfile: () => void;
+  continueToSaveProfile: () => void;
   acceptGeneratedProfile: () => Promise<void>;
   updateDistributionForm: (
     memberIdx: number,
@@ -52,12 +52,14 @@ type AppState = PwaPersistedState & {
     value: string,
   ) => void;
   distributeShare: (memberIdx: number, kind: 'prepare' | 'copy' | 'qr' | 'save' | 'mark') => Promise<void>;
+  updateDistributionPermission: (memberIdx: number, permission: 'sign' | 'ecdh' | 'ping' | 'onboard', enabled: boolean) => Promise<void>;
   closeQrPackage: () => void;
   finishDistribution: () => void;
   startLoadChoice: () => void;
   startLoadImport: () => void;
   startRecoverFromShare: () => void;
   updateImportProfileForm: (field: keyof PwaDraftState['importProfileForm'], value: string) => void;
+  updateImportSaveForm: (field: keyof PwaDraftState['importSaveForm'], value: string) => void;
   updateRecoverProfileForm: (field: keyof PwaDraftState['recoverProfileForm'], value: string) => void;
   loadBfProfile: () => Promise<void>;
   recoverProfileFromShare: () => Promise<void>;
@@ -99,6 +101,7 @@ const defaultDrafts: PwaDraftState = {
     groupName: '',
     threshold: '2',
     count: '3',
+    privateKey: '',
   },
   rotationForm: {
     sourceProfileId: '',
@@ -111,9 +114,16 @@ const defaultDrafts: PwaDraftState = {
     relayUrls: DEFAULT_RELAYS.join('\n'),
   },
   distributionForms: {},
+  distributionPermissions: {},
   importProfileForm: {
     profileString: '',
     password: '',
+  },
+  importSaveForm: {
+    label: '',
+    password: '',
+    confirmPassword: '',
+    relayUrls: '',
   },
   recoverProfileForm: {
     shareString: '',
@@ -127,6 +137,7 @@ const defaultDrafts: PwaDraftState = {
     label: '',
     password: '',
     confirmPassword: '',
+    relayUrls: '',
   },
   rotateConnectForm: {
     packageText: '',
@@ -211,9 +222,14 @@ function normalizeLoadedState(): PwaPersistedState {
       },
       profileForm: { ...defaultDrafts.profileForm, ...loaded.drafts?.profileForm },
       distributionForms: loaded.drafts?.distributionForms ?? {},
+      distributionPermissions: loaded.drafts?.distributionPermissions ?? {},
       importProfileForm: {
         ...defaultDrafts.importProfileForm,
         ...loaded.drafts?.importProfileForm,
+      },
+      importSaveForm: {
+        ...defaultDrafts.importSaveForm,
+        ...loaded.drafts?.importSaveForm,
       },
       recoverProfileForm: {
         ...defaultDrafts.recoverProfileForm,
@@ -243,6 +259,9 @@ function normalizeLoadedState(): PwaPersistedState {
   }
   if (loadedActiveView === 'onboard-handshake') {
     normalized.activeView = 'onboard-connect';
+  }
+  if ((loadedActiveView === 'create-profile' || loadedActiveView === 'create-confirm') && normalized.generatedKeyset) {
+    normalized.activeView = 'create-select-share';
   }
 
   return normalized;
@@ -538,6 +557,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
                 groupName: state.drafts.createForm.groupName,
                 threshold,
                 count,
+                privateKey: state.drafts.createForm.privateKey,
               });
         const preferredMemberIdx =
           sourceProfile && typeof sourceProfile.share_package_json === 'string'
@@ -552,7 +572,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           ...current,
           generatedKeyset: keyset,
           selectedGeneratedShareIdx: selectedShare?.member_idx ?? null,
-          activeView: 'create-profile',
+          activeView: 'create-select-share',
           drafts: {
             ...current.drafts,
             profileForm: {
@@ -590,7 +610,13 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           },
         }));
       },
-      reviewGeneratedProfile() {
+      continueToSaveProfile() {
+        if (!state.generatedKeyset || state.selectedGeneratedShareIdx == null) {
+          throw new Error('Generate a keyset and choose one share first.');
+        }
+        setState((current) => ({ ...current, activeView: 'create-save-profile' }));
+      },
+      async acceptGeneratedProfile() {
         if (!state.generatedKeyset || state.selectedGeneratedShareIdx == null) {
           throw new Error('Generate a keyset and choose one share first.');
         }
@@ -605,15 +631,6 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         }
         if (!state.drafts.profileForm.relayUrls.split(/\r?\n/).map((value) => value.trim()).filter(Boolean).length) {
           throw new Error('At least one relay is required.');
-        }
-        setState((current) => ({ ...current, activeView: 'create-confirm' }));
-      },
-      async acceptGeneratedProfile() {
-        if (!state.generatedKeyset || state.selectedGeneratedShareIdx == null) {
-          throw new Error('Generate a keyset and choose one share first.');
-        }
-        if (state.drafts.profileForm.password !== state.drafts.profileForm.confirmPassword) {
-          throw new Error('Device password confirmation does not match.');
         }
 
         const profile = await adapter.createDeviceProfileFromGeneratedShare({
@@ -666,6 +683,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
                   },
                 ];
               }),
+            ),
+            distributionPermissions: Object.fromEntries(
+              remaining.map((memberIdx) => [memberIdx, ['sign', 'ecdh', 'ping', 'onboard']]),
             ),
           },
         }));
@@ -775,6 +795,31 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
             : current.distributionSession,
         }));
       },
+      async updateDistributionPermission(memberIdx, permission, enabled) {
+        const nextPermissions = enabled
+          ? Array.from(new Set([...(state.drafts.distributionPermissions[memberIdx] ?? []), permission]))
+          : (state.drafts.distributionPermissions[memberIdx] ?? []).filter((entry) => entry !== permission);
+
+        let runtimeSnapshot = state.runtimeSnapshot;
+        const share = state.generatedKeyset?.shares.find((entry) => entry.member_idx === memberIdx);
+        if (share && runtimeSnapshot) {
+          runtimeSnapshot = await adapter.applyPeerPolicy(runtimeSnapshot, share.share_public_key, 'request', permission, enabled);
+          runtimeSnapshot = await adapter.applyPeerPolicy(runtimeSnapshot, share.share_public_key, 'respond', permission, enabled);
+        }
+
+        setState((current) => ({
+          ...current,
+          drafts: {
+            ...current.drafts,
+            distributionPermissions: {
+              ...current.drafts.distributionPermissions,
+              [memberIdx]: nextPermissions,
+            },
+          },
+          runtimeSnapshot,
+          peerPermissionStates: runtimeSnapshot?.peer_permission_states ?? current.peerPermissionStates,
+        }));
+      },
       closeQrPackage() {
         setState((current) => ({
           ...current,
@@ -811,6 +856,18 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           },
         }));
       },
+      updateImportSaveForm(field, value) {
+        setState((current) => ({
+          ...current,
+          drafts: {
+            ...current.drafts,
+            importSaveForm: {
+              ...current.drafts.importSaveForm,
+              [field]: value,
+            },
+          },
+        }));
+      },
       updateRecoverProfileForm(field, value) {
         setState((current) => ({
           ...current,
@@ -829,6 +886,16 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           ...current,
           pendingLoadConfirmation: confirmation,
           activeView: 'load-confirm',
+          drafts: {
+            ...current.drafts,
+            importSaveForm: {
+              ...current.drafts.importSaveForm,
+              label: confirmation.preview.label,
+              relayUrls: confirmation.preview.relays.join('\n'),
+              password: '',
+              confirmPassword: '',
+            },
+          },
         }));
       },
       async recoverProfileFromShare() {
@@ -843,14 +910,31 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         if (!state.pendingLoadConfirmation) {
           throw new Error('No confirmed profile is waiting to be loaded.');
         }
+        const isImport = state.pendingLoadConfirmation.kind === 'bfprofile';
+        let localPassword = state.pendingLoadConfirmation.stored_password;
+        if (isImport) {
+          const { password, confirmPassword } = state.drafts.importSaveForm;
+          if (!password) {
+            throw new Error('Enter a password to protect this profile on the device.');
+          }
+          if (password !== confirmPassword) {
+            throw new Error('Passwords do not match.');
+          }
+          localPassword = password;
+        }
         const profile = await adapter.finalizeLoadedProfile(
           state.pendingLoadConfirmation,
           state.profiles.map((entry) => entry.id),
+          localPassword,
         );
-        await persistProfileToDashboard(profile, state.pendingLoadConfirmation.stored_password);
+        await persistProfileToDashboard(profile, localPassword);
         setState((current) => ({
           ...current,
           pendingLoadConfirmation: null,
+          drafts: {
+            ...current.drafts,
+            importSaveForm: { ...defaultDrafts.importSaveForm },
+          },
           peerPermissionStates:
             current.peerPermissionStates.length
               ? current.peerPermissionStates
@@ -887,6 +971,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
               onboardSaveForm: {
                 ...current.drafts.onboardSaveForm,
                 label: connection.preview.label,
+                relayUrls: connection.preview.relays.join('\n'),
               },
             },
           }));
