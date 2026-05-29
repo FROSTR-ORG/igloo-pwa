@@ -76,6 +76,9 @@ export type BrowserRuntimeSession = {
   ) => Promise<BrowserRuntimeSessionSnapshot>;
   clearPeerPolicyOverrides: () => Promise<BrowserRuntimeSessionSnapshot>;
   updateConfig: (settings: Partial<SignerSettings>) => BrowserRuntimeSessionSnapshot;
+  // Subscribe to onboard-served signals (the runtime served an onboard response to
+  // a peer). Returns an unsubscribe. `peerPubkey` is the peer's x-only pubkey.
+  onOnboardComplete: (cb: (peerPubkey: string) => void) => () => void;
   stop: () => BrowserRuntimeSessionSnapshot;
 };
 
@@ -288,6 +291,25 @@ function createSession(node: NodeWithEvents, logs: ReturnType<typeof attachLogBu
     updateConfig(settings) {
       updateRuntimeConfigOnNode(node, settings);
       return buildSessionSnapshot(node);
+    },
+    onOnboardComplete(cb) {
+      const handler = (payload: unknown) => {
+        if (
+          payload &&
+          typeof payload === 'object' &&
+          typeof (payload as { peerPubkey?: unknown }).peerPubkey === 'string'
+        ) {
+          cb((payload as { peerPubkey: string }).peerPubkey);
+        }
+      };
+      node.on('onboard-complete', handler);
+      return () => {
+        if (typeof node.off === 'function') {
+          node.off('onboard-complete', handler);
+        } else if (typeof node.removeListener === 'function') {
+          node.removeListener('onboard-complete', handler);
+        }
+      };
     },
     stop() {
       if (!stopped) {

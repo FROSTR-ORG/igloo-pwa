@@ -11,6 +11,7 @@ import * as adapter from './local-adapter';
 import { clearPersistedState, loadPersistedState, savePersistedState } from './storage';
 import type {
   PwaDashboardTab,
+  PwaDistributionActionResult,
   PwaDraftState,
   PwaLoadConfirmation,
   PwaOnboardConnection,
@@ -51,18 +52,20 @@ type AppState = PwaPersistedState & {
     field: keyof PwaDraftState['distributionForms'][number],
     value: string,
   ) => void;
-  distributeShare: (memberIdx: number, kind: 'prepare' | 'copy' | 'qr' | 'save' | 'mark') => Promise<void>;
+  distributeShare: (
+    memberIdx: number,
+    kind: 'prepare' | 'copy' | 'qr' | 'save' | 'mark' | 'cancel' | 'revert',
+  ) => Promise<void>;
   updateDistributionPermission: (memberIdx: number, permission: 'sign' | 'ecdh' | 'ping' | 'onboard', enabled: boolean) => Promise<void>;
   closeQrPackage: () => void;
-  finishDistribution: () => void;
-  startLoadChoice: () => void;
+  startDistributionClient: () => Promise<void>;
+  stopDistributionClient: () => Promise<void>;
+  finishSetup: () => Promise<void>;
   startLoadImport: () => void;
-  startRecoverFromShare: () => void;
   updateImportProfileForm: (field: keyof PwaDraftState['importProfileForm'], value: string) => void;
   updateImportSaveForm: (field: keyof PwaDraftState['importSaveForm'], value: string) => void;
-  updateRecoverProfileForm: (field: keyof PwaDraftState['recoverProfileForm'], value: string) => void;
   loadBfProfile: () => Promise<void>;
-  recoverProfileFromShare: () => Promise<void>;
+  clearLoadError: () => void;
   acceptPendingLoadConfirmation: () => Promise<void>;
   updateOnboardConnectForm: (field: keyof PwaDraftState['onboardConnectForm'], value: string) => void;
   connectOnboardingPackage: () => Promise<void>;
@@ -138,10 +141,6 @@ const defaultDrafts: PwaDraftState = {
     confirmPassword: '',
     relayUrls: '',
   },
-  recoverProfileForm: {
-    shareString: '',
-    password: '',
-  },
   onboardConnectForm: {
     packageText: '',
     password: '',
@@ -166,6 +165,15 @@ const defaultSettings: PwaSettings = {
 
 const ACTIVE_RUNTIME_POLL_INTERVAL_MS = 1_000;
 
+// Normalize a pubkey for comparison: lowercase and drop a compressed-point
+// prefix so an x-only key and a 33-byte key compare equal.
+function normalizePeerKey(value: string) {
+  const lower = value.trim().toLowerCase();
+  return lower.length === 66 && (lower.startsWith('02') || lower.startsWith('03'))
+    ? lower.slice(2)
+    : lower;
+}
+
 function readProfileGroupName(profile: PwaProfile | null) {
   if (!profile) return '';
   try {
@@ -188,6 +196,7 @@ function createDefaultState(): PwaPersistedState {
     generatedKeyset: null,
     selectedGeneratedShareIdx: null,
     pendingLoadConfirmation: null,
+    pendingLoadError: null,
     pendingOnboardConnection: null,
     pendingRotationConnection: null,
     distributionSession: null,
@@ -252,10 +261,6 @@ function normalizeLoadedState(): PwaPersistedState {
         ...defaultDrafts.importSaveForm,
         ...loaded.drafts?.importSaveForm,
       },
-      recoverProfileForm: {
-        ...defaultDrafts.recoverProfileForm,
-        ...loaded.drafts?.recoverProfileForm,
-      },
       onboardConnectForm: {
         ...defaultDrafts.onboardConnectForm,
         ...loaded.drafts?.onboardConnectForm,
@@ -281,6 +286,9 @@ function normalizeLoadedState(): PwaPersistedState {
   if (loadedActiveView === 'onboard-handshake') {
     normalized.activeView = 'onboard-connect';
   }
+  if (loadedActiveView === 'load-error' && !normalized.pendingLoadError) {
+    normalized.activeView = 'load-import';
+  }
   if ((loadedActiveView === 'create-profile' || loadedActiveView === 'create-confirm') && normalized.generatedKeyset) {
     normalized.activeView = 'create-select-share';
   }
@@ -296,6 +304,40 @@ function downloadText(filename: string, value: string) {
   link.download = filename;
   link.click();
   URL.revokeObjectURL(url);
+}
+
+type SaveFilePicker = (options?: {
+  suggestedName?: string;
+  types?: Array<{ description?: string; accept: Record<string, string[]> }>;
+}) => Promise<{
+  createWritable: () => Promise<{ write: (data: string) => Promise<void>; close: () => Promise<void> }>;
+}>;
+
+// Save text to a real file. Prefers the File System Access API so the resulting
+// promise resolves only after a confirmed write (used to advance a share to the
+// `saved` status); returns false when the user cancels the native save dialog.
+// Falls back to an anchor download (optimistic) where the picker is unavailable.
+async function saveTextToFile(filename: string, value: string): Promise<boolean> {
+  const picker = (window as unknown as { showSaveFilePicker?: SaveFilePicker }).showSaveFilePicker;
+  if (typeof picker === 'function') {
+    try {
+      const handle = await picker({
+        suggestedName: filename,
+        types: [{ description: 'Onboarding package', accept: { 'text/plain': ['.txt'] } }],
+      });
+      const writable = await handle.createWritable();
+      await writable.write(value);
+      await writable.close();
+      return true;
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') {
+        return false;
+      }
+      // Fall through to the anchor download for any non-cancellation failure.
+    }
+  }
+  downloadText(filename, value);
+  return true;
 }
 
 export function StoreProvider({ children }: { children: React.ReactNode }) {
@@ -400,6 +442,39 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       window.clearInterval(interval);
     };
   }, [state.runtimeSnapshot?.active, state.runtimeSnapshot?.profile?.id]);
+
+  // Mark a share onboarded when the live runtime serves an onboard response to
+  // the matching peer (the real onboard-complete signal from bifrost-rs).
+  React.useEffect(() => {
+    adapter.setOnboardCompleteListener((peerPubkey) => {
+      const normalized = normalizePeerKey(peerPubkey);
+      setState((current) => {
+        if (!current.distributionSession || !current.generatedKeyset) return current;
+        const share = current.generatedKeyset.shares.find(
+          (entry) => normalizePeerKey(entry.share_public_key) === normalized,
+        );
+        if (!share) return current;
+        const existing = current.distributionSession.results[share.member_idx];
+        if (existing?.status === 'onboarded') return current;
+        return {
+          ...current,
+          distributionSession: {
+            ...current.distributionSession,
+            results: {
+              ...current.distributionSession.results,
+              [share.member_idx]: {
+                status: 'onboarded',
+                member_idx: share.member_idx,
+                label: existing?.label ?? share.name,
+                package_text: existing?.package_text ?? '',
+              },
+            },
+          },
+        };
+      });
+    });
+    return () => adapter.setOnboardCompleteListener(null);
+  }, []);
 
   const ensureProfileIdAvailable = React.useCallback(
     (profile: Pick<PwaProfile, 'id' | 'label'>) => {
@@ -813,84 +888,118 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         if (!state.generatedKeyset || !state.distributionSession || !selectedProfile) {
           throw new Error('Create the primary device profile before distributing shares.');
         }
+        const existing = state.distributionSession.results[memberIdx];
+
+        const writeResult = (next: PwaDistributionActionResult | null) => {
+          setState((current) => {
+            if (!current.distributionSession) return current;
+            const results = { ...current.distributionSession.results };
+            if (next) {
+              results[memberIdx] = next;
+            } else {
+              delete results[memberIdx];
+            }
+            // Discarding the package also clears any QR still showing it.
+            const qr_package =
+              next == null && current.distributionSession.qr_package?.member_idx === memberIdx
+                ? null
+                : current.distributionSession.qr_package;
+            return {
+              ...current,
+              distributionSession: { ...current.distributionSession, results, qr_package },
+            };
+          });
+        };
+
+        // Status-only transitions that operate on the already-created package.
         if (kind === 'mark') {
-          const existing = state.distributionSession.results[memberIdx];
           if (!existing) {
-            throw new Error('Create the onboarding package before marking it distributed.');
+            throw new Error('Create the onboarding package before marking it delivered.');
           }
+          writeResult({ ...existing, status: 'delivered' });
+          return;
+        }
+        if (kind === 'revert') {
+          if (!existing) {
+            throw new Error('No distributed share to revert.');
+          }
+          writeResult({ ...existing, status: 'packaged' });
+          return;
+        }
+        if (kind === 'cancel') {
+          writeResult(null);
+          return;
+        }
+
+        if (kind === 'prepare') {
+          const form = ensureDistributionForm(
+            state.drafts.distributionForms,
+            memberIdx,
+            state.generatedKeyset.shares.find((share) => share.member_idx === memberIdx)?.name ?? `Member ${memberIdx}`,
+          );
+          if (form.password !== form.confirmPassword) {
+            throw new Error('Share password confirmation does not match.');
+          }
+          if (!form.label.trim()) {
+            throw new Error('Share name is required.');
+          }
+
+          const result = await adapter.createOnboardingPackageForShare({
+            keyset: state.generatedKeyset,
+            shareMemberIdx: memberIdx,
+            label: form.label,
+            password: form.password,
+            relayUrls: selectedProfile.relays.join('\n'),
+            signerPubkey: state.distributionSession.signer_pubkey,
+          });
+
+          writeResult({
+            status: 'packaged',
+            member_idx: memberIdx,
+            label: form.label,
+            package_text: result.package_text,
+          });
+          return;
+        }
+
+        // copy / qr / save operate on the package built by `prepare`.
+        if (!existing?.package_text) {
+          throw new Error('Create the onboarding package before sharing it.');
+        }
+        if (kind === 'copy') {
+          if (navigator.clipboard?.writeText) {
+            await navigator.clipboard.writeText(existing.package_text);
+          }
+          return;
+        }
+        if (kind === 'qr') {
           setState((current) => ({
             ...current,
             distributionSession: current.distributionSession
               ? {
                   ...current.distributionSession,
-                  results: {
-                    ...current.distributionSession.results,
-                    [memberIdx]: {
-                      ...existing,
-                      kind: 'completed',
-                    },
+                  qr_package: {
+                    member_idx: memberIdx,
+                    label: existing.label,
+                    package_text: existing.package_text,
                   },
                 }
               : current.distributionSession,
           }));
           return;
         }
-        const form = ensureDistributionForm(
-          state.drafts.distributionForms,
-          memberIdx,
-          state.generatedKeyset.shares.find((share) => share.member_idx === memberIdx)?.name ?? `Member ${memberIdx}`,
-        );
-        if (form.password !== form.confirmPassword) {
-          throw new Error('Share password confirmation does not match.');
-        }
-        if (!form.label.trim()) {
-          throw new Error('Share name is required.');
-        }
-
-        const result = await adapter.createOnboardingPackageForShare({
-          keyset: state.generatedKeyset,
-          shareMemberIdx: memberIdx,
-          label: form.label,
-          password: form.password,
-          relayUrls: selectedProfile.relays.join('\n'),
-          signerPubkey: state.distributionSession.signer_pubkey,
-        });
-
-        if (kind === 'copy' && navigator.clipboard?.writeText) {
-          await navigator.clipboard.writeText(result.package_text);
-        }
         if (kind === 'save') {
-          downloadText(
-            buildProfileDownloadFilename(form.label, result.preview.share_public_key, 'bfonboard.txt'),
-            result.package_text,
+          const sharePublicKey =
+            state.generatedKeyset.shares.find((share) => share.member_idx === memberIdx)?.share_public_key ?? '';
+          const saved = await saveTextToFile(
+            buildProfileDownloadFilename(existing.label, sharePublicKey, 'bfonboard.txt'),
+            existing.package_text,
           );
+          if (saved) {
+            writeResult({ ...existing, status: 'saved' });
+          }
+          return;
         }
-
-        setState((current) => ({
-          ...current,
-          distributionSession: current.distributionSession
-            ? {
-                ...current.distributionSession,
-                results: {
-                  ...current.distributionSession.results,
-                  [memberIdx]: {
-                    kind: kind === 'copy' || kind === 'qr' ? 'handoff_pending' : 'package_ready',
-                    member_idx: memberIdx,
-                    label: form.label,
-                    package_text: result.package_text,
-                  },
-                },
-                qr_package:
-                  kind === 'qr'
-                    ? {
-                        member_idx: memberIdx,
-                        label: form.label,
-                        package_text: result.package_text,
-                      }
-                    : current.distributionSession.qr_package,
-              }
-            : current.distributionSession,
-        }));
       },
       async updateDistributionPermission(memberIdx, permission, enabled) {
         const nextPermissions = enabled
@@ -925,21 +1034,98 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
             : null,
         }));
       },
-      finishDistribution() {
+      async startDistributionClient() {
+        if (!selectedProfile) {
+          throw new Error('Save the device profile before starting the onboarding client.');
+        }
+        if (state.runtimeSnapshot?.active) return;
+        const runtimeSnapshot = await adapter.startSession(selectedProfile, state.unlockPhrase);
         setState((current) => ({
           ...current,
-          activeView: 'dashboard',
-          activeDashboardTab: 'signer',
+          profiles:
+            runtimeSnapshot.profile == null
+              ? current.profiles
+              : current.profiles.map((profile) =>
+                  profile.id === selectedProfile.id ? runtimeSnapshot.profile ?? profile : profile,
+                ),
+          peerPermissionStates:
+            runtimeSnapshot.peer_permission_states ?? current.peerPermissionStates,
+          runtimeWarning: null,
+          runtimeSnapshot,
         }));
       },
-      startLoadChoice() {
-        setState((current) => ({ ...current, activeView: 'load-choice' }));
+      async stopDistributionClient() {
+        if (!state.runtimeSnapshot?.active) return;
+        const runtimeSnapshot = await adapter.stopSession(state.runtimeSnapshot);
+        setState((current) => ({
+          ...current,
+          profiles:
+            runtimeSnapshot?.profile == null
+              ? current.profiles
+              : current.profiles.map((profile) =>
+                  profile.id === runtimeSnapshot.profile?.id ? runtimeSnapshot.profile ?? profile : profile,
+                ),
+          peerPermissionStates:
+            runtimeSnapshot?.peer_permission_states ?? current.peerPermissionStates,
+          runtimeWarning: null,
+          runtimeSnapshot,
+        }));
+      },
+      async finishSetup() {
+        // Capture the latest runtime snapshot (peer pubkey + nonce pool negotiated
+        // during distribution) so it persists into the already-stored profile before
+        // we lock the device.
+        let latestSnapshot = state.runtimeSnapshot;
+        if (latestSnapshot?.active) {
+          try {
+            latestSnapshot = (await adapter.readSession(latestSnapshot)) ?? latestSnapshot;
+          } catch {
+            // Fall back to the last known snapshot if the live read fails.
+          }
+        }
+        const persistedProfile = latestSnapshot?.profile ?? null;
+
+        // Stop the live runtime session before returning to the lock screen.
+        if (state.runtimeSnapshot?.active) {
+          try {
+            await adapter.stopSession(state.runtimeSnapshot);
+          } catch {
+            // Ignore stop failures while tearing down the setup session.
+          }
+        }
+
+        setState((current) => ({
+          ...current,
+          profiles: persistedProfile
+            ? current.profiles.map((entry) =>
+                entry.id === persistedProfile.id
+                  ? {
+                      ...entry,
+                      runtime_snapshot_json:
+                        persistedProfile.runtime_snapshot_json ?? entry.runtime_snapshot_json ?? null,
+                      peer_pubkey: persistedProfile.peer_pubkey ?? entry.peer_pubkey ?? null,
+                    }
+                  : entry,
+              )
+            : current.profiles,
+          // Purge in-memory setup secrets and return to the locked Welcome.
+          generatedKeyset: null,
+          selectedGeneratedShareIdx: null,
+          distributionSession: null,
+          runtimeSnapshot: null,
+          unlockPhrase: '',
+          activeView: 'landing',
+          activeDashboardTab: 'signer',
+          drafts: {
+            ...current.drafts,
+            profileForm: { ...defaultDrafts.profileForm },
+            distributionForms: {},
+            distributionPermissions: {},
+          },
+        }));
       },
       startLoadImport() {
         setState((current) => ({ ...current, activeView: 'load-import' }));
-      },
-      startRecoverFromShare() {
-        setState((current) => ({ ...current, activeView: 'load-recover' }));
       },
       updateImportProfileForm(field, value) {
         setState((current) => ({
@@ -965,23 +1151,27 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           },
         }));
       },
-      updateRecoverProfileForm(field, value) {
-        setState((current) => ({
-          ...current,
-          drafts: {
-            ...current.drafts,
-            recoverProfileForm: {
-              ...current.drafts.recoverProfileForm,
-              [field]: value,
-            },
-          },
-        }));
-      },
       async loadBfProfile() {
-        const confirmation = await adapter.importBfProfile(state.drafts.importProfileForm);
+        let confirmation: PwaLoadConfirmation;
+        try {
+          confirmation = await adapter.importBfProfile(state.drafts.importProfileForm);
+        } catch (error) {
+          // Import failures land on the dedicated Import Error screen rather than the
+          // global alert banner, matching the Paper design.
+          const message = error instanceof Error && error.message.trim()
+            ? error.message
+            : 'We couldn’t import this profile backup.';
+          setState((current) => ({
+            ...current,
+            pendingLoadError: message,
+            activeView: 'load-error',
+          }));
+          return;
+        }
         setState((current) => ({
           ...current,
           pendingLoadConfirmation: confirmation,
+          pendingLoadError: null,
           activeView: 'load-confirm',
           drafts: {
             ...current.drafts,
@@ -995,30 +1185,21 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           },
         }));
       },
-      async recoverProfileFromShare() {
-        const confirmation = await adapter.recoverProfileFromBfShare(state.drafts.recoverProfileForm);
-        setState((current) => ({
-          ...current,
-          pendingLoadConfirmation: confirmation,
-          activeView: 'load-confirm',
-        }));
+      clearLoadError() {
+        setState((current) => ({ ...current, pendingLoadError: null, activeView: 'load-import' }));
       },
       async acceptPendingLoadConfirmation() {
         if (!state.pendingLoadConfirmation) {
           throw new Error('No confirmed profile is waiting to be loaded.');
         }
-        const isImport = state.pendingLoadConfirmation.kind === 'bfprofile';
-        let localPassword = state.pendingLoadConfirmation.stored_password;
-        if (isImport) {
-          const { password, confirmPassword } = state.drafts.importSaveForm;
-          if (!password) {
-            throw new Error('Enter a password to protect this profile on the device.');
-          }
-          if (password !== confirmPassword) {
-            throw new Error('Passwords do not match.');
-          }
-          localPassword = password;
+        const { password, confirmPassword } = state.drafts.importSaveForm;
+        if (!password) {
+          throw new Error('Enter a password to protect this profile on the device.');
         }
+        if (password !== confirmPassword) {
+          throw new Error('Passwords do not match.');
+        }
+        const localPassword = password;
         const profile = await adapter.finalizeLoadedProfile(
           state.pendingLoadConfirmation,
           state.profiles.map((entry) => entry.id),

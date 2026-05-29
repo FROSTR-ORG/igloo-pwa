@@ -11,10 +11,9 @@ export type PwaView =
   | 'create-select-share'
   | 'create-save-profile'
   | 'create-distribute'
-  | 'load-choice'
   | 'load-import'
-  | 'load-recover'
   | 'load-confirm'
+  | 'load-error'
   | 'onboard-connect'
   | 'onboard-handshake'
   | 'onboard-failed'
@@ -131,7 +130,7 @@ export type PwaRuntimeSnapshot = {
 };
 
 export type PwaLoadConfirmation = {
-  kind: 'bfprofile' | 'bfshare';
+  kind: 'bfprofile';
   preview: PwaProfilePreview;
   stored_password: string;
   profile_string: string;
@@ -154,13 +153,14 @@ export type PwaOnboardConnection = {
   runtime_snapshot_json?: string | null;
 };
 
-export type PwaDistributionActionResult =
-  | {
-      kind: 'package_ready' | 'handoff_pending' | 'completed';
-      member_idx: number;
-      label: string;
-      package_text: string;
-    };
+export type PwaDistributionStatus = 'draft' | 'packaged' | 'delivered' | 'saved' | 'onboarded';
+
+export type PwaDistributionActionResult = {
+  status: PwaDistributionStatus;
+  member_idx: number;
+  label: string;
+  package_text: string;
+};
 
 export type PwaDistributionSession = {
   profile_id: string;
@@ -204,10 +204,6 @@ export type PwaDraftState = {
     confirmPassword: string;
     relayUrls: string;
   };
-  recoverProfileForm: {
-    shareString: string;
-    password: string;
-  };
   onboardConnectForm: {
     packageText: string;
     password: string;
@@ -235,6 +231,7 @@ export type PwaPersistedState = {
   generatedKeyset: PwaGeneratedKeyset | null;
   selectedGeneratedShareIdx: number | null;
   pendingLoadConfirmation: PwaLoadConfirmation | null;
+  pendingLoadError: string | null;
   pendingOnboardConnection: PwaOnboardConnection | null;
   pendingRotationConnection: PwaOnboardConnection | null;
   distributionSession: PwaDistributionSession | null;

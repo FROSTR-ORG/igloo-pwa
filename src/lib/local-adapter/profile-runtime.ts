@@ -15,7 +15,33 @@ import {
 let activeRuntimeSession: BrowserRuntimeSession | null = null;
 let activeRuntimeProfileId: string | null = null;
 
+// Forwards onboard-served signals from whichever runtime session is currently
+// active to a single host-supplied listener (the store sets this during the
+// distribute flow to mark a peer's share onboarded).
+let onboardCompleteListener: ((peerPubkey: string) => void) | null = null;
+let onboardCompleteUnsubscribe: (() => void) | null = null;
+
+export function setOnboardCompleteListener(listener: ((peerPubkey: string) => void) | null) {
+  onboardCompleteListener = listener;
+}
+
+function attachOnboardCompleteForwarder() {
+  if (onboardCompleteUnsubscribe) {
+    onboardCompleteUnsubscribe();
+    onboardCompleteUnsubscribe = null;
+  }
+  if (activeRuntimeSession) {
+    onboardCompleteUnsubscribe = activeRuntimeSession.onOnboardComplete((peerPubkey) => {
+      onboardCompleteListener?.(peerPubkey);
+    });
+  }
+}
+
 async function clearActiveRuntimeSession() {
+  if (onboardCompleteUnsubscribe) {
+    onboardCompleteUnsubscribe();
+    onboardCompleteUnsubscribe = null;
+  }
   if (!activeRuntimeSession) return;
   try {
     activeRuntimeSession.stop();
@@ -62,6 +88,7 @@ export async function startSession(profile: PwaProfile, unlockPhrase: string): P
         sharePackageJson: profile.share_package_json,
       });
   activeRuntimeProfileId = profile.id;
+  attachOnboardCompleteForwarder();
 
   return toRuntimeSnapshot(profile, activeRuntimeSession, true);
 }
@@ -188,6 +215,7 @@ export async function applyOperatorSettings(
       runtimeSnapshotJson: runtimeProfile.runtime_snapshot_json,
     });
     activeRuntimeProfileId = runtimeProfile.id;
+    attachOnboardCompleteForwarder();
     return toRuntimeSnapshot(runtimeProfile, activeRuntimeSession, true);
   }
 

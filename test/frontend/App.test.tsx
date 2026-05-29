@@ -174,7 +174,8 @@ describe('igloo-pwa app shell', () => {
     expect(screen.getByRole('button', { name: 'Next Step' })).toBeInTheDocument();
   });
 
-  it('opens the hard-cut create flow and launches the signer from distribution', async () => {
+  it('opens the hard-cut create flow and finishes setup back to the locked welcome', async () => {
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
     renderApp();
     fireEvent.click(screen.getByRole('button', { name: 'Generate Keyset' }));
     fireEvent.change(screen.getByLabelText('Group Name'), { target: { value: 'Playwright Treasury' } });
@@ -204,15 +205,20 @@ describe('igloo-pwa app shell', () => {
 
     await waitFor(() => {
       expect(screen.getByRole('heading', { name: 'Distribute Shares' })).toBeInTheDocument();
-      expect(screen.getByRole('button', { name: 'Launch Signer' })).toBeInTheDocument();
+      expect(screen.getByText('Onboarding Client')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Finish Setup' })).toBeInTheDocument();
       expect(screen.queryByText('Distribution Completion')).not.toBeInTheDocument();
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Launch Signer' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Finish Setup' }));
 
+    // Finish Setup purges the setup session and returns to the locked returning Welcome.
     await waitFor(() => {
-      expect(screen.getByText(/Device Dashboard/)).toBeInTheDocument();
-      expect(screen.getByRole('tab', { name: /Signer\s+runtime console/i })).toBeInTheDocument();
+      expect(screen.queryByRole('heading', { name: 'Distribute Shares' })).not.toBeInTheDocument();
+      expect(screen.getByText('Primary Browser Device')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Unlock' })).toBeInTheDocument();
     });
+    expect(confirmSpy).toHaveBeenCalledTimes(1);
+    confirmSpy.mockRestore();
   });
 
   it('accepts a real-looking bfonboard package and advances directly to save', async () => {
@@ -222,7 +228,7 @@ describe('igloo-pwa app shell', () => {
     fireEvent.change(screen.getByLabelText('bfonboard'), {
       target: { value: `bfonboard1${'q'.repeat(96)}` },
     });
-    fireEvent.change(screen.getByLabelText('Package Password'), {
+    fireEvent.change(screen.getByLabelText('Encryption Password'), {
       target: { value: 'playwright-onboard-pass' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Next Step' }));

@@ -3,7 +3,6 @@ import {
   finalizeConnectedBrowserProfile,
   finalizeRotatedBrowserProfile,
   importBrowserProfilePackage,
-  recoverBrowserProfilePackage,
 } from 'igloo-shared';
 
 import { connectOnboardingPackageAndCaptureProfile } from '../page-runtime-host';
@@ -18,7 +17,6 @@ import {
   type LoadInput,
   type OnboardConnectInput,
   type OnboardFinalizeInput,
-  type RecoverInput,
 } from './common';
 
 export async function importBfProfile(input: LoadInput): Promise<PwaLoadConfirmation> {
@@ -31,19 +29,6 @@ export async function importBfProfile(input: LoadInput): Promise<PwaLoadConfirma
     share_string: imported.shareString,
     profile_payload: imported.payload,
     manual_peer_policy_overrides: imported.payload.device.manualPeerPolicyOverrides,
-  };
-}
-
-export async function recoverProfileFromBfShare(input: RecoverInput): Promise<PwaLoadConfirmation> {
-  const recovered = await recoverBrowserProfilePackage(input.shareString, input.password);
-  return {
-    kind: 'bfshare',
-    preview: recovered.preview,
-    stored_password: input.password,
-    profile_string: recovered.profileString,
-    share_string: recovered.shareString,
-    profile_payload: recovered.payload,
-    manual_peer_policy_overrides: recovered.payload.device.manualPeerPolicyOverrides,
   };
 }
 

@@ -45,11 +45,6 @@ export type LoadInput = {
   password: string;
 };
 
-export type RecoverInput = {
-  shareString: string;
-  password: string;
-};
-
 export type OnboardConnectInput = {
   packageText: string;
   password: string;

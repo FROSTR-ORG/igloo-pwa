@@ -416,6 +416,7 @@ beforeEach(() => {
         updatePeerPolicyOverride: async () => buildSnapshot(),
         clearPeerPolicyOverrides: async () => buildSnapshot(),
         updateConfig: () => buildSnapshot(),
+        onOnboardComplete: () => () => {},
         stop: () => buildSnapshot(),
       };
     },

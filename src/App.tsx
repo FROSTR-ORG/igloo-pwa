@@ -1,6 +1,7 @@
 import * as React from 'react';
 
 import {
+  Alert,
   AppHeader,
   Button,
   Card,
@@ -13,11 +14,14 @@ import {
   CreateFlowGenerateCard,
   CreateFlowProfileSetup,
   CreateFlowShareSelection,
+  ImportProfileEntry,
   OnboardFailedPanel,
   OnboardHandshakePanel,
+  OnboardingClientCard,
   OnboardPackageEntry,
+  RecoverCollectSharesPanel,
   RotateKeysetPanel,
-  HostEntryTile,
+  WarningCard,
   HostFlowShell,
   OperatorDashboardTabs,
   OperatorPermissionsPanel,
@@ -25,6 +29,7 @@ import {
   OperatorSignerPanel,
   PageLayout,
   PageBackLink,
+  PasswordField,
   ProfileConfirmationCard,
   PublicFocusFooter,
   PublicTaskShell,
@@ -39,13 +44,24 @@ import {
   CRITICAL_E2E_TEST_IDS,
   type EventLogRowModel,
   type PeerPolicy,
+  type SharedDistributionResult,
   type PolicyDashboardViewModel,
   type SignerDashboardViewModel,
   type WelcomeReturningProfileModel,
 } from 'igloo-ui';
-import { shortProfileId } from 'igloo-shared';
+import { pingRelay, shortProfileId } from 'igloo-shared';
+import * as nip49 from 'nostr-tools/nip49';
 
 import { StoreProvider, useStore } from './lib/store';
+
+function hexToBytes(hex: string): Uint8Array {
+  const normalized = hex.length % 2 === 0 ? hex : `0${hex}`;
+  const bytes = new Uint8Array(normalized.length / 2);
+  for (let index = 0; index < bytes.length; index += 1) {
+    bytes[index] = Number.parseInt(normalized.slice(index * 2, index * 2 + 2), 16);
+  }
+  return bytes;
+}
 
 const CREATE_FLOW_STEPS = ['Create Keyset', 'Select Share', 'Save Profile', 'Distribute Shares'];
 const IMPORT_FLOW_STEPS = ['Import Profile', 'Save Profile'];
@@ -381,97 +397,141 @@ export function RecoverPrivateKeyView({
   const [password, setPassword] = React.useState('');
   const [confirmPassword, setConfirmPassword] = React.useState('');
 
-  const masked = `${recovered.nsec.slice(0, 10)}${'•'.repeat(32)}`;
+  // Auto-clear the recovered key from memory after 60 seconds (matches the Paper
+  // security treatment). The key is never persisted; this is an extra safeguard on
+  // top of the navigate-away clear.
+  React.useEffect(() => {
+    const timer = window.setTimeout(onClear, 60_000);
+    return () => window.clearTimeout(timer);
+  }, [onClear]);
+
+  // Encrypt Key: when enabled with a valid (non-empty, matching) password, every export
+  // emits a NIP-49 `ncryptsec1` instead of the plaintext nsec. The encryption runs in
+  // memory only; neither form is ever persisted.
+  const passwordsMatch = password === confirmPassword;
+  const encryptReady = encrypt && password.length > 0 && passwordsMatch;
+  const encryptedKey = React.useMemo(() => {
+    if (!encryptReady) return null;
+    try {
+      return nip49.encrypt(hexToBytes(recovered.signingKeyHex), password);
+    } catch {
+      return null;
+    }
+  }, [encryptReady, password, recovered.signingKeyHex]);
+
+  // When Encrypt Key is on, exports are blocked until the password is valid.
+  const exportValue = encrypt ? encryptedKey : recovered.nsec;
+  const exportsDisabled = encrypt && !encryptedKey;
+  const passwordError = encrypt && confirmPassword.length > 0 && !passwordsMatch
+    ? 'Passwords do not match.'
+    : null;
+  const fieldLabel = encrypt ? 'Encrypted Key (ncryptsec)' : 'Recovered NSEC';
+  const displayValue = exportValue ?? recovered.nsec;
+  const masked = `${displayValue.slice(0, 10)}${'•'.repeat(32)}`;
 
   function copyKey() {
-    void navigator.clipboard?.writeText(recovered.nsec);
+    if (!exportValue) return;
+    void navigator.clipboard?.writeText(exportValue);
     setCopied(true);
     window.setTimeout(() => setCopied(false), 1500);
   }
 
   function saveKey() {
-    const blob = new Blob([recovered.nsec], { type: 'text/plain' });
+    if (!exportValue) return;
+    const blob = new Blob([exportValue], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement('a');
     anchor.href = url;
-    anchor.download = 'recovered-nsec.txt';
+    anchor.download = encrypt ? 'recovered-key.ncryptsec' : 'recovered-nsec.txt';
     anchor.click();
     URL.revokeObjectURL(url);
   }
 
   return (
-    <HostFlowShell
-      title="Recover Private Key"
-      description="Your private key has been recovered. Please handle it with care!"
-      onBack={onClear}
-      backTooltip="Back to Welcome"
-    >
-      <section className="igloo-flow-root igloo-stack">
+    <>
+      <PublicTaskShell>
         <StepProgress steps={RECOVER_FLOW_STEPS} active={1} />
-        <section className="igloo-task-banner">
-          <span className="igloo-task-kicker">Security Warning</span>
-          <ul>
-            <li>This key grants full control of the account — never share it.</li>
-            <li>Avoid screenshots; copy it straight into a password manager.</li>
-            <li>This value is held only in memory and clears when you leave this screen.</li>
-          </ul>
+        <PageBackLink label="Back to Welcome" onBack={onClear} />
+        <PublicTaskTitle
+          title="Recover Private Key"
+          description="Your private key has been recovered. Please handle it with care!"
+        />
+        <section className="igloo-flow-root igloo-stack">
+          <section className="igloo-task-banner">
+            <span className="igloo-task-kicker">Security Warning</span>
+            <ul>
+              <li>Your private key will auto-clear in 60 seconds.</li>
+              <li>Do not screenshot or share this key.</li>
+              <li>Copy to a secure password manager.</li>
+            </ul>
+          </section>
+
+          <label>
+            {fieldLabel}
+            <div className="igloo-recover-key-field">
+              <span>{revealed ? displayValue : masked}</span>
+            </div>
+          </label>
+
+          <div className="igloo-button-row">
+            <Button type="button" size="sm" onClick={copyKey} disabled={exportsDisabled}>
+              {copied ? 'Copied!' : 'Copy'}
+            </Button>
+            <Button type="button" size="sm" variant="secondary" onClick={saveKey} disabled={exportsDisabled}>
+              Save
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="secondary"
+              onClick={() => setQrOpen(true)}
+              disabled={exportsDisabled}
+            >
+              QR code
+            </Button>
+            <Button type="button" size="sm" variant="secondary" onClick={() => setRevealed((value) => !value)}>
+              {revealed ? 'Hide' : 'Reveal'}
+            </Button>
+            <Button type="button" size="sm" variant="secondary" onClick={onClear}>
+              Clear
+            </Button>
+          </div>
+
+          <label className="igloo-recover-encrypt-toggle">
+            <input type="checkbox" checked={encrypt} onChange={(event) => setEncrypt(event.target.checked)} />
+            <span>
+              <strong>Encrypt Key</strong>
+              <small>Protect the exported key with a password before saving or sharing.</small>
+            </span>
+          </label>
+          {encrypt ? (
+            <div className="igloo-stack">
+              <label>
+                Password
+                <PasswordField value={password} onChange={(event) => setPassword(event.target.value)} />
+              </label>
+              <label>
+                Confirm Password
+                <PasswordField
+                  value={confirmPassword}
+                  onChange={(event) => setConfirmPassword(event.target.value)}
+                />
+              </label>
+              {passwordError ? <span className="igloo-field-error">{passwordError}</span> : null}
+            </div>
+          ) : null}
         </section>
-
-        <label>
-          Recovered NSEC
-          <div className="igloo-recover-key-field">
-            <span>{revealed ? recovered.nsec : masked}</span>
-          </div>
-        </label>
-
-        <div className="igloo-button-row">
-          <Button type="button" size="sm" onClick={copyKey}>
-            {copied ? 'Copied!' : 'Copy'}
-          </Button>
-          <Button type="button" size="sm" variant="secondary" onClick={saveKey}>
-            Save
-          </Button>
-          <Button type="button" size="sm" variant="secondary" onClick={() => setQrOpen(true)}>
-            QR code
-          </Button>
-          <Button type="button" size="sm" variant="secondary" onClick={() => setRevealed((value) => !value)}>
-            {revealed ? 'Hide' : 'Reveal'}
-          </Button>
-          <Button type="button" size="sm" variant="secondary" onClick={onClear}>
-            Clear
-          </Button>
-        </div>
-
-        <label className="igloo-recover-encrypt-toggle">
-          <input type="checkbox" checked={encrypt} onChange={(event) => setEncrypt(event.target.checked)} />
-          Encrypt Key before saving
-        </label>
-        {encrypt ? (
-          <div className="igloo-stack">
-            <label>
-              Password
-              <input type="password" value={password} onChange={(event) => setPassword(event.target.value)} />
-            </label>
-            <label>
-              Confirm Password
-              <input
-                type="password"
-                value={confirmPassword}
-                onChange={(event) => setConfirmPassword(event.target.value)}
-              />
-            </label>
-          </div>
-        ) : null}
-      </section>
+      </PublicTaskShell>
+      <PublicFocusFooter />
 
       <QrPayloadModal
         open={qrOpen}
         onClose={() => setQrOpen(false)}
-        title="Recovered NSEC"
-        payload={recovered.nsec}
-        label="Scan to import the recovered private key"
+        title={encrypt ? 'Encrypted Key (ncryptsec)' : 'Recovered NSEC'}
+        payload={exportValue ?? ''}
+        label={encrypt ? 'Scan to import the encrypted key' : 'Scan to import the recovered private key'}
       />
-    </HostFlowShell>
+    </>
   );
 }
 
@@ -485,6 +545,17 @@ function AppShell() {
   const [welcomeDeleteProfileId, setWelcomeDeleteProfileId] = React.useState<string | null>(null);
   const [recoveredKey, setRecoveredKey] = React.useState<{ nsec: string; signingKeyHex: string } | null>(null);
 
+  // DEV-only seam: lets the visual harness render the recover-success screen with a
+  // FAKE nsec injected on the window. Stripped from production builds (guarded on
+  // import.meta.env.DEV) and never touches persistence or the real reconstruction path.
+  React.useEffect(() => {
+    if (!import.meta.env.DEV) return;
+    const injected = window.__IGLOO_TEST_RECOVERED_KEY__;
+    if (injected && !recoveredKey) {
+      setRecoveredKey(injected);
+    }
+  }, [recoveredKey]);
+
   const selectedProfile = store.profiles.find((profile) => profile.id === store.selectedProfileId) ?? null;
   const welcomeUnlockProfile = React.useMemo<WelcomeReturningProfileModel | null>(() => {
     const profile = store.profiles.find((entry) => entry.id === welcomeUnlockProfileId);
@@ -494,8 +565,6 @@ function AppShell() {
     const profile = store.profiles.find((entry) => entry.id === welcomeDeleteProfileId);
     return profile ? deriveWelcomeReturningProfile(profile) : null;
   }, [store.profiles, welcomeDeleteProfileId]);
-  const selectedShare =
-    store.generatedKeyset?.shares.find((share) => share.member_idx === store.selectedGeneratedShareIdx) ?? null;
   const [operatorSettingsDraft, setOperatorSettingsDraft] = React.useState<OperatorSettingsDraft>(() =>
     buildOperatorSettingsDraft(selectedProfile),
   );
@@ -578,12 +647,12 @@ function AppShell() {
 
   function renderError() {
     if (!uiError) return null;
-    return <div className="igloo-shell-alert">{uiError}</div>;
+    return <Alert tone="danger">{uiError}</Alert>;
   }
 
   function renderRuntimeWarning() {
     if (!store.runtimeWarning) return null;
-    return <div className="igloo-shell-alert">{store.runtimeWarning}</div>;
+    return <Alert tone="warning">{store.runtimeWarning}</Alert>;
   }
 
   function renderLanding() {
@@ -624,7 +693,6 @@ function AppShell() {
     return (
       <>
         <PublicTaskShell>
-          <PageBackLink label="Back to Welcome" onBack={goToLanding} />
           <StepProgress steps={CREATE_FLOW_STEPS} active={0} />
           <PublicTaskTitle
             title="Create Keyset"
@@ -638,6 +706,7 @@ function AppShell() {
               privateKey={store.drafts.createForm.privateKey}
               onChangeForm={(field, value) => store.updateCreateForm(field, value)}
               onGenerate={() => void run(() => store.generateKeyset())}
+              onBack={goToLanding}
             />
           ) : null}
           {store.profiles.length > 0 ? (
@@ -692,7 +761,6 @@ function AppShell() {
       <>
         <PublicTaskShell>
           <StepProgress steps={CREATE_FLOW_STEPS} active={1} />
-          <PageBackLink label="Back" onBack={() => store.setActiveView('create-generate')} />
           <PublicTaskTitle
             title="Select Share"
             description="Choose which share stays on this device. The group public key identifies the shared signer for every device."
@@ -709,6 +777,7 @@ function AppShell() {
               }
             }}
             onAction={() => void run(() => store.continueToSaveProfile())}
+            onBack={() => store.setActiveView('create-generate')}
           />
         </PublicTaskShell>
         <PublicFocusFooter />
@@ -722,7 +791,6 @@ function AppShell() {
       <>
         <PublicTaskShell>
           <StepProgress steps={CREATE_FLOW_STEPS} active={2} />
-          <PageBackLink label="Back" onBack={() => store.setActiveView('create-select-share')} />
           <PublicTaskTitle
             title="Save Profile"
             description="Name and protect the local profile before remote shares are packaged for distribution."
@@ -738,8 +806,10 @@ function AppShell() {
             onLabelChange={(value) => store.updateProfileForm('label', value)}
             onPrimarySecretChange={(value) => store.updateProfileForm('password', value)}
             onSecondarySecretChange={(value) => store.updateProfileForm('confirmPassword', value)}
-            onRelayUrlsChange={(value) => store.updateProfileForm('relayUrls', value)}
+            onRelaysChange={(relays) => store.updateProfileForm('relayUrls', relays.join('\n'))}
+            onPingRelay={(url) => pingRelay(url)}
             onAction={() => void run(() => store.acceptGeneratedProfile())}
+            onBack={() => store.setActiveView('create-select-share')}
           />
         </PublicTaskShell>
         <PublicFocusFooter />
@@ -749,31 +819,56 @@ function AppShell() {
 
   function renderCreateDistribute() {
     if (!store.generatedKeyset || !store.distributionSession || !selectedProfile) return null;
+    const session = store.distributionSession;
     const remainingShares = store.generatedKeyset.shares.filter((share) =>
-      store.distributionSession?.remaining_member_indices.includes(share.member_idx),
+      session.remaining_member_indices.includes(share.member_idx),
     );
     const distributionResults = Object.fromEntries(
-      Object.entries(store.distributionSession?.results ?? {}).map(([memberIdx, result]) => [
+      Object.entries(session.results).map(([memberIdx, result]) => [
         Number(memberIdx),
         {
-          kind: result.kind,
+          status: result.status,
           label: result.label,
           packageText: result.package_text,
         },
       ]),
-    ) as Record<number, { kind: 'package_ready' | 'handoff_pending' | 'completed'; label: string; packageText?: string }>;
+    ) as Record<number, SharedDistributionResult>;
+
+    const handleFinishSetup = () => {
+      const undelivered = session.remaining_member_indices.filter((idx) => {
+        const status = session.results[idx]?.status ?? 'draft';
+        return status === 'draft' || status === 'packaged';
+      });
+      if (undelivered.length > 0) {
+        const confirmed = window.confirm(
+          `${undelivered.length} ${undelivered.length === 1 ? 'share is' : 'shares are'} not yet delivered. Finish setup anyway?`,
+        );
+        if (!confirmed) return;
+      }
+      void run(() => store.finishSetup());
+    };
+
     return (
       <>
         <PublicTaskShell>
           <StepProgress steps={CREATE_FLOW_STEPS} active={3} />
-          <PageBackLink label="Back" onBack={() => store.setActiveView('create-save-profile')} />
           <PublicTaskTitle
             title="Distribute Shares"
-            description="Create each remote onboarding package, set its peer permissions, and mark it done when the package has been handed off."
+            description="Create each remote onboarding package, set its peer permissions, and mark it delivered when the package has been handed off."
           />
           <CreateFlowDistributionSection
             sectionTitle="Remote Shares"
-            sectionDescription="Each share can be copied, saved, shown as a QR package, or marked done after handoff."
+            sectionDescription="Each share can be copied, saved, shown as a QR package, or marked delivered after handoff."
+            beforeCards={
+              <OnboardingClientCard
+                running={Boolean(store.runtimeSnapshot?.active)}
+                relayCount={selectedProfile.relays.length}
+                peerCount={store.peerPermissionStates.length}
+                signerPubkey={session.signer_pubkey}
+                onStart={() => void run(() => store.startDistributionClient())}
+                onStop={() => void run(() => store.stopDistributionClient())}
+              />
+            }
             shares={remainingShares}
             drafts={Object.fromEntries(
               Object.entries(store.drafts.distributionForms).map(([memberIdx, form]) => [
@@ -798,16 +893,15 @@ function AppShell() {
               )
             }
             onDistribute={(memberIdx, kind) => void run(() => store.distributeShare(memberIdx, kind))}
-            onFinish={() => store.finishDistribution()}
-            localShare={selectedShare}
-            localProfileName={selectedProfile.label || 'Igloo Web'}
+            onFinish={handleFinishSetup}
+            onBack={() => store.setActiveView('create-save-profile')}
           />
           <QrPayloadModal
-            open={Boolean(store.distributionSession.qr_package)}
+            open={Boolean(session.qr_package)}
             onClose={() => store.closeQrPackage()}
             title="Onboarding Package QR"
-            label={store.distributionSession.qr_package?.label}
-            payload={store.distributionSession.qr_package?.package_text ?? ''}
+            label={session.qr_package?.label}
+            payload={session.qr_package?.package_text ?? ''}
           />
         </PublicTaskShell>
         <PublicFocusFooter />
@@ -815,167 +909,95 @@ function AppShell() {
     );
   }
 
-  function renderLoadChoice() {
-    return (
-      <HostFlowShell
-        title="Load Profile"
-        description="Choose whether to import a full device profile or recover one from your protected share."
-        onBack={goToLanding}
-        backTooltip="Back to landing"
-      >
-        <section className="igloo-flow-root igloo-pwa-entry-shell">
-          <div className="igloo-pwa-entry-grid igloo-pwa-entry-grid-two">
-            <HostEntryTile
-              kicker="Local Import"
-              title="Import Profile"
-              description="Load an existing device profile from a password-protected `bfprofile` string."
-              actionLabel="Import Profile"
-              tone="primary"
-              onAction={() => store.startLoadImport()}
-              icon={(
-                <svg viewBox="0 0 24 24" role="presentation">
-                  <path d="M12 3 4 7v5c0 4.97 3.06 8.77 8 10 4.94-1.23 8-5.03 8-10V7l-8-4Z" />
-                  <path d="M12 8v6m0 0 3-3m-3 3-3-3" />
-                </svg>
-              )}
-            />
-            <HostEntryTile
-              kicker="Remote Recovery"
-              title="Recover from Share"
-              description="Use a password-protected `bfshare` string to download and decrypt the profile from its relays."
-              actionLabel="Recover from Share"
-              onAction={() => store.startRecoverFromShare()}
-              icon={(
-                <svg viewBox="0 0 24 24" role="presentation">
-                  <path d="M6 12a6 6 0 1 1 12 0c0 2.7-1.8 5-4.25 5.75L12 21l-1.75-3.25C7.8 17 6 14.7 6 12Z" />
-                  <path d="M9.5 11.5h5M12 9v5" />
-                </svg>
-              )}
-            />
-          </div>
-        </section>
-      </HostFlowShell>
-    );
-  }
-
   function renderLoadImport() {
     return (
-      <HostFlowShell
-        title="Import Device Profile"
-        description="Load a device profile backup and enter its password to continue."
-        onBack={goToLanding}
-        backTooltip="Back to Welcome"
-      >
-        <section className="igloo-flow-root igloo-stack">
+      <>
+        <PublicTaskShell>
           <StepProgress steps={IMPORT_FLOW_STEPS} active={0} />
-          <Card>
-            <CardHeader>
-              <CardTitle>Profile Backup</CardTitle>
-              <CardDescription>Paste a bfprofile1... backup string and the password that decrypts it.</CardDescription>
-            </CardHeader>
-            <CardContent className="igloo-stack">
-              <label>
-                Profile Backup
-                <Textarea
-                  className="min-h-[112px]"
-                  value={store.drafts.importProfileForm.profileString}
-                  onChange={(event) => store.updateImportProfileForm('profileString', event.target.value)}
-                  placeholder="Paste bfprofile1..."
-                />
-              </label>
-              <label>
-                Backup Password
-                <input
-                  type="password"
-                  value={store.drafts.importProfileForm.password}
-                  onChange={(event) => store.updateImportProfileForm('password', event.target.value)}
-                />
-              </label>
-              <div className="igloo-button-row">
-                <Button type="button" size="sm" onClick={() => void run(() => store.loadBfProfile())}>
-                  Next Step
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        </section>
-      </HostFlowShell>
+          <PageBackLink label="Back to Welcome" onBack={goToLanding} />
+          <PublicTaskTitle
+            title="Import Device Profile"
+            description="Import an existing signing device using an encrypted backup."
+          />
+          <section className="igloo-flow-root">
+            <ImportProfileEntry
+              profileString={store.drafts.importProfileForm.profileString}
+              password={store.drafts.importProfileForm.password}
+              onProfileStringChange={(value) => store.updateImportProfileForm('profileString', value)}
+              onPasswordChange={(value) => store.updateImportProfileForm('password', value)}
+              onNext={() => void run(() => store.loadBfProfile())}
+            />
+          </section>
+        </PublicTaskShell>
+        <PublicFocusFooter />
+      </>
     );
   }
 
-  function renderLoadRecover() {
+  function renderLoadError() {
     return (
-      <HostFlowShell
-        title="Recover from Share"
-        description="Use a protected `bfshare` string and password to fetch and decrypt the remote profile."
-        onBack={() => store.startLoadChoice()}
-        backTooltip="Back to load profile"
-      >
-        <section className="igloo-flow-root igloo-stack">
-          <StepProgress steps={['Import or recover', 'Review', 'Load device']} active={0} />
-          <Card>
-            <CardHeader>
-              <CardTitle>Recover a bfshare</CardTitle>
-              <CardDescription>The share includes suggested relays that will be used to recover the profile.</CardDescription>
-            </CardHeader>
-            <CardContent className="igloo-stack">
-              <label>
-                bfshare
-                <Textarea
-                  className="min-h-[112px]"
-                  value={store.drafts.recoverProfileForm.shareString}
-                  onChange={(event) => store.updateRecoverProfileForm('shareString', event.target.value)}
-                  placeholder="Paste bfshare1..."
-                />
-              </label>
-              <label>
-                Decryption Password
-                <input
-                  type="password"
-                  value={store.drafts.recoverProfileForm.password}
-                  onChange={(event) => store.updateRecoverProfileForm('password', event.target.value)}
-                />
-              </label>
-              <div className="igloo-button-row">
-                <Button type="button" size="sm" onClick={() => void run(() => store.recoverProfileFromShare())}>
-                  Recover Profile
+      <>
+        <PublicTaskShell>
+          <StepProgress steps={IMPORT_FLOW_STEPS} active={0} />
+          <PageBackLink label="Back to Welcome" onBack={goToLanding} />
+          <PublicTaskTitle
+            title="Import Error"
+            description="We couldn't import this profile backup. Resolve the issue below and try again."
+          />
+          <section className="igloo-flow-root">
+            <div className="igloo-onboard-form">
+              <WarningCard
+                title="Import Failed"
+                message={store.pendingLoadError ?? 'We couldn’t import this profile backup.'}
+              />
+              <div className="igloo-onboard-action-row">
+                <Button type="button" onClick={() => store.clearLoadError()}>
+                  Try Again
+                </Button>
+                <Button type="button" variant="secondary" onClick={goToLanding}>
+                  Back to Welcome
                 </Button>
               </div>
-            </CardContent>
-          </Card>
-        </section>
-      </HostFlowShell>
+            </div>
+          </section>
+        </PublicTaskShell>
+        <PublicFocusFooter />
+      </>
     );
   }
 
   function renderLoadConfirm() {
     if (!store.pendingLoadConfirmation) return null;
     return (
-      <HostFlowShell
-        title="Save Profile"
-        description="Name and protect this profile on the device before launching the signer."
-        onBack={() => store.setActiveView(store.pendingLoadConfirmation?.kind === 'bfprofile' ? 'load-import' : 'load-recover')}
-        backTooltip="Back"
-      >
-        <section className="igloo-flow-root igloo-stack">
+      <>
+        <PublicTaskShell>
           <StepProgress steps={IMPORT_FLOW_STEPS} active={1} />
-          <CreateFlowProfileSetup
-            draft={{
-              label: store.drafts.importSaveForm.label,
-              relayUrls: store.drafts.importSaveForm.relayUrls,
-              primarySecret: store.drafts.importSaveForm.password,
-              secondarySecret: store.drafts.importSaveForm.confirmPassword,
-            }}
-            lockIdentity
-            actionLabel="Launch Signer"
-            onLabelChange={(value) => store.updateImportSaveForm('label', value)}
-            onPrimarySecretChange={(value) => store.updateImportSaveForm('password', value)}
-            onSecondarySecretChange={(value) => store.updateImportSaveForm('confirmPassword', value)}
-            onRelayUrlsChange={(value) => store.updateImportSaveForm('relayUrls', value)}
-            onAction={() => void run(() => store.acceptPendingLoadConfirmation())}
+          <PageBackLink label="Back" onBack={() => store.setActiveView('load-import')} />
+          <PublicTaskTitle
+            title="Save Profile"
+            description="Name this local profile, protect it with a password, and choose the relays it should use."
           />
-        </section>
-      </HostFlowShell>
+          <section className="igloo-flow-root">
+            <CreateFlowProfileSetup
+              draft={{
+                label: store.drafts.importSaveForm.label,
+                relayUrls: store.drafts.importSaveForm.relayUrls,
+                primarySecret: store.drafts.importSaveForm.password,
+                secondarySecret: store.drafts.importSaveForm.confirmPassword,
+              }}
+              lockIdentity
+              actionLabel="Launch Signer"
+              onLabelChange={(value) => store.updateImportSaveForm('label', value)}
+              onPrimarySecretChange={(value) => store.updateImportSaveForm('password', value)}
+              onSecondarySecretChange={(value) => store.updateImportSaveForm('confirmPassword', value)}
+              onRelaysChange={(relays) => store.updateImportSaveForm('relayUrls', relays.join('\n'))}
+              onPingRelay={(url) => pingRelay(url)}
+              onAction={() => void run(() => store.acceptPendingLoadConfirmation())}
+            />
+          </section>
+        </PublicTaskShell>
+        <PublicFocusFooter />
+      </>
     );
   }
 
@@ -987,7 +1009,7 @@ function AppShell() {
           <PageBackLink label="Back to Welcome" onBack={goToLanding} />
           <PublicTaskTitle
             title="Input Package"
-            description="Receive this device's share from an onboarding package."
+            description="Create a new signing device from an onboarding package."
           />
           <section className="igloo-flow-root">
             <OnboardPackageEntry
@@ -1016,7 +1038,7 @@ function AppShell() {
               packageText={store.drafts.onboardConnectForm.packageText}
               keysetName="My Signing Key"
               thresholdLabel="2/3"
-              activeStep="applying"
+              activeStep="negotiate"
               onCancel={() => store.setActiveView('onboard-connect')}
             />
           </section>
@@ -1033,10 +1055,13 @@ function AppShell() {
           <StepProgress steps={ONBOARD_FLOW_STEPS} active={1} />
           <PublicTaskTitle
             title="Onboarding Failed"
-            description={null}
+            description="We couldn't finish onboarding this device. Review the details below and retry."
           />
           <section className="igloo-flow-root">
             <OnboardFailedPanel
+              keysetName="My Signing Key"
+              thresholdLabel="2/3"
+              activeStep="negotiate"
               onRetry={() => {
                 setUiError(null);
                 store.setActiveView('onboard-connect');
@@ -1072,7 +1097,8 @@ function AppShell() {
               onLabelChange={(value) => store.updateOnboardSaveForm('label', value)}
               onPrimarySecretChange={(value) => store.updateOnboardSaveForm('password', value)}
               onSecondarySecretChange={(value) => store.updateOnboardSaveForm('confirmPassword', value)}
-              onRelayUrlsChange={(value) => store.updateOnboardSaveForm('relayUrls', value)}
+              onRelaysChange={(relays) => store.updateOnboardSaveForm('relayUrls', relays.join('\n'))}
+              onPingRelay={(url) => pingRelay(url)}
               onAction={() => void run(() => store.finalizeOnboardedDevice())}
             />
           </section>
@@ -1176,45 +1202,51 @@ function AppShell() {
   }
 
   function renderRecoverCollect() {
+    const threshold = (() => {
+      try {
+        const group = selectedProfile?.group_package_json
+          ? (JSON.parse(selectedProfile.group_package_json) as { threshold?: unknown })
+          : null;
+        return typeof group?.threshold === 'number' && group.threshold > 0 ? group.threshold : 2;
+      } catch {
+        return 2;
+      }
+    })();
+    const sources = store.drafts.recoverKeyForm.sources;
+    const collectedCount = 1 + sources.filter((source) => source.packageText.trim().length > 0).length;
     return (
-      <HostFlowShell
-        title="Collect Shares"
-        description="Provide enough source packages to reconstruct this keyset's private key."
-        onBack={goToLanding}
-        backTooltip="Back to Welcome"
-      >
-        <section className="igloo-flow-root igloo-stack">
+      <>
+        <PublicTaskShell>
           <StepProgress steps={RECOVER_FLOW_STEPS} active={0} />
-          <RotateKeysetPanel
-            title="Source Packages"
-            description="Add threshold source packages (bfprofile or bfshare) to reconstruct the private key."
-            actionLabel="Next Step"
-            sourceProfileId={store.drafts.recoverKeyForm.sourceProfileId}
-            availableProfiles={store.profiles.map((profile) => ({
-              id: profile.id,
-              label: `${profile.label || 'Unnamed device'} (${shortProfileId(profile.id)})`,
-            }))}
-            rotationSources={store.drafts.recoverKeyForm.sources.map((source) => ({
-              packageText: source.packageText,
-              packagePassword: source.password,
-            }))}
-            onChangeSourceProfile={() => {
-              /* recovery targets a specific profile; the source picker is inert here */
-            }}
-            onChangeRotationSource={(index, field, value) =>
-              store.updateRecoverSource(index, field === 'packagePassword' ? 'password' : 'packageText', value)
-            }
-            onAddRotationSource={() => store.addRecoverSource()}
-            onRemoveRotationSource={(index) => store.removeRecoverSource(index)}
-            onRotate={() =>
-              void run(async () => {
-                const recovered = await store.recoverKeyFromShares();
-                setRecoveredKey(recovered);
-              })
-            }
+          <PageBackLink label="Back to Welcome" onBack={goToLanding} />
+          <PublicTaskTitle
+            title="Collect Shares"
+            description="Collect enough existing source packages to recover this key. Once the threshold is met, you can reveal and export the recovered private key."
           />
-        </section>
-      </HostFlowShell>
+          <section className="igloo-flow-root">
+            <RecoverCollectSharesPanel
+              sources={sources.map((source) => ({
+                packageText: source.packageText,
+                packagePassword: source.password,
+              }))}
+              threshold={threshold}
+              collectedCount={collectedCount}
+              onChangeSource={(index, field, value) =>
+                store.updateRecoverSource(index, field === 'packagePassword' ? 'password' : 'packageText', value)
+              }
+              onAddSource={() => store.addRecoverSource()}
+              onRemoveSource={(index) => store.removeRecoverSource(index)}
+              onNext={() =>
+                void run(async () => {
+                  const recovered = await store.recoverKeyFromShares();
+                  setRecoveredKey(recovered);
+                })
+              }
+            />
+          </section>
+        </PublicTaskShell>
+        <PublicFocusFooter />
+      </>
     );
   }
 
@@ -1472,10 +1504,9 @@ function AppShell() {
       {store.activeView === 'create-select-share' ? renderCreateSelectShare() : null}
       {store.activeView === 'create-save-profile' ? renderCreateSaveProfile() : null}
       {store.activeView === 'create-distribute' ? renderCreateDistribute() : null}
-      {store.activeView === 'load-choice' ? renderLoadChoice() : null}
       {store.activeView === 'load-import' ? renderLoadImport() : null}
-      {store.activeView === 'load-recover' ? renderLoadRecover() : null}
       {store.activeView === 'load-confirm' ? renderLoadConfirm() : null}
+      {store.activeView === 'load-error' ? renderLoadError() : null}
       {store.activeView === 'onboard-connect' ? renderOnboardConnect() : null}
       {store.activeView === 'onboard-handshake' ? renderOnboardHandshake() : null}
       {store.activeView === 'onboard-failed' ? renderOnboardFailed() : null}
