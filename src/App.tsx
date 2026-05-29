@@ -32,7 +32,13 @@ import {
   type LogEntry,
   type PeerPolicy,
 } from 'igloo-ui';
-import { shortProfileId, type RuntimeOnboardingStatus } from 'igloo-shared';
+import {
+  shortProfileId,
+  selectOnboardingStatuses,
+  selectPendingOperations,
+  type RuntimePendingOperation,
+  type RuntimeStatusSummary,
+} from 'igloo-shared';
 
 import { StoreProvider, useStore } from './lib/store';
 import type { PwaDistributionActionResult, PwaGeneratedShare } from './lib/types';
@@ -93,49 +99,6 @@ function buildOperatorSettingsDraft(
   };
 }
 
-type PwaRuntimePeerStatus = {
-  idx: number;
-  pubkey: string;
-  known: boolean;
-  last_seen: number | null;
-  online: boolean;
-  incoming_available: number;
-  outgoing_available: number;
-  outgoing_spent: number;
-  can_sign: boolean;
-  should_send_nonces: boolean;
-};
-
-type PwaRuntimePendingOperation = {
-  request_id: string;
-  op_type: string;
-  threshold: number;
-  started_at: number | null;
-  timeout_at: number | null;
-  collected_responses: unknown[];
-  target_peers: string[];
-};
-
-type PwaRuntimeReadiness = {
-  runtime_ready: boolean;
-  restore_complete: boolean;
-  sign_ready: boolean;
-  ecdh_ready: boolean;
-  last_refresh_at: number | null;
-};
-
-type PwaRuntimeStatus = {
-  peers?: PwaRuntimePeerStatus[];
-  onboarding_statuses?: RuntimeOnboardingStatus[];
-  pending_operations?: PwaRuntimePendingOperation[];
-  metadata?: {
-    peers?: string[];
-  };
-  status?: {
-    last_active?: number;
-  };
-};
-
 function derivePwaPeers(
   policies: Array<{
     pubkey: string;
@@ -144,7 +107,7 @@ function derivePwaPeers(
       respond: { sign: boolean };
     };
   }>,
-  runtimeStatus: unknown,
+  runtimeStatus: RuntimeStatusSummary | null | undefined,
 ): PeerPolicy[] {
   const base = new Map<string, PeerPolicy>();
 
@@ -164,7 +127,7 @@ function derivePwaPeers(
     });
   }
 
-  const summary = (runtimeStatus ?? null) as PwaRuntimeStatus | null;
+  const summary = runtimeStatus;
   for (const [index, peer] of (summary?.metadata?.peers ?? []).entries()) {
     const normalized = peer.toLowerCase();
     const existing = base.get(normalized);
@@ -204,9 +167,9 @@ function derivePwaPeers(
   return Array.from(base.values()).sort((a, b) => a.pubkey.localeCompare(b.pubkey));
 }
 
-function derivePendingOperations(runtimeStatus: unknown) {
-  const summary = (runtimeStatus ?? null) as PwaRuntimeStatus | null;
-  return (summary?.pending_operations ?? []).map((operation) => ({
+function derivePendingOperations(runtimeStatus: RuntimeStatusSummary | null | undefined) {
+  const operations: RuntimePendingOperation[] = runtimeStatus ? selectPendingOperations(runtimeStatus) : [];
+  return operations.map((operation) => ({
     request_id: operation.request_id,
     op_type: operation.op_type,
     threshold: operation.threshold,
@@ -219,7 +182,7 @@ function derivePendingOperations(runtimeStatus: unknown) {
 
 function deriveActivationStage(runtimeSnapshot: ReturnType<typeof useStore>['runtimeSnapshot']) {
   if (!runtimeSnapshot?.active) return 'idle';
-  const readiness = (runtimeSnapshot.readiness ?? null) as PwaRuntimeReadiness | null;
+  const readiness = runtimeSnapshot.readiness ?? null;
   if (!readiness) return 'running';
   if (!readiness.restore_complete) return 'restoring';
   if (readiness.sign_ready && readiness.ecdh_ready) return 'ready';
@@ -230,13 +193,13 @@ function deriveActivationStage(runtimeSnapshot: ReturnType<typeof useStore>['run
 }
 
 function deriveActivationUpdatedAt(runtimeSnapshot: ReturnType<typeof useStore>['runtimeSnapshot']) {
-  const readiness = (runtimeSnapshot?.readiness ?? null) as PwaRuntimeReadiness | null;
+  const readiness = runtimeSnapshot?.readiness ?? null;
   if (typeof readiness?.last_refresh_at === 'number') {
     return readiness.last_refresh_at > 10_000_000_000
       ? readiness.last_refresh_at
       : readiness.last_refresh_at * 1000;
   }
-  const summary = (runtimeSnapshot?.runtime_status ?? null) as PwaRuntimeStatus | null;
+  const summary = runtimeSnapshot?.runtime_status ?? null;
   const lastActive = summary?.status?.last_active;
   if (typeof lastActive === 'number') {
     return lastActive > 10_000_000_000 ? lastActive : lastActive * 1000;
@@ -246,7 +209,7 @@ function deriveActivationUpdatedAt(runtimeSnapshot: ReturnType<typeof useStore>[
 
 function deriveRuntimeSummaryLabel(runtimeSnapshot: ReturnType<typeof useStore>['runtimeSnapshot']) {
   if (!runtimeSnapshot?.active) return 'Signer Stopped';
-  const readiness = (runtimeSnapshot.readiness ?? null) as PwaRuntimeReadiness | null;
+  const readiness = runtimeSnapshot.readiness ?? null;
   if (readiness && (!readiness.sign_ready || !readiness.ecdh_ready || !readiness.restore_complete)) {
     return 'Signer Running (Degraded)';
   }
@@ -256,14 +219,14 @@ function deriveRuntimeSummaryLabel(runtimeSnapshot: ReturnType<typeof useStore>[
 function deriveDistributionResults(
   results: Record<number, PwaDistributionActionResult>,
   shares: PwaGeneratedShare[],
-  runtimeStatus: unknown,
+  runtimeStatus: RuntimeStatusSummary | null | undefined,
 ) {
-  const summary = (runtimeStatus ?? null) as PwaRuntimeStatus | null;
+  const summary = runtimeStatus;
   const runtimePeers = new Map(
     (summary?.peers ?? []).map((peer) => [peer.pubkey.toLowerCase(), peer]),
   );
   const onboardingStatuses = new Map(
-    (summary?.onboarding_statuses ?? []).map((status) => [status.pubkey.toLowerCase(), status]),
+    (summary ? selectOnboardingStatuses(summary) : []).map((status) => [status.pubkey.toLowerCase(), status]),
   );
 
   return Object.fromEntries(
@@ -373,9 +336,9 @@ function AppShell() {
 
     return (
       <ContentCard title="Welcome to Igloo" description="Choose one path to initialize this browser workspace.">
-        <section className="igloo-flow-root igloo-pwa-entry-shell">
-          <div className="igloo-pwa-entry-intro">
-            <p className="igloo-pwa-entry-lead">
+        <section className="igloo-flow-root igloo-entry-shell">
+          <div className="igloo-entry-intro">
+            <p className="igloo-entry-lead">
               Create or rotate a keyset, load an existing profile, or finish onboarding a device from an accepted package.
             </p>
           </div>
@@ -429,7 +392,7 @@ function AppShell() {
               })
             }
           />
-          <div className="igloo-pwa-entry-grid">
+          <div className="igloo-entry-grid">
             <HostEntryTile
               kicker="Fresh Setup"
               title="Create / Rotate Keyset"
@@ -717,8 +680,8 @@ function AppShell() {
         onBack={goToLanding}
         backTooltip="Back to landing"
       >
-        <section className="igloo-flow-root igloo-pwa-entry-shell">
-          <div className="igloo-pwa-entry-grid igloo-pwa-entry-grid-two">
+        <section className="igloo-flow-root igloo-entry-shell">
+          <div className="igloo-entry-grid igloo-entry-grid-two">
             <HostEntryTile
               kicker="Local Import"
               title="Import Profile"

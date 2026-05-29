@@ -1,4 +1,5 @@
 import {
+  BrowserBridgeNode,
   createBrowserRuntimeNodeInit,
   clearRuntimePeerPolicyOverridesOnNode,
   connectSignerNode,
@@ -16,7 +17,6 @@ import {
   updateRuntimeConfigOnNode,
   updateRuntimePeerPolicyOverrideOnNode,
   type DecodedOnboardingProfile,
-  type NodeWithEvents,
   type RuntimeMetadata,
   type RuntimePeerPermissionState,
   type RuntimeReadiness,
@@ -163,7 +163,7 @@ function snapshotHasUsableNonces(snapshot: unknown) {
   });
 }
 
-async function waitForNonceSnapshot(node: NodeWithEvents) {
+async function waitForNonceSnapshot(node: BrowserBridgeNode) {
   const startedAt = Date.now();
   let lastSnapshot: unknown = null;
   while (Date.now() - startedAt < NONCE_SNAPSHOT_WAIT_TIMEOUT_MS) {
@@ -176,7 +176,7 @@ async function waitForNonceSnapshot(node: NodeWithEvents) {
   return lastSnapshot ?? getRuntimeSnapshot(node);
 }
 
-function attachLogBuffer(node: NodeWithEvents) {
+function attachLogBuffer(node: BrowserBridgeNode) {
   const lines: string[] = [];
 
   const onMessage = (payload: unknown) => {
@@ -209,7 +209,7 @@ function attachLogBuffer(node: NodeWithEvents) {
  * export still emits `bootstrap.share.seckey` hex and is now reserved
  * for rare persistence paths that the PWA no longer uses.
  */
-function buildStatusSnapshot(node: NodeWithEvents): BrowserRuntimeSessionSnapshot {
+function buildStatusSnapshot(node: BrowserBridgeNode): BrowserRuntimeSessionSnapshot {
   const runtimeStatus = getRuntimeStatus(node);
   return {
     runtimeStatus,
@@ -277,7 +277,7 @@ export async function connectOnboardingPackageAndCaptureProfile(input: {
   }
 }
 
-function createSession(node: NodeWithEvents, logs: ReturnType<typeof attachLogBuffer>): BrowserRuntimeSession {
+function createSession(node: BrowserBridgeNode, logs: ReturnType<typeof attachLogBuffer>): BrowserRuntimeSession {
   let stopped = false;
 
   return {

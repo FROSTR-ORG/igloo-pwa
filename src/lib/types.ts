@@ -3,6 +3,8 @@ import type {
   BrowserProfilePackagePayload,
   BrowserProfilePreview,
   RuntimeOnboardingStatus,
+  RuntimeReadiness,
+  RuntimeStatusSummary,
   SignerSettings as SharedSignerSettings,
 } from 'igloo-shared';
 import type { SharedDistributionTrackingStatus } from 'igloo-ui';
@@ -136,8 +138,8 @@ export type PwaGeneratedKeyset = {
 export type PwaRuntimeSnapshot = {
   active: boolean;
   profile: PwaProfile | null;
-  runtime_status: unknown;
-  readiness: unknown;
+  runtime_status: RuntimeStatusSummary | null;
+  readiness: RuntimeReadiness | null;
   peer_permission_states?: PwaPeerPermissionState[];
   runtime_log_lines: string[];
   runtime_host: {
