@@ -5,7 +5,9 @@ import {
   setInjectedWasmBridgeModuleForTests,
   setInjectedWasmProfileModuleForTests,
 } from 'igloo-shared';
+import { ensureLocalStorage } from 'igloo-shared/testing/setup-dom';
 import { setBrowserRuntimeTestHooks } from '@/lib/page-runtime-host';
+import { createFakeBrowserRuntimeSession } from '@/lib/page-runtime-host-fakes';
 
 const mockRuntimeSnapshot = JSON.stringify({
   bootstrap: {
@@ -25,48 +27,6 @@ const mockRuntimeSnapshot = JSON.stringify({
     }
   }
 });
-
-function createMemoryStorage(): Storage {
-  const values = new Map<string, string>();
-  return {
-    get length() {
-      return values.size;
-    },
-    clear() {
-      values.clear();
-    },
-    getItem(key: string) {
-      return values.has(key) ? values.get(key) ?? null : null;
-    },
-    key(index: number) {
-      return Array.from(values.keys())[index] ?? null;
-    },
-    removeItem(key: string) {
-      values.delete(key);
-    },
-    setItem(key: string, value: string) {
-      values.set(key, String(value));
-    },
-  };
-}
-
-function ensureLocalStorage() {
-  const candidate = window.localStorage as Storage | undefined;
-  if (
-    candidate &&
-    typeof candidate.clear === 'function' &&
-    typeof candidate.getItem === 'function' &&
-    typeof candidate.setItem === 'function' &&
-    typeof candidate.removeItem === 'function'
-  ) {
-    return;
-  }
-
-  Object.defineProperty(window, 'localStorage', {
-    configurable: true,
-    value: createMemoryStorage(),
-  });
-}
 
 class MockWasmBridgeRuntime {
   init_runtime() {}
@@ -409,16 +369,7 @@ beforeEach(() => {
         },
         runtimeSnapshotJson: mockRuntimeSnapshot
       });
-      return {
-        collectLogs: () => ['[info] attached live browser signer session'],
-        read: () => buildSnapshot(),
-        refreshPeers: async () => buildSnapshot(),
-        updatePeerPolicyOverride: async () => buildSnapshot(),
-        clearPeerPolicyOverrides: async () => buildSnapshot(),
-        updateConfig: () => buildSnapshot(),
-        onOnboardComplete: () => () => {},
-        stop: () => buildSnapshot(),
-      };
+      return createFakeBrowserRuntimeSession(buildSnapshot());
     },
   });
 });
