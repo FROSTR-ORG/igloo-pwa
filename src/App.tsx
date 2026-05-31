@@ -1383,6 +1383,7 @@ function AppShell() {
                 maintenanceActions={[
                   {
                     label: 'copy profile',
+                    testId: CRITICAL_E2E_TEST_IDS.settingsCopyProfile,
                     variant: 'secondary',
                     disabled: !selectedProfile,
                     onClick: () =>
@@ -1393,6 +1394,7 @@ function AppShell() {
                   },
                   {
                     label: 'copy share',
+                    testId: CRITICAL_E2E_TEST_IDS.settingsCopyShare,
                     variant: 'secondary',
                     disabled: !selectedProfile,
                     onClick: () =>
@@ -1413,6 +1415,7 @@ function AppShell() {
                   },
                   {
                     label: 'logout',
+                    testId: CRITICAL_E2E_TEST_IDS.settingsLogout,
                     variant: 'outline',
                     disabled: !selectedProfile,
                     onClick: () => void run(() => store.logout()),
@@ -1438,6 +1441,7 @@ function AppShell() {
                       <label className="igloo-toggle-row">
                         <input
                           type="checkbox"
+                          data-testid={CRITICAL_E2E_TEST_IDS.settingsAutoOpenToggle}
                           checked={store.settings.auto_open_signer}
                           onChange={(event) => store.updateSettings('auto_open_signer', event.target.checked)}
                         />
