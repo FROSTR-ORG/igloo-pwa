@@ -715,6 +715,7 @@ function AppShell() {
                 type="button"
                 size="sm"
                 variant={store.drafts.createForm.mode === 'new' ? 'default' : 'secondary'}
+                data-testid={CRITICAL_E2E_TEST_IDS.createModeNew}
                 onClick={() => store.updateCreateForm('mode', 'new')}
               >
                 New Keyset
@@ -723,6 +724,7 @@ function AppShell() {
                 type="button"
                 size="sm"
                 variant={store.drafts.createForm.mode === 'rotate' ? 'default' : 'secondary'}
+                data-testid={CRITICAL_E2E_TEST_IDS.createModeRotate}
                 onClick={() => store.updateCreateForm('mode', 'rotate')}
               >
                 Rotate Existing
@@ -1263,6 +1265,7 @@ function AppShell() {
 
     return (
       <ContentCard
+        data-testid={CRITICAL_E2E_TEST_IDS.dashboardRoot}
         title={selectedProfile ? `Device Dashboard · ${selectedProfile.label} (${shortProfileId(selectedProfile.id)})` : 'Device Dashboard'}
         description="Chrome-style operator console for the active browser signer profile."
       >
