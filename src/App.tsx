@@ -1095,6 +1095,7 @@ function AppShell() {
                 secondarySecret: store.drafts.onboardSaveForm.confirmPassword,
               }}
               lockIdentity
+              lockName={false}
               actionLabel="Launch Signer"
               onLabelChange={(value) => store.updateOnboardSaveForm('label', value)}
               onPrimarySecretChange={(value) => store.updateOnboardSaveForm('password', value)}
