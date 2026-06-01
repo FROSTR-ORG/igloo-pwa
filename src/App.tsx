@@ -1138,6 +1138,7 @@ function AppShell() {
                 bfonboard
                 <Textarea
                   className="min-h-[112px]"
+                  data-testid={CRITICAL_E2E_TEST_IDS.rotationPackageInput}
                   value={store.drafts.rotateConnectForm.packageText}
                   onChange={(event) => store.updateRotateConnectForm('packageText', event.target.value)}
                   placeholder="Paste bfonboard1..."
@@ -1147,6 +1148,7 @@ function AppShell() {
                 Package Password
                 <input
                   type="password"
+                  data-testid={CRITICAL_E2E_TEST_IDS.rotationPasswordInput}
                   value={store.drafts.rotateConnectForm.password}
                   onChange={(event) => store.updateRotateConnectForm('password', event.target.value)}
                 />
