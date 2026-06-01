@@ -23,7 +23,6 @@ import {
   RotateKeysetPanel,
   WarningCard,
   HostFlowShell,
-  OperatorDashboardTabs,
   OperatorPermissionsPanel,
   OperatorSettingsPanel,
   OperatorSignerPanel,
@@ -42,6 +41,7 @@ import {
   WelcomeDeleteModal,
   WelcomeUnlockModal,
   CRITICAL_E2E_TEST_IDS,
+  type DashboardKeyModel,
   type EventLogRowModel,
   type PeerPolicy,
   type SharedDistributionResult,
@@ -51,6 +51,7 @@ import {
 } from 'igloo-ui';
 import { pingRelay, shortProfileId } from 'igloo-shared';
 import * as nip49 from 'nostr-tools/nip49';
+import { nip19 } from 'nostr-tools';
 
 import { StoreProvider, useStore } from './lib/store';
 
@@ -261,6 +262,31 @@ function deriveRuntimeSummaryLabel(runtimeSnapshot: ReturnType<typeof useStore>[
   return 'Signer Running';
 }
 
+// Build a copyable key model (truncated npub display + full npub + hex) from a
+// 32-byte x-only public key hex. Falls back to the raw hex display if the key is
+// not encodable, so a malformed key never throws on the dashboard.
+function toDashboardKey(hex: string): DashboardKeyModel | undefined {
+  const normalized = (hex ?? '').trim().toLowerCase();
+  if (!/^[0-9a-f]{64}$/.test(normalized)) return undefined;
+  try {
+    const npub = nip19.npubEncode(normalized);
+    const display = `${npub.slice(0, 8)}...${npub.slice(-4)}`;
+    return { display, npub, hex: normalized };
+  } catch {
+    return undefined;
+  }
+}
+
+function deriveMemberLabel(profile: ReturnType<typeof useStore>['profiles'][number]): string | undefined {
+  try {
+    const share = JSON.parse(profile.share_package_json) as { idx?: unknown };
+    if (typeof share.idx === 'number') return `Share #${share.idx}`;
+  } catch {
+    // ignore malformed share package json
+  }
+  return undefined;
+}
+
 function deriveSignerDashboardView(
   profile: ReturnType<typeof useStore>['profiles'][number] | null,
   runtimeSnapshot: ReturnType<typeof useStore>['runtimeSnapshot'],
@@ -277,10 +303,15 @@ function deriveSignerDashboardView(
   return {
     profileName: profile.label || 'Unnamed device',
     thresholdLabel,
+    memberLabel: deriveMemberLabel(profile),
     publicKeyLabel: profile.group_public_key,
     shareLabel: profile.share_public_key,
+    groupKey: toDashboardKey(profile.group_public_key),
+    shareKey: toDashboardKey(profile.share_public_key),
+    running: Boolean(runtimeSnapshot?.active),
     readinessLabel: deriveRuntimeSummaryLabel(runtimeSnapshot),
     relaySummary: runtimeSnapshot?.active ? 'Browser runtime connected' : 'Runtime stopped',
+    pendingApprovalRows: [],
     peerRows: derivePwaPeers(peerPermissionStates, runtimeSnapshot?.runtime_status).map((peer) => ({
       id: peer.pubkey,
       alias: peer.alias,
@@ -544,6 +575,20 @@ function AppShell() {
   const [welcomeUnlockSubmitting, setWelcomeUnlockSubmitting] = React.useState(false);
   const [welcomeDeleteProfileId, setWelcomeDeleteProfileId] = React.useState<string | null>(null);
   const [recoveredKey, setRecoveredKey] = React.useState<{ nsec: string; signingKeyHex: string } | null>(null);
+  const [dashboardCopiedField, setDashboardCopiedField] = React.useState<'group' | 'share' | null>(null);
+
+  const copyDashboardKey = React.useCallback(
+    (field: 'group' | 'share', keyModel: DashboardKeyModel | undefined, format?: 'npub' | 'hex') => {
+      if (!keyModel) return;
+      const value = format === 'hex' ? keyModel.hex : keyModel.npub;
+      if (navigator.clipboard?.writeText) {
+        void navigator.clipboard.writeText(value);
+      }
+      setDashboardCopiedField(field);
+      window.setTimeout(() => setDashboardCopiedField(null), 2000);
+    },
+    [],
+  );
 
   // DEV-only seam: lets the visual harness render the recover-success screen with a
   // FAKE nsec injected on the window. Stripped from production builds (guarded on
@@ -1260,6 +1305,35 @@ function AppShell() {
     return <RecoverPrivateKeyView recovered={recoveredKey} onClear={goToLanding} />;
   }
 
+  function renderDashboardNav() {
+    if (store.activeView !== 'dashboard') return undefined;
+    const items: Array<{ key: 'signer' | 'permissions' | 'settings'; label: string; testId: string }> = [
+      { key: 'signer', label: 'Dashboard', testId: CRITICAL_E2E_TEST_IDS.dashboardTabSigner },
+      { key: 'permissions', label: 'Permissions', testId: CRITICAL_E2E_TEST_IDS.dashboardTabPermissions },
+      { key: 'settings', label: 'Settings', testId: CRITICAL_E2E_TEST_IDS.dashboardTabSettings },
+    ];
+    return (
+      <nav className="igloo-dashboard-nav" aria-label="Dashboard sections">
+        {items.map((item) => {
+          const active = store.activeDashboardTab === item.key;
+          return (
+            <button
+              key={item.key}
+              type="button"
+              role="tab"
+              aria-selected={active}
+              data-testid={item.testId}
+              className={active ? 'igloo-dashboard-nav-link is-active' : 'igloo-dashboard-nav-link'}
+              onClick={() => store.setDashboardTab(item.key)}
+            >
+              {item.label}
+            </button>
+          );
+        })}
+      </nav>
+    );
+  }
+
   function renderDashboard() {
     const runtimeState = store.runtimeSnapshot?.active ? 'running' : 'stopped';
     const runtimeControlLabel = runtimeState === 'running' ? 'Stop Signer' : 'Start Signer';
@@ -1273,16 +1347,6 @@ function AppShell() {
         description="Chrome-style operator console for the active browser signer profile."
       >
         <div className="space-y-6">
-          <OperatorDashboardTabs
-            tabs={[
-              { key: 'signer', label: 'Signer', description: 'runtime console' },
-              { key: 'permissions', label: 'Permissions', description: 'peer policies' },
-              { key: 'settings', label: 'Settings', description: 'operator controls' },
-            ]}
-            activeTab={store.activeDashboardTab}
-            onChangeTab={store.setDashboardTab}
-          />
-
           {store.activeDashboardTab === 'signer' ? (
             <div role="tabpanel" id="operator-panel-signer" aria-labelledby="operator-tab-signer">
               <OperatorSignerPanel
@@ -1290,6 +1354,9 @@ function AppShell() {
                 introMessage="The browser signer runs locally inside the PWA workbench. This dashboard mirrors the operator workflow used by igloo-chrome."
                 emptyDescription="Load or onboard a device profile before opening the signer dashboard."
                 runtimeControlLabel={runtimeControlLabel}
+                copiedField={dashboardCopiedField}
+                onCopyGroupKey={(format) => copyDashboardKey('group', signerView?.groupKey, format)}
+                onCopyShareKey={(format) => copyDashboardKey('share', signerView?.shareKey, format)}
                 onPrimaryAction={() =>
                   void run(() => (store.runtimeSnapshot?.active ? store.stopSigner() : store.startSigner()))
                 }
@@ -1485,6 +1552,7 @@ function AppShell() {
           logoSrc="/igloo-paper-mark.png"
           taskLabel={deriveHeaderTaskLabel(store.activeView)}
           profileName={selectedProfile?.label}
+          actions={renderDashboardNav()}
         />
       }
     >
