@@ -51,7 +51,7 @@ import {
 } from 'igloo-ui';
 import { pingRelay, shortProfileId } from 'igloo-shared';
 import * as nip49 from 'nostr-tools/nip49';
-import { nip19 } from 'nostr-tools';
+import { deriveMemberLabel, toDashboardKey } from './lib/dashboard-view';
 
 import { StoreProvider, useStore } from './lib/store';
 
@@ -262,31 +262,6 @@ function deriveRuntimeSummaryLabel(runtimeSnapshot: ReturnType<typeof useStore>[
   return 'Signer Running';
 }
 
-// Build a copyable key model (truncated npub display + full npub + hex) from a
-// 32-byte x-only public key hex. Falls back to the raw hex display if the key is
-// not encodable, so a malformed key never throws on the dashboard.
-function toDashboardKey(hex: string): DashboardKeyModel | undefined {
-  const normalized = (hex ?? '').trim().toLowerCase();
-  if (!/^[0-9a-f]{64}$/.test(normalized)) return undefined;
-  try {
-    const npub = nip19.npubEncode(normalized);
-    const display = `${npub.slice(0, 8)}...${npub.slice(-4)}`;
-    return { display, npub, hex: normalized };
-  } catch {
-    return undefined;
-  }
-}
-
-function deriveMemberLabel(profile: ReturnType<typeof useStore>['profiles'][number]): string | undefined {
-  try {
-    const share = JSON.parse(profile.share_package_json) as { idx?: unknown };
-    if (typeof share.idx === 'number') return `Share #${share.idx}`;
-  } catch {
-    // ignore malformed share package json
-  }
-  return undefined;
-}
-
 function deriveSignerDashboardView(
   profile: ReturnType<typeof useStore>['profiles'][number] | null,
   runtimeSnapshot: ReturnType<typeof useStore>['runtimeSnapshot'],
@@ -303,7 +278,7 @@ function deriveSignerDashboardView(
   return {
     profileName: profile.label || 'Unnamed device',
     thresholdLabel,
-    memberLabel: deriveMemberLabel(profile),
+    memberLabel: deriveMemberLabel(profile.share_package_json),
     publicKeyLabel: profile.group_public_key,
     shareLabel: profile.share_public_key,
     groupKey: toDashboardKey(profile.group_public_key),
@@ -1341,12 +1316,7 @@ function AppShell() {
     const policyView = derivePolicyDashboardView(Boolean(store.runtimeSnapshot?.active), store.peerPermissionStates);
 
     return (
-      <ContentCard
-        data-testid={CRITICAL_E2E_TEST_IDS.dashboardRoot}
-        title={selectedProfile ? `Device Dashboard · ${selectedProfile.label} (${shortProfileId(selectedProfile.id)})` : 'Device Dashboard'}
-        description="Chrome-style operator console for the active browser signer profile."
-      >
-        <div className="space-y-6">
+      <div data-testid={CRITICAL_E2E_TEST_IDS.dashboardRoot} className="space-y-6">
           {store.activeDashboardTab === 'signer' ? (
             <div role="tabpanel" id="operator-panel-signer" aria-labelledby="operator-tab-signer">
               <OperatorSignerPanel
@@ -1537,8 +1507,7 @@ function AppShell() {
               />
             </div>
           ) : null}
-        </div>
-      </ContentCard>
+      </div>
     );
   }
 
