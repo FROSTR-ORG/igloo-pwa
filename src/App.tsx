@@ -1419,46 +1419,54 @@ function AppShell() {
                 message={
                   store.runtimeSnapshot?.active ? null : 'Start the signer to apply settings live.'
                 }
-                maintenanceDescription="Browser package export, share rotation, and session controls."
-                maintenanceActions={[
+                sections={[
                   {
-                    label: 'copy profile',
+                    title: 'Replace Share',
+                    description:
+                      "Import a bfonboard package to replace only this device's local share while keeping the same group public key and profile.",
+                    actionLabel: 'Replace Share',
+                    testId: CRITICAL_E2E_TEST_IDS.maintenanceRotateShare,
+                    variant: 'secondary',
+                    disabled: !selectedProfile,
+                    onAction: () =>
+                      void run(() => {
+                        store.startRotateKey();
+                      }),
+                  },
+                  {
+                    title: 'Export Profile',
+                    description: 'Encrypted backup of your share and configuration.',
+                    actionLabel: 'Export Profile',
                     testId: CRITICAL_E2E_TEST_IDS.settingsCopyProfile,
                     variant: 'secondary',
                     disabled: !selectedProfile,
-                    onClick: () =>
+                    onAction: () =>
                       void run(async () => {
                         if (!selectedProfile) return;
                         await store.copyProfilePackage(selectedProfile.id, 'bfprofile');
                       }),
                   },
                   {
-                    label: 'copy share',
+                    title: 'Export Share',
+                    description: 'Password-protected bfshare package.',
+                    actionLabel: 'Export Share',
                     testId: CRITICAL_E2E_TEST_IDS.settingsCopyShare,
                     variant: 'secondary',
                     disabled: !selectedProfile,
-                    onClick: () =>
+                    onAction: () =>
                       void run(async () => {
                         if (!selectedProfile) return;
                         await store.copyProfilePackage(selectedProfile.id, 'bfshare');
                       }),
                   },
                   {
-                    label: 'rotate share',
-                    testId: CRITICAL_E2E_TEST_IDS.maintenanceRotateShare,
-                    variant: 'secondary',
-                    disabled: !selectedProfile,
-                    onClick: () =>
-                      void run(() => {
-                        store.startRotateKey();
-                      }),
-                  },
-                  {
-                    label: 'logout',
+                    title: 'Logout',
+                    description: 'Return to the profile list to open another profile.',
+                    actionLabel: 'Logout',
                     testId: CRITICAL_E2E_TEST_IDS.settingsLogout,
                     variant: 'outline',
                     disabled: !selectedProfile,
-                    onClick: () => void run(() => store.logout()),
+                    onAction: () => void run(() => store.logout()),
                   },
                 ]}
                 extraSections={

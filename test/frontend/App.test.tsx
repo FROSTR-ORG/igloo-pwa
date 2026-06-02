@@ -591,10 +591,10 @@ describe('igloo-pwa app shell', () => {
 
     render(<App />);
 
-    expect(screen.getAllByRole('button', { name: 'copy profile' }).length).toBeGreaterThan(0);
-    expect(screen.getAllByRole('button', { name: 'copy share' }).length).toBeGreaterThan(0);
-    expect(screen.getAllByRole('button', { name: 'rotate share' }).length).toBeGreaterThan(0);
-    expect(screen.getAllByRole('button', { name: 'logout' }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole('button', { name: 'Export Profile' }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole('button', { name: 'Export Share' }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole('button', { name: 'Replace Share' }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole('button', { name: 'Logout' }).length).toBeGreaterThan(0);
     expect(screen.queryByRole('button', { name: /reset browser workspace/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /wipe/i })).not.toBeInTheDocument();
   });
