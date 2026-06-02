@@ -11,6 +11,7 @@ export function createFakeBrowserRuntimeSession(
 ): BrowserRuntimeSession {
   const session = {
     collectLogs: () => ['[info] attached live browser signer session'],
+    clearLogs: () => {},
     read: () => snapshot,
     refreshPeers: async () => snapshot,
     updatePeerPolicyOverride: async () => snapshot,

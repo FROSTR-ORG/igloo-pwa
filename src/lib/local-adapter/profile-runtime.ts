@@ -119,6 +119,7 @@ export async function refreshSession(current: PwaRuntimeSnapshot | null): Promis
     profile: runtimeProfile,
     runtime_status: refreshed.runtimeStatus,
     readiness: refreshed.readiness,
+    events: refreshed.events,
     runtime_log_lines: [...activeRuntimeSession.collectLogs(), '[info] session refresh completed'],
     runtime_host: {
       profile_id: runtimeProfile.id,
@@ -172,6 +173,20 @@ export async function clearPeerPolicies(current: PwaRuntimeSnapshot | null): Pro
 
   const session = activeRuntimeSession;
   await session.clearPeerPolicyOverrides();
+
+  return toRuntimeSnapshot(current.profile, session, true);
+}
+
+export async function clearSessionLogs(current: PwaRuntimeSnapshot | null): Promise<PwaRuntimeSnapshot> {
+  if (!current?.profile) {
+    throw new Error('Load or onboard a device profile before clearing the runtime log.');
+  }
+  if (!current.active || !activeRuntimeSession || activeRuntimeProfileId !== current.profile.id) {
+    throw new Error('Start the signer before clearing the runtime log.');
+  }
+
+  const session = activeRuntimeSession;
+  session.clearLogs();
 
   return toRuntimeSnapshot(current.profile, session, true);
 }

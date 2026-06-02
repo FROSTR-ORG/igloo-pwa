@@ -367,7 +367,8 @@ beforeEach(() => {
           state_save_interval_secs: 30,
           peer_selection_strategy: 'deterministic_sorted' as const
         },
-        runtimeSnapshotJson: mockRuntimeSnapshot
+        runtimeSnapshotJson: mockRuntimeSnapshot,
+        events: []
       });
       return createFakeBrowserRuntimeSession(buildSnapshot());
     },

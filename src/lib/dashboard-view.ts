@@ -32,3 +32,41 @@ export function deriveMemberLabel(sharePackageJson: string): string | undefined 
   }
   return undefined;
 }
+
+// Parse the group package json for its display name + member count. Returns empty
+// fields for malformed json so callers never throw on a bad blob.
+export function deriveGroupSummary(groupPackageJson: string): {
+  keysetName?: string;
+  memberCount?: number;
+} {
+  try {
+    const group = JSON.parse(groupPackageJson) as { group_name?: unknown; members?: unknown };
+    return {
+      keysetName: typeof group.group_name === 'string' ? group.group_name : undefined,
+      memberCount: Array.isArray(group.members) ? group.members.length : undefined,
+    };
+  } catch {
+    return {};
+  }
+}
+
+type ExportSummaryProfile = {
+  share_package_json: string;
+  group_package_json: string;
+  relays: string[];
+};
+
+// Build the export-modal summary line: "Share #1 · Keyset: … · N relays · M peers".
+// Tolerant of malformed package json (the parse helpers degrade to undefined).
+export function deriveExportSummary(profile: ExportSummaryProfile | null): string {
+  if (!profile) return '';
+  const member = deriveMemberLabel(profile.share_package_json);
+  const { keysetName, memberCount } = deriveGroupSummary(profile.group_package_json);
+  const parts = [
+    member,
+    keysetName ? `Keyset: ${keysetName}` : undefined,
+    `${profile.relays.length} ${profile.relays.length === 1 ? 'relay' : 'relays'}`,
+    typeof memberCount === 'number' ? `${memberCount} peers` : undefined,
+  ].filter(Boolean);
+  return parts.join(' · ');
+}

@@ -17,6 +17,7 @@ import {
   updateRuntimePeerPolicyOverrideOnNode,
   type DecodedOnboardingProfile,
   type NodeWithEvents,
+  type ObservabilityEvent,
   type RuntimeMetadata,
   type RuntimePeerPermissionState,
   type RuntimeReadiness,
@@ -60,10 +61,15 @@ export type BrowserRuntimeSessionSnapshot = {
   peerPermissionStates: RuntimePeerPermissionState[];
   signerSettings: SignerSettings;
   runtimeSnapshotJson: string;
+  // Structured runtime events retained host-side (domain/event/level/ts) so the
+  // dashboard log can render type tags and a domain filter. The formatted string
+  // `runtime_log_lines` is kept alongside for the plain-text fallback.
+  events: ObservabilityEvent[];
 };
 
 export type BrowserRuntimeSession = {
   collectLogs: () => string[];
+  clearLogs: () => void;
   read: () => BrowserRuntimeSessionSnapshot;
   refreshPeers: () => Promise<BrowserRuntimeSessionSnapshot>;
   updatePeerPolicyOverride: (
@@ -172,14 +178,29 @@ async function waitForNonceSnapshot(node: NodeWithEvents) {
   return lastSnapshot ?? getRuntimeSnapshot(node);
 }
 
+// A payload qualifies as a structured runtime event when it carries the
+// observability shape (level + domain); other emissions (raw bifrost messages,
+// errors) only contribute the formatted string fallback.
+function asObservabilityEvent(payload: unknown): ObservabilityEvent | null {
+  if (!payload || typeof payload !== 'object') return null;
+  const record = payload as Record<string, unknown>;
+  if (typeof record.domain !== 'string' || typeof record.level !== 'string') return null;
+  return payload as ObservabilityEvent;
+}
+
 function attachLogBuffer(node: NodeWithEvents) {
   const lines: string[] = [];
+  const events: ObservabilityEvent[] = [];
 
   const onMessage = (payload: unknown) => {
     lines.push(formatLogLine('info', payload));
+    const event = asObservabilityEvent(payload);
+    if (event) events.push(event);
   };
   const onError = (payload: unknown) => {
     lines.push(formatLogLine('error', payload));
+    const event = asObservabilityEvent(payload);
+    if (event) events.push(event);
   };
 
   node.on('message', onMessage);
@@ -187,6 +208,11 @@ function attachLogBuffer(node: NodeWithEvents) {
 
   return {
     collect: () => [...lines],
+    collectEvents: () => [...events],
+    clear: () => {
+      lines.length = 0;
+      events.length = 0;
+    },
     detach: () => {
       if (typeof node.off === 'function') {
         node.off('message', onMessage);
@@ -199,7 +225,10 @@ function attachLogBuffer(node: NodeWithEvents) {
   };
 }
 
-function buildSessionSnapshot(node: NodeWithEvents): BrowserRuntimeSessionSnapshot {
+function buildSessionSnapshot(
+  node: NodeWithEvents,
+  events: ObservabilityEvent[]
+): BrowserRuntimeSessionSnapshot {
   const runtimeStatus = getRuntimeStatus(node);
   return {
     runtimeStatus,
@@ -207,7 +236,8 @@ function buildSessionSnapshot(node: NodeWithEvents): BrowserRuntimeSessionSnapsh
     readiness: getRuntimeReadiness(node),
     peerPermissionStates: getRuntimePeerPermissionStatesFromNode(node),
     signerSettings: normalizeSignerSettings(getRuntimeConfigFromNode(node)),
-    runtimeSnapshotJson: JSON.stringify(getRuntimeSnapshot(node))
+    runtimeSnapshotJson: JSON.stringify(getRuntimeSnapshot(node)),
+    events
   };
 }
 
@@ -272,25 +302,28 @@ function createSession(node: NodeWithEvents, logs: ReturnType<typeof attachLogBu
     collectLogs() {
       return logs.collect();
     },
+    clearLogs() {
+      logs.clear();
+    },
     read() {
-      return buildSessionSnapshot(node);
+      return buildSessionSnapshot(node, logs.collectEvents());
     },
     async refreshPeers() {
       refreshAllPeersOnNode(node);
       await new Promise((resolve) => setTimeout(resolve, 250));
-      return buildSessionSnapshot(node);
+      return buildSessionSnapshot(node, logs.collectEvents());
     },
     async updatePeerPolicyOverride(pubkey, patch) {
       await updateRuntimePeerPolicyOverrideOnNode(node, pubkey, patch);
-      return buildSessionSnapshot(node);
+      return buildSessionSnapshot(node, logs.collectEvents());
     },
     async clearPeerPolicyOverrides() {
       await clearRuntimePeerPolicyOverridesOnNode(node);
-      return buildSessionSnapshot(node);
+      return buildSessionSnapshot(node, logs.collectEvents());
     },
     updateConfig(settings) {
       updateRuntimeConfigOnNode(node, settings);
-      return buildSessionSnapshot(node);
+      return buildSessionSnapshot(node, logs.collectEvents());
     },
     onOnboardComplete(cb) {
       const handler = (payload: unknown) => {
@@ -317,7 +350,7 @@ function createSession(node: NodeWithEvents, logs: ReturnType<typeof attachLogBu
         logs.detach();
         stopSignerNode(node);
       }
-      return buildSessionSnapshot(node);
+      return buildSessionSnapshot(node, logs.collectEvents());
     }
   };
 }

@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { nip19 } from 'nostr-tools';
 
-import { deriveMemberLabel, toDashboardKey } from '../../src/lib/dashboard-view';
+import {
+  deriveExportSummary,
+  deriveGroupSummary,
+  deriveMemberLabel,
+  toDashboardKey,
+} from '../../src/lib/dashboard-view';
 
 describe('toDashboardKey', () => {
   it('encodes a valid 64-hex x-only pubkey to npub + truncated display + hex', () => {
@@ -38,5 +43,44 @@ describe('deriveMemberLabel', () => {
     expect(deriveMemberLabel('not json')).toBeUndefined();
     expect(deriveMemberLabel(JSON.stringify({ seckey: 'aa' }))).toBeUndefined();
     expect(deriveMemberLabel(JSON.stringify({ idx: 'one' }))).toBeUndefined();
+  });
+});
+
+describe('deriveGroupSummary', () => {
+  it('reads the keyset name and member count from the group package json', () => {
+    const json = JSON.stringify({ group_name: 'Treasury', members: [{}, {}, {}] });
+    expect(deriveGroupSummary(json)).toEqual({ keysetName: 'Treasury', memberCount: 3 });
+  });
+
+  it('degrades to empty fields for malformed json or missing/typed-wrong fields', () => {
+    expect(deriveGroupSummary('not json')).toEqual({});
+    expect(deriveGroupSummary(JSON.stringify({ group_name: 5, members: 'nope' }))).toEqual({
+      keysetName: undefined,
+      memberCount: undefined,
+    });
+  });
+});
+
+describe('deriveExportSummary', () => {
+  it('joins member, keyset, relays, and peer count into one line', () => {
+    const summary = deriveExportSummary({
+      share_package_json: JSON.stringify({ idx: 1 }),
+      group_package_json: JSON.stringify({ group_name: 'Treasury', members: [{}, {}, {}] }),
+      relays: ['wss://a', 'wss://b'],
+    });
+    expect(summary).toBe('Share #1 · Keyset: Treasury · 2 relays · 3 peers');
+  });
+
+  it('singularizes a single relay and omits parts derived from malformed json', () => {
+    const summary = deriveExportSummary({
+      share_package_json: 'not json',
+      group_package_json: 'not json',
+      relays: ['wss://only'],
+    });
+    expect(summary).toBe('1 relay');
+  });
+
+  it('returns an empty string for a null profile', () => {
+    expect(deriveExportSummary(null)).toBe('');
   });
 });

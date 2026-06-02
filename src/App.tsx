@@ -43,6 +43,7 @@ import {
   WelcomeDeleteModal,
   WelcomeUnlockModal,
   CRITICAL_E2E_TEST_IDS,
+  observabilityEventsToEventRows,
   type DashboardKeyModel,
   type EventLogRowModel,
   type PeerPolicy,
@@ -53,7 +54,8 @@ import {
 } from 'igloo-ui';
 import { pingRelay, shortProfileId } from 'igloo-shared';
 import * as nip49 from 'nostr-tools/nip49';
-import { deriveMemberLabel, toDashboardKey } from './lib/dashboard-view';
+import { deriveExportSummary, deriveMemberLabel, toDashboardKey } from './lib/dashboard-view';
+import { saveTextToFile } from './lib/file-save';
 
 import { StoreProvider, useStore } from './lib/store';
 
@@ -224,7 +226,11 @@ function derivePwaPeers(
       pubkey: normalized,
       send: existing?.send ?? true,
       receive: existing?.receive ?? true,
-      state: peer.can_sign ? 'warning' : peer.online ? 'online' : peer.known ? 'idle' : 'offline',
+      // Match the igloo-ui runtime adapter: a reachable peer is online/idle, a
+      // known-but-unreachable peer warns, everything else is offline. (The prior
+      // mapping flagged sign-ready peers as 'warning', contradicting the
+      // 'sign-ready' status label and the shared adapter.)
+      state: peer.online ? (peer.can_sign ? 'online' : 'idle') : peer.known ? 'warning' : 'offline',
       statusLabel: peer.can_sign ? 'sign-ready' : peer.online ? 'online' : peer.known ? 'known' : 'offline',
       lastSeen: peer.last_seen,
       incomingAvailable: peer.incoming_available,
@@ -266,27 +272,6 @@ function deriveRuntimeSummaryLabel(runtimeSnapshot: ReturnType<typeof useStore>[
 
 // Summary line for the export modal, e.g.
 // "Share #1 · Keyset: My Signing Key · 2 relays · 3 peers".
-function deriveExportSummary(profile: ReturnType<typeof useStore>['profiles'][number] | null): string {
-  if (!profile) return '';
-  const member = deriveMemberLabel(profile.share_package_json);
-  let keysetName: string | undefined;
-  let memberCount: number | undefined;
-  try {
-    const group = JSON.parse(profile.group_package_json) as { group_name?: unknown; members?: unknown };
-    if (typeof group.group_name === 'string') keysetName = group.group_name;
-    if (Array.isArray(group.members)) memberCount = group.members.length;
-  } catch {
-    // ignore malformed group package json
-  }
-  const parts = [
-    member,
-    keysetName ? `Keyset: ${keysetName}` : undefined,
-    `${profile.relays.length} ${profile.relays.length === 1 ? 'relay' : 'relays'}`,
-    typeof memberCount === 'number' ? `${memberCount} peers` : undefined,
-  ].filter(Boolean);
-  return parts.join(' · ');
-}
-
 function deriveSignerDashboardView(
   profile: ReturnType<typeof useStore>['profiles'][number] | null,
   runtimeSnapshot: ReturnType<typeof useStore>['runtimeSnapshot'],
@@ -318,12 +303,17 @@ function deriveSignerDashboardView(
       pubkey: peer.pubkey,
       state: peer.state,
       statusLabel: peer.statusLabel ?? peer.state,
+      lastSeenLabel: peer.lastSeen ? `last seen ${new Date(peer.lastSeen * 1000).toLocaleTimeString()}` : undefined,
       incomingAvailable: peer.incomingAvailable,
       outgoingAvailable: peer.outgoingAvailable,
       outgoingSpent: peer.outgoingSpent,
     })),
     pendingOperationRows: derivePendingOperations(runtimeSnapshot?.runtime_status),
-    eventRows: toPwaEventRows(runtimeSnapshot?.runtime_log_lines),
+    // Prefer structured events (domain/event tags + filter); fall back to the
+    // formatted log lines for sessions that only surface plain strings.
+    eventRows: runtimeSnapshot?.events?.length
+      ? observabilityEventsToEventRows(runtimeSnapshot.events)
+      : toPwaEventRows(runtimeSnapshot?.runtime_log_lines),
   };
 }
 
@@ -1420,6 +1410,7 @@ function AppShell() {
                 primaryActionVariant={store.runtimeSnapshot?.active ? 'destructive' : 'success'}
                 onRefreshPeers={() => void run(() => store.refreshSigner())}
                 refreshPeersDisabled={!store.runtimeSnapshot?.active}
+                onClearLogs={() => void run(() => store.clearLogs())}
               />
             </div>
           ) : null}
@@ -1428,6 +1419,7 @@ function AppShell() {
             <div role="tabpanel" id="operator-panel-permissions" aria-labelledby="operator-tab-permissions">
               <OperatorPermissionsPanel
                 view={policyView}
+                showPeerSummary={false}
                 onRefresh={() => void run(() => store.refreshSigner())}
                 onClearAllPeerPermissions={() => void run(() => store.clearPeerPolicies())}
                 onPeerPolicyOverrideChange={(pubkey, direction, method, value) =>
@@ -1652,13 +1644,9 @@ function AppShell() {
         }}
         onDownload={(value) => {
           const filename = exportModalFormat === 'bfshare' ? 'igloo-share.bfshare.txt' : 'igloo-profile.bfprofile.txt';
-          const blob = new Blob([value], { type: 'text/plain' });
-          const url = URL.createObjectURL(blob);
-          const anchor = document.createElement('a');
-          anchor.href = url;
-          anchor.download = filename;
-          anchor.click();
-          URL.revokeObjectURL(url);
+          // Route through the confirmed-write save helper (File System Access API
+          // with an anchor-download fallback), matching the distribution flow.
+          void saveTextToFile(filename, value);
         }}
       />
       <ConfirmModal

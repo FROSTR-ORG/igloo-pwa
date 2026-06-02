@@ -331,6 +331,7 @@ export function toRuntimeSnapshot(profile: PwaProfile, session: BrowserRuntimeSe
     runtime_status: snapshot.runtimeStatus,
     readiness: snapshot.readiness,
     peer_permission_states: snapshot.peerPermissionStates.map(toPwaPeerPermissionState),
+    events: snapshot.events ?? [],
     runtime_log_lines:
       logs.length > 0
         ? logs

@@ -1,6 +1,7 @@
 import type {
   BrowserManualPeerPolicyOverride,
   BrowserProfilePackagePayload,
+  ObservabilityEvent,
   SignerSettings as SharedSignerSettings,
 } from 'igloo-shared';
 
@@ -119,6 +120,8 @@ export type PwaRuntimeSnapshot = {
   runtime_status: unknown;
   readiness: unknown;
   peer_permission_states?: PwaPeerPermissionState[];
+  /** Structured runtime events (domain/event/level/ts) for the diagnostics log tags + filter. */
+  events?: ObservabilityEvent[];
   runtime_log_lines: string[];
   runtime_host: {
     profile_id: string;
