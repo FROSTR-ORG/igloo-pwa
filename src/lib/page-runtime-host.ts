@@ -188,19 +188,28 @@ function asObservabilityEvent(payload: unknown): ObservabilityEvent | null {
   return payload as ObservabilityEvent;
 }
 
+// Keep the host-side log buffers bounded so a long-lived signer session does not
+// grow memory without limit; the dashboard only ever renders the recent tail.
+const LOG_BUFFER_LIMIT = 500;
+
+function pushCapped<T>(buffer: T[], value: T) {
+  buffer.push(value);
+  if (buffer.length > LOG_BUFFER_LIMIT) buffer.splice(0, buffer.length - LOG_BUFFER_LIMIT);
+}
+
 function attachLogBuffer(node: NodeWithEvents) {
   const lines: string[] = [];
   const events: ObservabilityEvent[] = [];
 
   const onMessage = (payload: unknown) => {
-    lines.push(formatLogLine('info', payload));
+    pushCapped(lines, formatLogLine('info', payload));
     const event = asObservabilityEvent(payload);
-    if (event) events.push(event);
+    if (event) pushCapped(events, event);
   };
   const onError = (payload: unknown) => {
-    lines.push(formatLogLine('error', payload));
+    pushCapped(lines, formatLogLine('error', payload));
     const event = asObservabilityEvent(payload);
-    if (event) events.push(event);
+    if (event) pushCapped(events, event);
   };
 
   node.on('message', onMessage);

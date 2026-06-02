@@ -303,7 +303,7 @@ function deriveSignerDashboardView(
       pubkey: peer.pubkey,
       state: peer.state,
       statusLabel: peer.statusLabel ?? peer.state,
-      lastSeenLabel: peer.lastSeen ? `last seen ${new Date(peer.lastSeen * 1000).toLocaleTimeString()}` : undefined,
+      lastSeenLabel: peer.lastSeen ? `last seen ${formatRuntimeTimestamp(peer.lastSeen)}` : undefined,
       incomingAvailable: peer.incomingAvailable,
       outgoingAvailable: peer.outgoingAvailable,
       outgoingSpent: peer.outgoingSpent,
@@ -1410,7 +1410,11 @@ function AppShell() {
                 primaryActionVariant={store.runtimeSnapshot?.active ? 'destructive' : 'success'}
                 onRefreshPeers={() => void run(() => store.refreshSigner())}
                 refreshPeersDisabled={!store.runtimeSnapshot?.active}
-                onClearLogs={() => void run(() => store.clearLogs())}
+                // Clearing the host-side log buffer requires an active session, so
+                // only expose the control while the signer is running.
+                onClearLogs={
+                  store.runtimeSnapshot?.active ? () => void run(() => store.clearLogs()) : undefined
+                }
               />
             </div>
           ) : null}

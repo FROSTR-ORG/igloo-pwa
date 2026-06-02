@@ -112,22 +112,13 @@ export async function refreshSession(current: PwaRuntimeSnapshot | null): Promis
   if (!activeRuntimeSession || activeRuntimeProfileId !== current.profile.id) {
     throw new Error('No active browser signer session is attached to this profile.');
   }
-  const refreshed = await activeRuntimeSession.refreshPeers();
-  const runtimeProfile = toRuntimeProfile(current.profile, refreshed);
+  await activeRuntimeSession.refreshPeers();
+  // Build through the single snapshot path so peer_permission_states/events stay
+  // in sync; just annotate the log tail with the refresh marker.
+  const snapshot = toRuntimeSnapshot(current.profile, activeRuntimeSession, true);
   return {
-    active: true,
-    profile: runtimeProfile,
-    runtime_status: refreshed.runtimeStatus,
-    readiness: refreshed.readiness,
-    events: refreshed.events,
-    runtime_log_lines: [...activeRuntimeSession.collectLogs(), '[info] session refresh completed'],
-    runtime_host: {
-      profile_id: runtimeProfile.id,
-      mode: 'browser',
-      log_source: 'In-memory session logs',
-      started_at: Math.floor(Date.now() / 1000),
-      signer_pubkey: refreshed.metadata.share_public_key,
-    },
+    ...snapshot,
+    runtime_log_lines: [...snapshot.runtime_log_lines, '[info] session refresh completed'],
   };
 }
 
