@@ -1,5 +1,7 @@
 import {
   createBrowserOnboardingConnection,
+  createProfilePackagePair,
+  decodeBfProfilePackage,
   finalizeConnectedBrowserProfile,
   finalizeRotatedBrowserProfile,
   importBrowserProfilePackage,
@@ -142,4 +144,19 @@ export async function finalizeOnboardedDevice(input: OnboardFinalizeInput): Prom
     existingProfileIds: input.existingProfileIds,
   });
   return toPwaProfile(finalized);
+}
+
+// Re-encrypt a stored profile's package with a fresh export password. The stored
+// bfprofile/bfshare strings are encrypted with the profile's local password; we
+// decode with that, then re-encode the payload under the export password so the
+// exported backup is portable and independent of the local password.
+export async function exportEncryptedPackage(input: {
+  profileString: string;
+  storedPassword: string;
+  exportPassword: string;
+  format: 'bfprofile' | 'bfshare';
+}): Promise<string> {
+  const payload = await decodeBfProfilePackage(input.profileString, input.storedPassword);
+  const pair = await createProfilePackagePair(payload, input.exportPassword);
+  return input.format === 'bfprofile' ? pair.profileString : pair.shareString;
 }

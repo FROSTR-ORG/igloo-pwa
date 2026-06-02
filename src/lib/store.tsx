@@ -85,6 +85,11 @@ type AppState = PwaPersistedState & {
   removeRecoverSource: (index: number) => void;
   recoverKeyFromShares: () => Promise<{ nsec: string; signingKeyHex: string }>;
   copyProfilePackage: (profileId: string, format: 'bfprofile' | 'bfshare') => Promise<void>;
+  exportEncryptedPackage: (
+    profileId: string,
+    format: 'bfprofile' | 'bfshare',
+    exportPassword: string,
+  ) => Promise<string>;
   deleteProfile: (profileId: string) => void;
   updatePeerPolicy: (
     pubkey: string,
@@ -1394,6 +1399,21 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           throw new Error('Clipboard access is unavailable in this browser.');
         }
         await navigator.clipboard.writeText(packageText);
+      },
+      async exportEncryptedPackage(profileId, format, exportPassword) {
+        const profile = state.profiles.find((entry) => entry.id === profileId);
+        if (!profile) {
+          throw new Error('Select a profile first.');
+        }
+        if (!profile.profile_string.trim()) {
+          throw new Error('No package is available to export for this profile.');
+        }
+        return await adapter.exportEncryptedPackage({
+          profileString: profile.profile_string,
+          storedPassword: profile.stored_password,
+          exportPassword,
+          format,
+        });
       },
       deleteProfile(profileId) {
         void adapter.disposeRuntimeSessionForProfile(profileId);

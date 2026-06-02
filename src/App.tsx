@@ -30,6 +30,7 @@ import {
   PageBackLink,
   PasswordField,
   ProfileConfirmationCard,
+  ExportPackageModal,
   PublicFocusFooter,
   PublicTaskShell,
   PublicTaskTitle,
@@ -260,6 +261,29 @@ function deriveRuntimeSummaryLabel(runtimeSnapshot: ReturnType<typeof useStore>[
     return 'Signer Running (Degraded)';
   }
   return 'Signer Running';
+}
+
+// Summary line for the export modal, e.g.
+// "Share #1 · Keyset: My Signing Key · 2 relays · 3 peers".
+function deriveExportSummary(profile: ReturnType<typeof useStore>['profiles'][number] | null): string {
+  if (!profile) return '';
+  const member = deriveMemberLabel(profile.share_package_json);
+  let keysetName: string | undefined;
+  let memberCount: number | undefined;
+  try {
+    const group = JSON.parse(profile.group_package_json) as { group_name?: unknown; members?: unknown };
+    if (typeof group.group_name === 'string') keysetName = group.group_name;
+    if (Array.isArray(group.members)) memberCount = group.members.length;
+  } catch {
+    // ignore malformed group package json
+  }
+  const parts = [
+    member,
+    keysetName ? `Keyset: ${keysetName}` : undefined,
+    `${profile.relays.length} ${profile.relays.length === 1 ? 'relay' : 'relays'}`,
+    typeof memberCount === 'number' ? `${memberCount} peers` : undefined,
+  ].filter(Boolean);
+  return parts.join(' · ');
 }
 
 function deriveSignerDashboardView(
@@ -565,6 +589,24 @@ function AppShell() {
     [],
   );
 
+  // Export package modal state (Phase B step 4): which format is open, the
+  // re-encrypted result (entry → complete), and busy/error.
+  const [exportModalFormat, setExportModalFormat] = React.useState<'bfprofile' | 'bfshare' | null>(null);
+  const [exportResult, setExportResult] = React.useState<string | null>(null);
+  const [exportBusy, setExportBusy] = React.useState(false);
+  const [exportError, setExportError] = React.useState<string | null>(null);
+
+  const openExportModal = React.useCallback((format: 'bfprofile' | 'bfshare') => {
+    setExportModalFormat(format);
+    setExportResult(null);
+    setExportError(null);
+  }, []);
+  const closeExportModal = React.useCallback(() => {
+    setExportModalFormat(null);
+    setExportResult(null);
+    setExportError(null);
+  }, []);
+
   // DEV-only seam: lets the visual harness render the recover-success screen with a
   // FAKE nsec injected on the window. Stripped from production builds (guarded on
   // import.meta.env.DEV) and never touches persistence or the real reconstruction path.
@@ -577,6 +619,21 @@ function AppShell() {
   }, [recoveredKey]);
 
   const selectedProfile = store.profiles.find((profile) => profile.id === store.selectedProfileId) ?? null;
+  const runExport = React.useCallback(
+    (exportPassword: string) => {
+      if (!selectedProfile || !exportModalFormat) return;
+      setExportBusy(true);
+      setExportError(null);
+      void store
+        .exportEncryptedPackage(selectedProfile.id, exportModalFormat, exportPassword)
+        .then((value) => setExportResult(value))
+        .catch((error: unknown) =>
+          setExportError(error instanceof Error ? error.message : 'Export failed.'),
+        )
+        .finally(() => setExportBusy(false));
+    },
+    [selectedProfile, exportModalFormat, store],
+  );
   const welcomeUnlockProfile = React.useMemo<WelcomeReturningProfileModel | null>(() => {
     const profile = store.profiles.find((entry) => entry.id === welcomeUnlockProfileId);
     return profile ? deriveWelcomeReturningProfile(profile) : null;
@@ -1440,11 +1497,7 @@ function AppShell() {
                     testId: CRITICAL_E2E_TEST_IDS.settingsCopyProfile,
                     variant: 'secondary',
                     disabled: !selectedProfile,
-                    onAction: () =>
-                      void run(async () => {
-                        if (!selectedProfile) return;
-                        await store.copyProfilePackage(selectedProfile.id, 'bfprofile');
-                      }),
+                    onAction: () => openExportModal('bfprofile'),
                   },
                   {
                     title: 'Export Share',
@@ -1453,11 +1506,7 @@ function AppShell() {
                     testId: CRITICAL_E2E_TEST_IDS.settingsCopyShare,
                     variant: 'secondary',
                     disabled: !selectedProfile,
-                    onAction: () =>
-                      void run(async () => {
-                        if (!selectedProfile) return;
-                        await store.copyProfilePackage(selectedProfile.id, 'bfshare');
-                      }),
+                    onAction: () => openExportModal('bfshare'),
                   },
                   {
                     title: 'Logout',
@@ -1553,6 +1602,34 @@ function AppShell() {
         profile={welcomeDeleteProfile}
         onConfirm={confirmWelcomeDelete}
         onClose={closeWelcomeDelete}
+      />
+      <ExportPackageModal
+        open={Boolean(exportModalFormat)}
+        onClose={closeExportModal}
+        title={exportModalFormat === 'bfshare' ? 'Export Share' : 'Export Profile'}
+        description={
+          exportModalFormat === 'bfshare'
+            ? "Create a password-protected bfshare package. You'll need this password to restore on another device."
+            : "Create an encrypted backup of your share and configuration. You'll need this password to restore on another device."
+        }
+        summary={deriveExportSummary(selectedProfile)}
+        result={exportResult}
+        busy={exportBusy}
+        error={exportError}
+        onExport={runExport}
+        onCopy={(value) => {
+          if (navigator.clipboard?.writeText) void navigator.clipboard.writeText(value);
+        }}
+        onDownload={(value) => {
+          const filename = exportModalFormat === 'bfshare' ? 'igloo-share.bfshare.txt' : 'igloo-profile.bfprofile.txt';
+          const blob = new Blob([value], { type: 'text/plain' });
+          const url = URL.createObjectURL(blob);
+          const anchor = document.createElement('a');
+          anchor.href = url;
+          anchor.download = filename;
+          anchor.click();
+          URL.revokeObjectURL(url);
+        }}
       />
       {store.activeView === 'landing' ? renderLanding() : null}
       {store.activeView === 'create-generate' ? renderCreateGenerate() : null}
