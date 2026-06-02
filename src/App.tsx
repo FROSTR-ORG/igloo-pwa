@@ -11,6 +11,7 @@ import {
   CardTitle,
   ContentCard,
   CreateFlowDistributionSection,
+  ConfirmModal,
   CreateFlowGenerateCard,
   CreateFlowProfileSetup,
   CreateFlowShareSelection,
@@ -607,6 +608,10 @@ function AppShell() {
     setExportError(null);
   }, []);
 
+  // Unsaved-changes guard for the Settings tab: tracks the pending nav target while
+  // the confirm modal is open.
+  const [pendingSettingsNav, setPendingSettingsNav] = React.useState<'signer' | 'permissions' | 'settings' | null>(null);
+
   // DEV-only seam: lets the visual harness render the recover-success screen with a
   // FAKE nsec injected on the window. Stripped from production builds (guarded on
   // import.meta.env.DEV) and never touches persistence or the real reconstruction path.
@@ -634,6 +639,7 @@ function AppShell() {
     },
     [selectedProfile, exportModalFormat, store],
   );
+
   const welcomeUnlockProfile = React.useMemo<WelcomeReturningProfileModel | null>(() => {
     const profile = store.profiles.find((entry) => entry.id === welcomeUnlockProfileId);
     return profile ? deriveWelcomeReturningProfile(profile) : null;
@@ -654,6 +660,30 @@ function AppShell() {
     selectedProfile?.relays,
     selectedProfile?.signer_settings,
   ]);
+
+  // The Settings form is dirty when the draft diverges from the saved profile
+  // (transient newRelayUrl is ignored).
+  const settingsDirty = React.useMemo(() => {
+    const saved = buildOperatorSettingsDraft(selectedProfile);
+    return (
+      operatorSettingsDraft.signerName !== saved.signerName ||
+      JSON.stringify(operatorSettingsDraft.relays) !== JSON.stringify(saved.relays) ||
+      JSON.stringify(operatorSettingsDraft.signerSettings) !== JSON.stringify(saved.signerSettings)
+    );
+  }, [operatorSettingsDraft, selectedProfile]);
+
+  // Guarded dashboard-tab nav: leaving the Settings tab with unsaved edits opens
+  // the Unsaved-Changes confirm modal instead of navigating immediately.
+  const requestDashboardTab = React.useCallback(
+    (tab: 'signer' | 'permissions' | 'settings') => {
+      if (store.activeDashboardTab === 'settings' && tab !== 'settings' && settingsDirty) {
+        setPendingSettingsNav(tab);
+        return;
+      }
+      store.setDashboardTab(tab);
+    },
+    [store, settingsDirty],
+  );
 
   const run = React.useCallback(async (action: () => Promise<void> | void) => {
     try {
@@ -1356,7 +1386,7 @@ function AppShell() {
               aria-selected={active}
               data-testid={item.testId}
               className={active ? 'igloo-dashboard-nav-link is-active' : 'igloo-dashboard-nav-link'}
-              onClick={() => store.setDashboardTab(item.key)}
+              onClick={() => requestDashboardTab(item.key)}
             >
               {item.label}
             </button>
@@ -1630,6 +1660,20 @@ function AppShell() {
           anchor.click();
           URL.revokeObjectURL(url);
         }}
+      />
+      <ConfirmModal
+        isOpen={Boolean(pendingSettingsNav)}
+        variant="warning"
+        title="Discard unsaved changes?"
+        message="You have unsaved changes in Settings. Close without saving?"
+        confirmLabel="Discard"
+        cancelLabel="Keep editing"
+        onConfirm={() => {
+          setOperatorSettingsDraft(buildOperatorSettingsDraft(selectedProfile));
+          if (pendingSettingsNav) store.setDashboardTab(pendingSettingsNav);
+          setPendingSettingsNav(null);
+        }}
+        onCancel={() => setPendingSettingsNav(null)}
       />
       {store.activeView === 'landing' ? renderLanding() : null}
       {store.activeView === 'create-generate' ? renderCreateGenerate() : null}
