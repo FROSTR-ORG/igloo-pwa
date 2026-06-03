@@ -55,7 +55,16 @@ export default defineConfig(() => ({
   server: {
     host: '0.0.0.0',
     port: 1430,
-    strictPort: true
+    strictPort: true,
+    fs: {
+      // igloo-shared / igloo-ui resolve to sibling-submodule sources outside this
+      // project root (see vite.resolve.ts). Vite's workspace-root auto-detection
+      // stops at the first `.git` it finds, and `repos/igloo-pwa/.git` is a
+      // submodule gitdir *file*, so it pins the allow list to repos/igloo-pwa and
+      // blocks those sibling sources ("outside of Vite serving allow list").
+      // Allow the monorepo root so the shared submodule sources are served.
+      allow: [path.resolve(__dirname, '../..')]
+    }
   },
   clearScreen: false
 }));
