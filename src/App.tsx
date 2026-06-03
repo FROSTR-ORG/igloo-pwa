@@ -44,6 +44,7 @@ import {
   WelcomeUnlockModal,
   CRITICAL_E2E_TEST_IDS,
   observabilityEventsToEventRows,
+  passwordManagerOptOutProps,
   type DashboardKeyModel,
   type EventLogRowModel,
   type PeerPolicy,
@@ -1245,6 +1246,7 @@ function AppShell() {
                 Package Password
                 <input
                   type="password"
+                  {...passwordManagerOptOutProps}
                   data-testid={CRITICAL_E2E_TEST_IDS.rotationPasswordInput}
                   value={store.drafts.rotateConnectForm.password}
                   onChange={(event) => store.updateRotateConnectForm('password', event.target.value)}
