@@ -27,6 +27,15 @@ export default defineConfig(({ command }) => ({
     host: '0.0.0.0',
     port: 1430,
     strictPort: true,
+    fs: {
+      // The igloo-ui styles are aliased to ../igloo-ui/dist/styles.css, whose
+      // @font-face references the vendored ShareTechMono font under
+      // ../igloo-ui/dist/fonts/ (Bucket H). That path is a sibling package
+      // outside the pwa root, so the dev server 403s it ("outside of Vite
+      // serving allow list") and the font silently falls back. Allow serving
+      // from the repos/ parent so the sibling igloo-ui assets resolve.
+      allow: [path.resolve(__dirname, '..')]
+    },
     headers: {
       'Cross-Origin-Opener-Policy': 'same-origin',
       'Cross-Origin-Embedder-Policy': 'require-corp',
