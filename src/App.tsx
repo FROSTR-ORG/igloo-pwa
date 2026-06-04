@@ -11,7 +11,7 @@ import {
   CardTitle,
   ContentCard,
   CreateFlowDistributionSection,
-  ConfirmModal,
+  ConfirmDialog,
   CreateFlowGenerateCard,
   CreateFlowProfileSetup,
   CreateFlowShareSelection,
@@ -53,12 +53,18 @@ import {
   type SignerDashboardViewModel,
   type WelcomeReturningProfileModel,
 } from 'igloo-ui';
-import { pingRelay, shortProfileId } from 'igloo-shared';
+import {
+  pingRelay,
+  shortProfileId,
+  type RuntimeReadiness,
+  type RuntimeStatusSummary,
+} from 'igloo-shared';
 import * as nip49 from 'nostr-tools/nip49';
-import { deriveExportSummary, deriveMemberLabel, toDashboardKey } from './lib/dashboard-view';
+import { deriveExportSummary, toDashboardKey } from './lib/dashboard-view';
 import { saveTextToFile } from './lib/file-save';
 
 import { StoreProvider, useStore } from './lib/store';
+import type { PwaDistributionActionResult, PwaGeneratedShare } from './lib/types';
 
 function hexToBytes(hex: string): Uint8Array {
   const normalized = hex.length % 2 === 0 ? hex : `0${hex}`;
@@ -180,7 +186,7 @@ function derivePwaPeers(
       respond: { sign: boolean };
     };
   }>,
-  runtimeStatus: unknown,
+  runtimeStatus: RuntimeStatusSummary | null | undefined,
 ): PeerPolicy[] {
   const base = new Map<string, PeerPolicy>();
 
@@ -200,7 +206,7 @@ function derivePwaPeers(
     });
   }
 
-  const summary = (runtimeStatus ?? null) as PwaRuntimeStatus | null;
+  const summary = runtimeStatus;
   for (const [index, peer] of (summary?.metadata?.peers ?? []).entries()) {
     const normalized = peer.toLowerCase();
     const existing = base.get(normalized);
@@ -264,7 +270,7 @@ function formatRuntimeTimestamp(value: number | null) {
 
 function deriveRuntimeSummaryLabel(runtimeSnapshot: ReturnType<typeof useStore>['runtimeSnapshot']) {
   if (!runtimeSnapshot?.active) return 'Signer Stopped';
-  const readiness = (runtimeSnapshot.readiness ?? null) as PwaRuntimeReadiness | null;
+  const readiness = runtimeSnapshot.readiness ?? null;
   if (readiness && (!readiness.sign_ready || !readiness.ecdh_ready || !readiness.restore_complete)) {
     return 'Signer Running (Degraded)';
   }
@@ -289,7 +295,7 @@ function deriveSignerDashboardView(
   return {
     profileName: profile.label || 'Unnamed device',
     thresholdLabel,
-    memberLabel: deriveMemberLabel(profile.share_package_json),
+    memberLabel: Number.isFinite(profile.member_idx) ? `Share #${profile.member_idx}` : undefined,
     publicKeyLabel: profile.group_public_key,
     shareLabel: profile.share_public_key,
     groupKey: toDashboardKey(profile.group_public_key),
@@ -357,15 +363,11 @@ function deriveHeaderTaskLabel(activeView: ReturnType<typeof useStore>['activeVi
 
 function deriveWelcomeReturningProfile(profile: ReturnType<typeof useStore>['profiles'][number]) {
   const groupPackage = parseJsonObject(profile.group_package_json);
-  const sharePackage = parseJsonObject(profile.share_package_json);
   const threshold = typeof groupPackage?.threshold === 'number' ? groupPackage.threshold : 2;
   const memberCount = Array.isArray(groupPackage?.members) ? groupPackage.members.length : 3;
-  const memberIdx =
-    typeof sharePackage?.idx === 'number'
-      ? sharePackage.idx
-      : typeof sharePackage?.idx === 'string'
-        ? Number.parseInt(sharePackage.idx, 10)
-        : 0;
+  // `member_idx` is public profile metadata; the raw share package json (with
+  // its secret seckey) is no longer persisted on the profile record.
+  const memberIdx = profile.member_idx;
 
   return {
     id: profile.id,
@@ -801,7 +803,7 @@ function AppShell() {
               groupName={store.drafts.createForm.groupName}
               threshold={store.drafts.createForm.threshold}
               count={store.drafts.createForm.count}
-              privateKey={store.drafts.createForm.privateKey}
+              privateKey={store.draftSecrets.createFormPrivateKey}
               onChangeForm={(field, value) => store.updateCreateForm(field, value)}
               onGenerate={() => void run(() => store.generateKeyset())}
               onBack={goToLanding}
@@ -836,9 +838,9 @@ function AppShell() {
                 id: profile.id,
                 label: `${profile.label || 'Unnamed device'} (${shortProfileId(profile.id)})`,
               }))}
-              rotationSources={store.drafts.rotationForm.sources.map((source) => ({
+              rotationSources={store.drafts.rotationForm.sources.map((source, index) => ({
                 packageText: source.packageText,
-                packagePassword: source.password,
+                packagePassword: store.draftSecrets.rotationSources[index] ?? '',
               }))}
               onChangeSourceProfile={(profileId) => store.updateRotationForm('sourceProfileId', profileId)}
               onChangeRotationSource={(index, field, value) =>
@@ -856,7 +858,7 @@ function AppShell() {
   }
 
   function renderCreateSelectShare() {
-    if (!store.generatedKeyset) return null;
+    if (!store.pendingKeyset) return null;
     return (
       <>
         <PublicTaskShell>
@@ -866,14 +868,14 @@ function AppShell() {
             description="Choose which share stays on this device. The group public key identifies the shared signer for every device."
           />
           <CreateFlowShareSelection
-            shares={store.generatedKeyset.shares}
+            shares={store.pendingKeyset.shares}
             selectedMemberIdx={store.selectedGeneratedShareIdx}
-            keysetName={store.generatedKeyset.group_name}
-            groupPublicKey={store.generatedKeyset.group_public_key}
+            keysetName={store.pendingKeyset.group_name}
+            groupPublicKey={store.pendingKeyset.group_public_key}
             onSelectShare={(memberIdx) => store.selectGeneratedShare(memberIdx)}
             onCopyGroupPublicKey={() => {
               if (navigator.clipboard?.writeText) {
-                void navigator.clipboard.writeText(store.generatedKeyset?.group_public_key ?? '');
+                void navigator.clipboard.writeText(store.pendingKeyset?.group_public_key ?? '');
               }
             }}
             onAction={() => void run(() => store.continueToSaveProfile())}
@@ -886,7 +888,7 @@ function AppShell() {
   }
 
   function renderCreateSaveProfile() {
-    if (!store.generatedKeyset) return null;
+    if (!store.pendingKeyset) return null;
     return (
       <>
         <PublicTaskShell>
@@ -899,13 +901,13 @@ function AppShell() {
             draft={{
               label: store.drafts.profileForm.label,
               relayUrls: store.drafts.profileForm.relayUrls,
-              primarySecret: store.drafts.profileForm.password,
-              secondarySecret: store.drafts.profileForm.confirmPassword,
+              primarySecret: store.draftSecrets.profileFormPassword,
+              secondarySecret: store.draftSecrets.profileFormConfirm,
             }}
             actionLabel="Next Step"
             onLabelChange={(value) => store.updateProfileForm('label', value)}
-            onPrimarySecretChange={(value) => store.updateProfileForm('password', value)}
-            onSecondarySecretChange={(value) => store.updateProfileForm('confirmPassword', value)}
+            onPrimarySecretChange={(value) => store.updateProfileFormPassword('password', value)}
+            onSecondarySecretChange={(value) => store.updateProfileFormPassword('confirmPassword', value)}
             onRelaysChange={(relays) => store.updateProfileForm('relayUrls', relays.join('\n'))}
             onPingRelay={(url) => pingRelay(url)}
             onAction={() => void run(() => store.acceptGeneratedProfile())}
@@ -918,9 +920,9 @@ function AppShell() {
   }
 
   function renderCreateDistribute() {
-    if (!store.generatedKeyset || !store.distributionSession || !selectedProfile) return null;
+    if (!store.pendingKeyset || !store.distributionSession || !selectedProfile) return null;
     const session = store.distributionSession;
-    const remainingShares = store.generatedKeyset.shares.filter((share) =>
+    const remainingShares = store.pendingKeyset.shares.filter((share) =>
       session.remaining_member_indices.includes(share.member_idx),
     );
     const distributionResults = Object.fromEntries(
@@ -971,27 +973,36 @@ function AppShell() {
             }
             shares={remainingShares}
             drafts={Object.fromEntries(
-              Object.entries(store.drafts.distributionForms).map(([memberIdx, form]) => [
-                Number(memberIdx),
-                {
-                  label: form.label,
-                  packagePassword: form.password,
-                  confirmPassword: form.confirmPassword,
-                },
-              ]),
+              Object.entries(store.drafts.distributionForms).map(([memberIdx, form]) => {
+                const idx = Number(memberIdx);
+                const passwordSlot = store.draftSecrets.distributionPasswords[idx] ?? {
+                  password: '',
+                  confirmPassword: '',
+                };
+                return [
+                  idx,
+                  {
+                    label: form.label,
+                    packagePassword: passwordSlot.password,
+                    confirmPassword: passwordSlot.confirmPassword,
+                  },
+                ];
+              }),
             )}
             results={distributionResults}
             permissions={store.drafts.distributionPermissions}
             onTogglePermission={(memberIdx, permission, enabled) =>
               void run(() => store.updateDistributionPermission(memberIdx, permission, enabled))
             }
-            onChangeDraft={(memberIdx, field, value) =>
-              store.updateDistributionForm(
-                memberIdx,
-                field === 'packagePassword' ? 'password' : field,
-                value,
-              )
-            }
+            onChangeDraft={(memberIdx, field, value) => {
+              if (field === 'packagePassword') {
+                store.updateDistributionPassword(memberIdx, 'password', value);
+              } else if (field === 'confirmPassword') {
+                store.updateDistributionPassword(memberIdx, 'confirmPassword', value);
+              } else {
+                store.updateDistributionForm(memberIdx, 'label', value);
+              }
+            }}
             onDistribute={(memberIdx, kind) => void run(() => store.distributeShare(memberIdx, kind))}
             onFinish={handleFinishSetup}
             onBack={() => store.setActiveView('create-save-profile')}
@@ -1022,9 +1033,9 @@ function AppShell() {
           <section className="igloo-flow-root">
             <ImportProfileEntry
               profileString={store.drafts.importProfileForm.profileString}
-              password={store.drafts.importProfileForm.password}
+              password={store.draftSecrets.importProfileFormPassword}
               onProfileStringChange={(value) => store.updateImportProfileForm('profileString', value)}
-              onPasswordChange={(value) => store.updateImportProfileForm('password', value)}
+              onPasswordChange={(value) => store.updateImportProfilePassword(value)}
               onNext={() => void run(() => store.loadBfProfile())}
             />
           </section>
@@ -1082,14 +1093,14 @@ function AppShell() {
               draft={{
                 label: store.drafts.importSaveForm.label,
                 relayUrls: store.drafts.importSaveForm.relayUrls,
-                primarySecret: store.drafts.importSaveForm.password,
-                secondarySecret: store.drafts.importSaveForm.confirmPassword,
+                primarySecret: store.draftSecrets.importSaveFormPassword,
+                secondarySecret: store.draftSecrets.importSaveFormConfirm,
               }}
               lockIdentity
               actionLabel="Launch Signer"
               onLabelChange={(value) => store.updateImportSaveForm('label', value)}
-              onPrimarySecretChange={(value) => store.updateImportSaveForm('password', value)}
-              onSecondarySecretChange={(value) => store.updateImportSaveForm('confirmPassword', value)}
+              onPrimarySecretChange={(value) => store.updateImportSavePassword('password', value)}
+              onSecondarySecretChange={(value) => store.updateImportSavePassword('confirmPassword', value)}
               onRelaysChange={(relays) => store.updateImportSaveForm('relayUrls', relays.join('\n'))}
               onPingRelay={(url) => pingRelay(url)}
               onAction={() => void run(() => store.acceptPendingLoadConfirmation())}
@@ -1114,9 +1125,9 @@ function AppShell() {
           <section className="igloo-flow-root">
             <OnboardPackageEntry
               packageText={store.drafts.onboardConnectForm.packageText}
-              password={store.drafts.onboardConnectForm.password}
+              password={store.draftSecrets.onboardConnectFormPassword}
               onPackageTextChange={(value) => store.updateOnboardConnectForm('packageText', value)}
-              onPasswordChange={(value) => store.updateOnboardConnectForm('password', value)}
+              onPasswordChange={(value) => store.updateOnboardConnectPassword(value)}
               onConnect={() => void run(() => store.connectOnboardingPackage())}
               actionLabel="Next Step"
             />
@@ -1189,15 +1200,15 @@ function AppShell() {
               draft={{
                 label: store.drafts.onboardSaveForm.label,
                 relayUrls: store.drafts.onboardSaveForm.relayUrls,
-                primarySecret: store.drafts.onboardSaveForm.password,
-                secondarySecret: store.drafts.onboardSaveForm.confirmPassword,
+                primarySecret: store.draftSecrets.onboardSaveFormPassword,
+                secondarySecret: store.draftSecrets.onboardSaveFormConfirm,
               }}
               lockIdentity
               lockName={false}
               actionLabel="Launch Signer"
               onLabelChange={(value) => store.updateOnboardSaveForm('label', value)}
-              onPrimarySecretChange={(value) => store.updateOnboardSaveForm('password', value)}
-              onSecondarySecretChange={(value) => store.updateOnboardSaveForm('confirmPassword', value)}
+              onPrimarySecretChange={(value) => store.updateOnboardSavePassword('password', value)}
+              onSecondarySecretChange={(value) => store.updateOnboardSavePassword('confirmPassword', value)}
               onRelaysChange={(relays) => store.updateOnboardSaveForm('relayUrls', relays.join('\n'))}
               onPingRelay={(url) => pingRelay(url)}
               onAction={() => void run(() => store.finalizeOnboardedDevice())}
@@ -1248,8 +1259,8 @@ function AppShell() {
                   type="password"
                   {...passwordManagerOptOutProps}
                   data-testid={CRITICAL_E2E_TEST_IDS.rotationPasswordInput}
-                  value={store.drafts.rotateConnectForm.password}
-                  onChange={(event) => store.updateRotateConnectForm('password', event.target.value)}
+                  value={store.draftSecrets.rotateConnectFormPassword}
+                  onChange={(event) => store.updateRotateConnectPassword(event.target.value)}
                 />
               </label>
               <div className="igloo-button-row">
@@ -1290,6 +1301,15 @@ function AppShell() {
             <span className="igloo-task-kicker">Same keyset, fresh device share</span>
             <p>This replacement keeps the same group public key and replaces this device with a new share and profile id.</p>
           </section>
+          <label>
+            Current Device Passphrase
+            <input
+              type="password"
+              value={store.unlockPassphrase}
+              onChange={(event) => store.setUnlockPassphrase(event.target.value)}
+              placeholder="Enter the passphrase for the active device"
+            />
+          </label>
           <div className="igloo-button-row">
             <Button
               type="button"
@@ -1329,9 +1349,9 @@ function AppShell() {
           />
           <section className="igloo-flow-root">
             <RecoverCollectSharesPanel
-              sources={sources.map((source) => ({
+              sources={sources.map((source, index) => ({
                 packageText: source.packageText,
-                packagePassword: source.password,
+                packagePassword: store.draftSecrets.recoverKeySources[index] ?? '',
               }))}
               threshold={threshold}
               collectedCount={collectedCount}
@@ -1655,8 +1675,8 @@ function AppShell() {
           void saveTextToFile(filename, value);
         }}
       />
-      <ConfirmModal
-        isOpen={Boolean(pendingSettingsNav)}
+      <ConfirmDialog
+        open={Boolean(pendingSettingsNav)}
         variant="warning"
         title="Discard unsaved changes?"
         message="You have unsaved changes in Settings. Close without saving?"

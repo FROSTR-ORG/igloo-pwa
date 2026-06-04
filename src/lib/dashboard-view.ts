@@ -51,16 +51,18 @@ export function deriveGroupSummary(groupPackageJson: string): {
 }
 
 type ExportSummaryProfile = {
-  share_package_json: string;
+  member_idx: number;
   group_package_json: string;
   relays: string[];
 };
 
 // Build the export-modal summary line: "Share #1 · Keyset: … · N relays · M peers".
 // Tolerant of malformed package json (the parse helpers degrade to undefined).
+// The member label comes from the public `member_idx`; the raw share package
+// json (which carries the secret seckey) is no longer held on the profile.
 export function deriveExportSummary(profile: ExportSummaryProfile | null): string {
   if (!profile) return '';
-  const member = deriveMemberLabel(profile.share_package_json);
+  const member = Number.isFinite(profile.member_idx) ? `Share #${profile.member_idx}` : undefined;
   const { keysetName, memberCount } = deriveGroupSummary(profile.group_package_json);
   const parts = [
     member,

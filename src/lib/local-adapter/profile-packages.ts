@@ -20,13 +20,14 @@ import {
   type OnboardConnectInput,
   type OnboardFinalizeInput,
 } from './common';
+import { unlockShareFromArtifact } from './profile-runtime';
 
 export async function importBfProfile(input: LoadInput): Promise<PwaLoadConfirmation> {
   const imported = await importBrowserProfilePackage(input.profileString, input.password);
   return {
     kind: 'bfprofile',
     preview: imported.preview,
-    stored_password: input.password,
+    passphrase: input.password,
     profile_string: imported.profileString,
     share_string: imported.shareString,
     profile_payload: imported.payload,
@@ -44,46 +45,57 @@ export async function finalizeLoadedProfile(
   }
   return await createStoredProfileFromPayload({
     payload: input.profile_payload,
-    password: localPassword ?? input.stored_password,
+    password: localPassword ?? input.passphrase,
     source: input.kind,
     existingProfileIds,
     profileString: input.kind === 'bfprofile' ? input.profile_string : undefined,
     shareString: input.share_string,
-    runtimeSnapshotJson: input.runtime_snapshot_json ?? null,
     peerPubkey: input.peer_pubkey ?? null,
   });
 }
 
 export async function finalizeRotationUpdateFromConnection(input: {
   targetProfile: PwaProfile;
+  targetPassphrase: string;
   connection: PwaOnboardConnection;
   existingProfileIds?: string[];
 }) {
   if (!input.connection.profile_payload) {
     throw new Error('Missing canonical rotated profile payload.');
   }
+  // D.1/PR16b: `share_package_json` is no longer stored on the
+  // persisted profile record. Rebuild it in memory by decrypting the
+  // target profile's `encrypted_bfshare_artifact` with the passphrase
+  // the user entered for this rotation. The reconstructed string lives
+  // only on this call's stack frame.
+  const targetSharePackageJson = await unlockShareFromArtifact(
+    input.targetProfile,
+    input.targetPassphrase,
+  );
   const finalized = await finalizeRotatedBrowserProfile({
     targetProfile: {
       id: input.targetProfile.id,
       label: input.targetProfile.label,
       relays: input.targetProfile.relays,
       groupPackageJson: input.targetProfile.group_package_json,
-      sharePackageJson: input.targetProfile.share_package_json,
+      sharePackageJson: targetSharePackageJson,
       manualPeerPolicyOverrides: input.targetProfile.manual_peer_policy_overrides ?? [],
-      storedPassword: input.targetProfile.stored_password,
-      runtimeSnapshotJson: input.targetProfile.runtime_snapshot_json ?? null,
+      // In-memory-only passphrase supplied by the caller at rotation
+      // time. We never persist it on the profile record.
+      storedPassword: input.targetPassphrase,
+      runtimeSnapshotJson: null,
       peerPubkey: input.targetProfile.peer_pubkey ?? null,
     },
     connection: {
       preview: input.connection.preview,
-      storedPassword: input.connection.stored_password,
+      storedPassword: input.connection.passphrase,
       packageText: input.connection.package_text,
       profileString: input.connection.profile_string,
       shareString: input.connection.share_string,
       profilePayload: input.connection.profile_payload,
       manualPeerPolicyOverrides: input.connection.manual_peer_policy_overrides ?? [],
       peerPubkey: input.connection.peer_pubkey ?? null,
-      runtimeSnapshotJson: input.connection.runtime_snapshot_json ?? null,
+      runtimeSnapshotJson: null,
     },
     existingProfileIds: input.existingProfileIds,
   });
@@ -101,6 +113,10 @@ export async function connectOnboardingPackage(input: OnboardConnectInput): Prom
     password: input.password,
     groupName: 'Onboarded Device',
   });
+  // The one-shot snapshot JSON carries the incoming share + group. It is
+  // only used here to derive the canonical profile payload; the payload
+  // is immediately re-encrypted as `encrypted_bfshare_artifact` and the
+  // raw snapshot is never persisted to localStorage (D.1).
   const connection = await createBrowserOnboardingConnection({
     packageText: input.packageText,
     password: input.password,
@@ -112,12 +128,11 @@ export async function connectOnboardingPackage(input: OnboardConnectInput): Prom
 
   return {
     preview: connection.preview,
-    stored_password: connection.storedPassword,
+    passphrase: connection.storedPassword,
     package_text: connection.packageText,
     profile_string: connection.profileString,
     share_string: connection.shareString,
     peer_pubkey: connection.peerPubkey ?? null,
-    runtime_snapshot_json: connection.runtimeSnapshotJson ?? null,
     profile_payload: connection.profilePayload,
     manual_peer_policy_overrides: connection.manualPeerPolicyOverrides,
   };
@@ -130,14 +145,14 @@ export async function finalizeOnboardedDevice(input: OnboardFinalizeInput): Prom
   const finalized = await finalizeConnectedBrowserProfile({
     connection: {
       preview: input.connection.preview,
-      storedPassword: input.connection.stored_password,
+      storedPassword: input.connection.passphrase,
       packageText: input.connection.package_text,
       profileString: input.connection.profile_string,
       shareString: input.connection.share_string,
       profilePayload: input.connection.profile_payload,
       manualPeerPolicyOverrides: input.connection.manual_peer_policy_overrides ?? [],
       peerPubkey: input.connection.peer_pubkey ?? null,
-      runtimeSnapshotJson: input.connection.runtime_snapshot_json ?? null,
+      runtimeSnapshotJson: null,
     },
     label: input.label,
     password: input.password,

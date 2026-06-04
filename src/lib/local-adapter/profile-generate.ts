@@ -195,7 +195,7 @@ export async function createOnboardingPackageForShare(input: DistributionPackage
       group_public_key: input.keyset.group_public_key,
       relays,
       group_package_json: input.keyset.group_package_json,
-      share_package_json: share.share_package_json,
+      member_idx: share.member_idx,
       source: 'bfonboard',
     } satisfies PwaProfilePreview,
   };

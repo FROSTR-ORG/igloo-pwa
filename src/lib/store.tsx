@@ -9,10 +9,18 @@ import {
 
 import * as adapter from './local-adapter';
 import { saveTextToFile } from './file-save';
-import { clearPersistedState, loadPersistedState, savePersistedState } from './storage';
+import { toPersistable } from './persist-allowlist';
+import { SessionController } from './session-controller';
+import {
+  clearPersistedState,
+  createDebouncedPersistor,
+  loadPersistedState,
+  savePersistedState,
+} from './storage';
 import type {
   PwaDashboardTab,
   PwaDistributionActionResult,
+  PwaDraftSecrets,
   PwaDraftState,
   PwaLoadConfirmation,
   PwaOnboardConnection,
@@ -30,15 +38,15 @@ const ONBOARD_HANDSHAKE_MINIMUM_MS = 350;
 type AppState = PwaPersistedState & {
   setActiveView: (view: PwaView) => void;
   setDashboardTab: (tab: PwaDashboardTab) => void;
-  setUnlockPhrase: (value: string) => void;
+  setUnlockPassphrase: (value: string) => void;
   selectProfile: (profileId: string) => void;
-  loadStoredProfile: (profileId: string, unlockPhrase?: string) => Promise<void>;
+  loadStoredProfile: (profileId: string, passphrase: string) => Promise<void>;
   startCreateChoice: () => void;
-  updateCreateForm: (field: keyof PwaDraftState['createForm'], value: string) => void;
-  updateRotationForm: (field: keyof PwaDraftState['rotationForm'], value: string) => void;
+  updateCreateForm: (field: keyof PwaDraftState['createForm'] | 'privateKey', value: string) => void;
+  updateRotationForm: (field: 'sourceProfileId', value: string) => void;
   updateRotationSource: (
     index: number,
-    field: keyof PwaDraftState['rotationForm']['sources'][number],
+    field: 'packageText' | 'password',
     value: string,
   ) => void;
   addRotationSource: () => void;
@@ -46,11 +54,17 @@ type AppState = PwaPersistedState & {
   generateKeyset: () => Promise<void>;
   selectGeneratedShare: (memberIdx: number) => void;
   updateProfileForm: (field: keyof PwaDraftState['profileForm'], value: string) => void;
+  updateProfileFormPassword: (field: 'password' | 'confirmPassword', value: string) => void;
   continueToSaveProfile: () => void;
   acceptGeneratedProfile: () => Promise<void>;
   updateDistributionForm: (
     memberIdx: number,
-    field: keyof PwaDraftState['distributionForms'][number],
+    field: 'label',
+    value: string,
+  ) => void;
+  updateDistributionPassword: (
+    memberIdx: number,
+    field: 'password' | 'confirmPassword',
     value: string,
   ) => void;
   distributeShare: (
@@ -64,22 +78,27 @@ type AppState = PwaPersistedState & {
   finishSetup: () => Promise<void>;
   startLoadImport: () => void;
   updateImportProfileForm: (field: keyof PwaDraftState['importProfileForm'], value: string) => void;
+  updateImportProfilePassword: (value: string) => void;
   updateImportSaveForm: (field: keyof PwaDraftState['importSaveForm'], value: string) => void;
+  updateImportSavePassword: (field: 'password' | 'confirmPassword', value: string) => void;
   loadBfProfile: () => Promise<void>;
   clearLoadError: () => void;
   acceptPendingLoadConfirmation: () => Promise<void>;
-  updateOnboardConnectForm: (field: keyof PwaDraftState['onboardConnectForm'], value: string) => void;
+  updateOnboardConnectForm: (field: 'packageText', value: string) => void;
+  updateOnboardConnectPassword: (value: string) => void;
   connectOnboardingPackage: () => Promise<void>;
-  updateOnboardSaveForm: (field: keyof PwaDraftState['onboardSaveForm'], value: string) => void;
+  updateOnboardSaveForm: (field: 'label' | 'relayUrls', value: string) => void;
+  updateOnboardSavePassword: (field: 'password' | 'confirmPassword', value: string) => void;
   finalizeOnboardedDevice: () => Promise<void>;
   startRotateKey: () => void;
-  updateRotateConnectForm: (field: keyof PwaDraftState['rotateConnectForm'], value: string) => void;
+  updateRotateConnectForm: (field: 'packageText', value: string) => void;
+  updateRotateConnectPassword: (value: string) => void;
   connectRotationPackage: () => Promise<void>;
   finalizeRotationUpdate: () => Promise<void>;
   startRecoverKey: (profileId: string) => void;
   updateRecoverSource: (
     index: number,
-    field: keyof PwaDraftState['recoverKeyForm']['sources'][number],
+    field: 'packageText' | 'password',
     value: string,
   ) => void;
   addRecoverSource: () => void;
@@ -114,55 +133,79 @@ type AppState = PwaPersistedState & {
 
 const AppStore = React.createContext<AppState | null>(null);
 
+/**
+ * Per-PwaStore SessionController. Exposed via context so tests and any
+ * future UI path can reach the same controller instance the adapter
+ * helpers were bound to. Replaces the module-global singleton that
+ * used to live in `profile-runtime.ts` (PR17 / D.4).
+ */
+const SessionControllerContext = React.createContext<SessionController | null>(null);
+
+export function useSessionController(): SessionController {
+  const controller = React.useContext(SessionControllerContext);
+  if (!controller) {
+    throw new Error('SessionControllerContext missing; wrap tree in <StoreProvider>.');
+  }
+  return controller;
+}
+
 const defaultDrafts: PwaDraftState = {
   createForm: {
     mode: 'new',
     groupName: '',
     threshold: '2',
     count: '3',
-    privateKey: '',
   },
   rotationForm: {
     sourceProfileId: '',
-    sources: [{ packageText: '', password: '' }],
+    sources: [{ packageText: '' }],
   },
   recoverKeyForm: {
     sourceProfileId: '',
-    sources: [{ packageText: '', password: '' }],
+    sources: [{ packageText: '' }],
   },
   profileForm: {
     label: '',
-    password: '',
-    confirmPassword: '',
     relayUrls: DEFAULT_RELAYS.join('\n'),
   },
   distributionForms: {},
   distributionPermissions: {},
   importProfileForm: {
     profileString: '',
-    password: '',
   },
   importSaveForm: {
     label: '',
-    password: '',
-    confirmPassword: '',
     relayUrls: '',
   },
   onboardConnectForm: {
     packageText: '',
-    password: '',
   },
   onboardSaveForm: {
     label: '',
-    password: '',
-    confirmPassword: '',
     relayUrls: '',
   },
   rotateConnectForm: {
     packageText: '',
-    password: '',
   },
 };
+
+function createDefaultDraftSecrets(): PwaDraftSecrets {
+  return {
+    createFormPrivateKey: '',
+    rotationSources: {},
+    recoverKeySources: {},
+    profileFormPassword: '',
+    profileFormConfirm: '',
+    distributionPasswords: {},
+    importProfileFormPassword: '',
+    importSaveFormPassword: '',
+    importSaveFormConfirm: '',
+    onboardConnectFormPassword: '',
+    onboardSaveFormPassword: '',
+    onboardSaveFormConfirm: '',
+    rotateConnectFormPassword: '',
+  };
+}
 
 const defaultSettings: PwaSettings = {
   remember_browser_state: true,
@@ -199,8 +242,8 @@ function createDefaultState(): PwaPersistedState {
     selectedProfileId: '',
     activeView: 'landing',
     activeDashboardTab: 'signer',
-    unlockPhrase: '',
-    generatedKeyset: null,
+    unlockPassphrase: '',
+    pendingKeyset: null,
     selectedGeneratedShareIdx: null,
     pendingLoadConfirmation: null,
     pendingLoadError: null,
@@ -208,8 +251,11 @@ function createDefaultState(): PwaPersistedState {
     pendingRotationConnection: null,
     distributionSession: null,
     runtimeSnapshot: null,
+    // In-memory only. Populated on each `startSession` call; reset on load.
+    sharePackageJsonByProfileId: {},
     settings: defaultSettings,
     drafts: defaultDrafts,
+    draftSecrets: createDefaultDraftSecrets(),
   };
 }
 
@@ -221,10 +267,15 @@ function ensureDistributionForm(
   return (
     current[memberIdx] ?? {
       label: fallbackLabel,
-      password: '',
-      confirmPassword: '',
     }
   );
+}
+
+function ensureDistributionPasswordSlot(
+  current: PwaDraftSecrets['distributionPasswords'],
+  memberIdx: number,
+): { password: string; confirmPassword: string } {
+  return current[memberIdx] ?? { password: '', confirmPassword: '' };
 }
 
 function normalizeLoadedState(): PwaPersistedState {
@@ -232,11 +283,24 @@ function normalizeLoadedState(): PwaPersistedState {
   if (!loaded) return createDefaultState();
   const loadedActiveView = (loaded as { activeView?: string }).activeView;
 
+  // All runtime-only / secret-bearing fields are intentionally reset on
+  // every load — they are never persisted under the v2 schema.
   const normalized: PwaPersistedState = {
-      ...createDefaultState(),
-      ...loaded,
-      peerPermissionStates:
-        loaded.peerPermissionStates?.length ? loaded.peerPermissionStates : adapter.defaultPeerPermissionStates(),
+    ...createDefaultState(),
+    ...loaded,
+    unlockPassphrase: '',
+    pendingKeyset: null,
+    selectedGeneratedShareIdx: null,
+    pendingLoadConfirmation: null,
+    pendingOnboardConnection: null,
+    pendingRotationConnection: null,
+    distributionSession: null,
+    runtimeSnapshot: null,
+    // In-memory only; repopulated on each `startSession` call.
+    sharePackageJsonByProfileId: {},
+    draftSecrets: createDefaultDraftSecrets(),
+    peerPermissionStates:
+      loaded.peerPermissionStates?.length ? loaded.peerPermissionStates : adapter.defaultPeerPermissionStates(),
     drafts: {
       ...defaultDrafts,
       ...loaded.drafts,
@@ -246,7 +310,7 @@ function normalizeLoadedState(): PwaPersistedState {
         ...loaded.drafts?.rotationForm,
         sources:
           loaded.drafts?.rotationForm?.sources?.length
-            ? loaded.drafts.rotationForm.sources
+            ? loaded.drafts.rotationForm.sources.map((entry) => ({ packageText: entry.packageText ?? '' }))
             : defaultDrafts.rotationForm.sources,
       },
       recoverKeyForm: {
@@ -296,8 +360,17 @@ function normalizeLoadedState(): PwaPersistedState {
   if (loadedActiveView === 'load-error' && !normalized.pendingLoadError) {
     normalized.activeView = 'load-import';
   }
-  if ((loadedActiveView === 'create-profile' || loadedActiveView === 'create-confirm') && normalized.generatedKeyset) {
-    normalized.activeView = 'create-select-share';
+  if (
+    (loadedActiveView === 'create-generate' ||
+      loadedActiveView === 'create-select-share' ||
+      loadedActiveView === 'create-save-profile' ||
+      loadedActiveView === 'create-distribute') &&
+    !normalized.pendingKeyset
+  ) {
+    // The in-flight keyset is in-memory only (it holds share secrets) and is
+    // never persisted, so a reload can't resume mid-create. Bounce back to the
+    // create entry point instead of stranding the user on a keyset-less step.
+    normalized.activeView = 'create-choice';
   }
 
   return normalized;
@@ -305,60 +378,61 @@ function normalizeLoadedState(): PwaPersistedState {
 
 export function StoreProvider({ children }: { children: React.ReactNode }) {
   const [state, setState] = React.useState<PwaPersistedState>(() => normalizeLoadedState());
-  const restoredRuntimeProfileRef = React.useRef<string | null>(null);
   const runtimeSnapshotRef = React.useRef<PwaRuntimeSnapshot | null>(state.runtimeSnapshot);
-  const shouldRestorePersistedRuntimeRef = React.useRef(Boolean(state.runtimeSnapshot?.active));
 
   React.useEffect(() => {
     runtimeSnapshotRef.current = state.runtimeSnapshot;
   }, [state.runtimeSnapshot]);
 
+  // D.4: one SessionController per PwaStore instance. Created lazily
+  // via `useRef` so re-renders don't re-instantiate it, but the React
+  // tree keeps a stable reference for the lifetime of the provider.
+  // StrictMode double-mount cleans up via the effect below, which
+  // calls `controller.stop()` — idempotent on a fresh controller.
+  const controllerRef = React.useRef<SessionController | null>(null);
+  if (controllerRef.current == null) {
+    controllerRef.current = new SessionController();
+  }
+  const controller = controllerRef.current;
+
+  React.useEffect(
+    () => () => {
+      // Stop on unmount. Idempotent: a second stop returns false
+      // without throwing. StrictMode's simulated unmount/remount
+      // becomes start -> stop -> start, which is now safe.
+      void controller.stop();
+    },
+    [controller],
+  );
+
+  // D.1: the v1 per-tick `savePersistedState(state)` effect is replaced
+  // with a debounced persistor that writes ONLY the allow-list fields
+  // produced by `toPersistable(state)`. Secrets, runtime snapshots, and
+  // draft passwords never reach localStorage.
+  const persistorRef = React.useRef(
+    createDebouncedPersistor((snapshot) => savePersistedState(snapshot as PwaPersistedState)),
+  );
+  React.useEffect(
+    () => () => {
+      persistorRef.current.flush();
+    },
+    [],
+  );
+
   React.useEffect(() => {
-    if (state.settings.remember_browser_state) {
-      savePersistedState(state);
-    } else {
+    if (!state.settings.remember_browser_state) {
+      persistorRef.current.cancel();
       clearPersistedState();
+      return;
     }
+    const persistable = toPersistable(state);
+    persistorRef.current.schedule(persistable as unknown as PwaPersistedState);
   }, [state]);
 
   const selectedProfile = React.useMemo(
     () => state.profiles.find((profile) => profile.id === state.selectedProfileId) ?? null,
     [state.profiles, state.selectedProfileId],
   );
-
-  React.useEffect(() => {
-    if (!shouldRestorePersistedRuntimeRef.current) {
-      restoredRuntimeProfileRef.current = null;
-      return;
-    }
-    const profile = selectedProfile;
-    if (!profile?.runtime_snapshot_json || !state.runtimeSnapshot?.active) {
-      restoredRuntimeProfileRef.current = null;
-      return;
-    }
-    if (restoredRuntimeProfileRef.current === profile.id) return;
-    shouldRestorePersistedRuntimeRef.current = false;
-    restoredRuntimeProfileRef.current = profile.id;
-    void adapter
-      .startSession(profile, state.unlockPhrase || profile.stored_password)
-      .then((runtimeSnapshot) => {
-        setState((current) => ({
-          ...current,
-          runtimeSnapshot,
-          runtimeWarning: null,
-          profiles: current.profiles.map((entry) =>
-            entry.id === profile.id && runtimeSnapshot.profile
-              ? {
-                  ...entry,
-                  runtime_snapshot_json:
-                    runtimeSnapshot.profile.runtime_snapshot_json ?? entry.runtime_snapshot_json ?? null,
-                }
-              : entry,
-          ),
-        }));
-      })
-      .catch(() => undefined);
-  }, [selectedProfile, state.runtimeSnapshot?.active, state.unlockPhrase]);
 
   React.useEffect(() => {
     const activeProfileId = state.runtimeSnapshot?.active ? state.runtimeSnapshot.profile?.id ?? null : null;
@@ -371,7 +445,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       if (!currentSnapshot?.active || currentSnapshot.profile?.id !== activeProfileId) return;
 
       try {
-        const runtimeSnapshot = await adapter.readSession(currentSnapshot);
+        const runtimeSnapshot = await adapter.readSession(currentSnapshot, controller);
         if (!runtimeSnapshot || cancelled) return;
         setState((current) => {
           if (!current.runtimeSnapshot?.active || current.runtimeSnapshot.profile?.id !== activeProfileId) {
@@ -404,7 +478,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       cancelled = true;
       window.clearInterval(interval);
     };
-  }, [state.runtimeSnapshot?.active, state.runtimeSnapshot?.profile?.id]);
+  }, [controller, state.runtimeSnapshot?.active, state.runtimeSnapshot?.profile?.id]);
 
   // Mark a share onboarded when the live runtime serves an onboard response to
   // the matching peer (the real onboard-complete signal from bifrost-rs).
@@ -412,8 +486,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     adapter.setOnboardCompleteListener((peerPubkey) => {
       const normalized = normalizePeerKey(peerPubkey);
       setState((current) => {
-        if (!current.distributionSession || !current.generatedKeyset) return current;
-        const share = current.generatedKeyset.shares.find(
+        if (!current.distributionSession || !current.pendingKeyset) return current;
+        const share = current.pendingKeyset.shares.find(
           (entry) => normalizePeerKey(entry.share_public_key) === normalized,
         );
         if (!share) return current;
@@ -449,7 +523,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   );
 
   const persistProfileToDashboard = React.useCallback(
-    async (profile: PwaProfile, password: string, runtimeSnapshot?: PwaRuntimeSnapshot | null) => {
+    async (profile: PwaProfile, passphrase: string, runtimeSnapshot?: PwaRuntimeSnapshot | null) => {
       ensureProfileIdAvailable(profile);
       const saved =
         runtimeSnapshot != null
@@ -461,7 +535,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           : await saveBrowserProfileAndMaybeActivate({
               profile,
               autoStart: state.settings.auto_open_signer,
-              activate: async () => await adapter.startSession(profile, password),
+              activate: async () => await adapter.startSession(profile, passphrase, controller),
             });
       const snapshot = saved.runtime;
       const storedProfile = (snapshot?.profile ?? saved.profile) as PwaProfile;
@@ -476,10 +550,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         activeView: 'dashboard',
         activeDashboardTab: 'signer',
         runtimeSnapshot: snapshot,
-        unlockPhrase: password,
+        unlockPassphrase: passphrase,
       }));
     },
-    [ensureProfileIdAvailable, state.settings.auto_open_signer],
+    [controller, ensureProfileIdAvailable, state.settings.auto_open_signer],
   );
 
   const value = React.useMemo<AppState>(
@@ -491,25 +565,24 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       setDashboardTab(tab) {
         setState((current) => ({ ...current, activeDashboardTab: tab, activeView: 'dashboard' }));
       },
-      setUnlockPhrase(value) {
-        setState((current) => ({ ...current, unlockPhrase: value }));
+      setUnlockPassphrase(value) {
+        setState((current) => ({ ...current, unlockPassphrase: value }));
       },
       selectProfile(profileId) {
         setState((current) => ({ ...current, selectedProfileId: profileId }));
       },
-      async loadStoredProfile(profileId, unlockPhrase) {
+      async loadStoredProfile(profileId, passphrase) {
         const profile = state.profiles.find((entry) => entry.id === profileId);
         if (!profile) {
           throw new Error('Profile not found.');
         }
-        const password = unlockPhrase ?? profile.stored_password;
-        const runtimeSnapshot = await adapter.startSession(profile, password);
+        const runtimeSnapshot = await adapter.startSession(profile, passphrase, controller);
         setState((current) => ({
           ...current,
           selectedProfileId: profile.id,
           activeView: 'dashboard',
           activeDashboardTab: 'signer',
-          unlockPhrase: password,
+          unlockPassphrase: passphrase,
           runtimeSnapshot,
           runtimeWarning: null,
           peerPermissionStates:
@@ -523,16 +596,26 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         setState((current) => ({ ...current, activeView: 'create-choice' }));
       },
       updateCreateForm(field, value) {
-        setState((current) => ({
-          ...current,
-          drafts: {
-            ...current.drafts,
-            createForm: {
-              ...current.drafts.createForm,
-              [field]: value,
+        setState((current) => {
+          if (field === 'privateKey') {
+            // The raw nsec is a secret: it lives only in draftSecrets, never in
+            // the persistable drafts partition.
+            return {
+              ...current,
+              draftSecrets: { ...current.draftSecrets, createFormPrivateKey: value },
+            };
+          }
+          return {
+            ...current,
+            drafts: {
+              ...current.drafts,
+              createForm: {
+                ...current.drafts.createForm,
+                [field]: value,
+              },
             },
-          },
-        }));
+          };
+        });
       },
       updateRotationForm(field, value) {
         setState((current) => ({
@@ -547,18 +630,32 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         }));
       },
       updateRotationSource(index, field, value) {
-        setState((current) => ({
-          ...current,
-          drafts: {
-            ...current.drafts,
-            rotationForm: {
-              ...current.drafts.rotationForm,
-              sources: current.drafts.rotationForm.sources.map((entry, sourceIndex) =>
-                sourceIndex === index ? { ...entry, [field]: value } : entry,
-              ),
+        setState((current) => {
+          if (field === 'password') {
+            return {
+              ...current,
+              draftSecrets: {
+                ...current.draftSecrets,
+                rotationSources: {
+                  ...current.draftSecrets.rotationSources,
+                  [index]: value,
+                },
+              },
+            };
+          }
+          return {
+            ...current,
+            drafts: {
+              ...current.drafts,
+              rotationForm: {
+                ...current.drafts.rotationForm,
+                sources: current.drafts.rotationForm.sources.map((entry, sourceIndex) =>
+                  sourceIndex === index ? { ...entry, [field]: value } : entry,
+                ),
+              },
             },
-          },
-        }));
+          };
+        });
       },
       addRotationSource() {
         setState((current) => ({
@@ -567,25 +664,33 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
             ...current.drafts,
             rotationForm: {
               ...current.drafts.rotationForm,
-              sources: [...current.drafts.rotationForm.sources, { packageText: '', password: '' }],
+              sources: [...current.drafts.rotationForm.sources, { packageText: '' }],
             },
           },
         }));
       },
       removeRotationSource(index) {
-        setState((current) => ({
-          ...current,
-          drafts: {
-            ...current.drafts,
-            rotationForm: {
-              ...current.drafts.rotationForm,
-              sources:
-                current.drafts.rotationForm.sources.length > 1
-                  ? current.drafts.rotationForm.sources.filter((_, sourceIndex) => sourceIndex !== index)
-                  : current.drafts.rotationForm.sources,
+        setState((current) => {
+          const nextRotationSecrets = { ...current.draftSecrets.rotationSources };
+          delete nextRotationSecrets[index];
+          return {
+            ...current,
+            drafts: {
+              ...current.drafts,
+              rotationForm: {
+                ...current.drafts.rotationForm,
+                sources:
+                  current.drafts.rotationForm.sources.length > 1
+                    ? current.drafts.rotationForm.sources.filter((_, sourceIndex) => sourceIndex !== index)
+                    : current.drafts.rotationForm.sources,
+              },
             },
-          },
-        }));
+            draftSecrets: {
+              ...current.draftSecrets,
+              rotationSources: nextRotationSecrets,
+            },
+          };
+        });
       },
       startRecoverKey(profileId) {
         setState((current) => ({
@@ -596,24 +701,44 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
             ...current.drafts,
             recoverKeyForm: {
               sourceProfileId: profileId,
-              sources: [{ packageText: '', password: '' }],
+              sources: [{ packageText: '' }],
             },
+          },
+          draftSecrets: {
+            ...current.draftSecrets,
+            recoverKeySources: {},
           },
         }));
       },
       updateRecoverSource(index, field, value) {
-        setState((current) => ({
-          ...current,
-          drafts: {
-            ...current.drafts,
-            recoverKeyForm: {
-              ...current.drafts.recoverKeyForm,
-              sources: current.drafts.recoverKeyForm.sources.map((entry, sourceIndex) =>
-                sourceIndex === index ? { ...entry, [field]: value } : entry,
-              ),
+        setState((current) => {
+          if (field === 'password') {
+            // Per-source passphrases are secrets: keep them out of the
+            // persistable recoverKeyForm and in draftSecrets instead.
+            return {
+              ...current,
+              draftSecrets: {
+                ...current.draftSecrets,
+                recoverKeySources: {
+                  ...current.draftSecrets.recoverKeySources,
+                  [index]: value,
+                },
+              },
+            };
+          }
+          return {
+            ...current,
+            drafts: {
+              ...current.drafts,
+              recoverKeyForm: {
+                ...current.drafts.recoverKeyForm,
+                sources: current.drafts.recoverKeyForm.sources.map((entry, sourceIndex) =>
+                  sourceIndex === index ? { ...entry, [field]: value } : entry,
+                ),
+              },
             },
-          },
-        }));
+          };
+        });
       },
       addRecoverSource() {
         setState((current) => ({
@@ -622,7 +747,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
             ...current.drafts,
             recoverKeyForm: {
               ...current.drafts.recoverKeyForm,
-              sources: [...current.drafts.recoverKeyForm.sources, { packageText: '', password: '' }],
+              sources: [...current.drafts.recoverKeyForm.sources, { packageText: '' }],
             },
           },
         }));
@@ -645,9 +770,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       async recoverKeyFromShares() {
         const recovered = await adapter.recoverNsecFromShares({
           sources: state.drafts.recoverKeyForm.sources
-            .map((source) => ({
+            .map((source, index) => ({
               packageText: source.packageText.trim(),
-              password: source.password,
+              password: state.draftSecrets.recoverKeySources[index] ?? '',
             }))
             .filter((source) => source.packageText && source.password),
         });
@@ -659,6 +784,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           drafts: {
             ...current.drafts,
             recoverKeyForm: defaultDrafts.recoverKeyForm,
+          },
+          draftSecrets: {
+            ...current.draftSecrets,
+            recoverKeySources: {},
           },
         }));
         return recovered;
@@ -682,9 +811,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
                 threshold,
                 count,
                 sources: state.drafts.rotationForm.sources
-                  .map((source) => ({
+                  .map((source, index) => ({
                     packageText: source.packageText.trim(),
-                    password: source.password,
+                    password: state.draftSecrets.rotationSources[index] ?? '',
                   }))
                   .filter((source) => source.packageText && source.password),
               })
@@ -692,20 +821,20 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
                 groupName: state.drafts.createForm.groupName,
                 threshold,
                 count,
-                privateKey: state.drafts.createForm.privateKey,
+                privateKey: state.draftSecrets.createFormPrivateKey,
               });
+        // D.1/PR16b: `share_package_json` no longer lives on persisted
+        // profiles. Use the public `member_idx` field to pick the
+        // matching slot in the rotated keyset.
         const preferredMemberIdx =
-          sourceProfile && typeof sourceProfile.share_package_json === 'string'
-            ? Number.parseInt(
-                String((JSON.parse(sourceProfile.share_package_json) as { idx?: number | string }).idx ?? ''),
-                10,
-              )
+          sourceProfile && typeof sourceProfile.member_idx === 'number' && sourceProfile.member_idx > 0
+            ? sourceProfile.member_idx
             : NaN;
         const selectedShare =
           keyset.shares.find((share) => share.member_idx === preferredMemberIdx) ?? keyset.shares[0];
         setState((current) => ({
           ...current,
-          generatedKeyset: keyset,
+          pendingKeyset: keyset,
           selectedGeneratedShareIdx: selectedShare?.member_idx ?? null,
           activeView: 'create-select-share',
           drafts: {
@@ -727,7 +856,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
             profileForm: {
               ...current.drafts.profileForm,
               label:
-                current.generatedKeyset?.shares.find((share) => share.member_idx === memberIdx)?.name ??
+                current.pendingKeyset?.shares.find((share) => share.member_idx === memberIdx)?.name ??
                 current.drafts.profileForm.label,
             },
           },
@@ -746,43 +875,53 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         }));
       },
       continueToSaveProfile() {
-        if (!state.generatedKeyset || state.selectedGeneratedShareIdx == null) {
+        if (!state.pendingKeyset || state.selectedGeneratedShareIdx == null) {
           throw new Error('Generate a keyset and choose one share first.');
         }
         setState((current) => ({ ...current, activeView: 'create-save-profile' }));
       },
+      updateProfileFormPassword(field, value) {
+        setState((current) => ({
+          ...current,
+          draftSecrets: {
+            ...current.draftSecrets,
+            [field === 'password' ? 'profileFormPassword' : 'profileFormConfirm']: value,
+          },
+        }));
+      },
       async acceptGeneratedProfile() {
-        if (!state.generatedKeyset || state.selectedGeneratedShareIdx == null) {
+        if (!state.pendingKeyset || state.selectedGeneratedShareIdx == null) {
           throw new Error('Generate a keyset and choose one share first.');
         }
         if (!state.drafts.profileForm.label.trim()) {
           throw new Error('Device profile name is required.');
         }
-        if (!state.drafts.profileForm.password) {
+        if (!state.draftSecrets.profileFormPassword) {
           throw new Error('Device password is required.');
         }
-        if (state.drafts.profileForm.password !== state.drafts.profileForm.confirmPassword) {
+        if (state.draftSecrets.profileFormPassword !== state.draftSecrets.profileFormConfirm) {
           throw new Error('Device password confirmation does not match.');
         }
         if (!state.drafts.profileForm.relayUrls.split(/\r?\n/).map((value) => value.trim()).filter(Boolean).length) {
           throw new Error('At least one relay is required.');
         }
 
+        const password = state.draftSecrets.profileFormPassword;
         const profile = await adapter.createDeviceProfileFromGeneratedShare({
-          keyset: state.generatedKeyset,
+          keyset: state.pendingKeyset,
           shareMemberIdx: state.selectedGeneratedShareIdx,
           label: state.drafts.profileForm.label,
-          password: state.drafts.profileForm.password,
+          password,
           relayUrls: state.drafts.profileForm.relayUrls,
           existingProfileIds: state.profiles.map((entry) => entry.id),
         });
         const saved = await saveBrowserProfileAndMaybeActivate({
           profile,
           autoStart: true,
-          activate: async () => await adapter.startSession(profile, state.drafts.profileForm.password),
+          activate: async () => await adapter.startSession(profile, password, controller),
         });
         const runtimeSnapshot = saved.runtime;
-        const remaining = state.generatedKeyset.shares
+        const remaining = state.pendingKeyset.shares
           .map((share) => share.member_idx)
           .filter((memberIdx) => memberIdx !== state.selectedGeneratedShareIdx);
 
@@ -792,7 +931,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           selectedProfileId: profile.id,
           activeView: 'create-distribute',
           activeDashboardTab: 'signer',
-          unlockPhrase: state.drafts.profileForm.password,
+          unlockPassphrase: password,
           runtimeSnapshot,
           runtimeWarning: saved.runtimeWarning?.message ?? null,
           peerPermissionStates:
@@ -808,13 +947,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
             ...current.drafts,
             distributionForms: Object.fromEntries(
               remaining.map((memberIdx) => {
-                const share = state.generatedKeyset?.shares.find((entry) => entry.member_idx === memberIdx);
+                const share = state.pendingKeyset?.shares.find((entry) => entry.member_idx === memberIdx);
                 return [
                   memberIdx,
                   {
                     label: share?.name ?? `Member ${memberIdx}`,
-                    password: '',
-                    confirmPassword: '',
                   },
                 ];
               }),
@@ -823,11 +960,17 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
               remaining.map((memberIdx) => [memberIdx, ['sign', 'ecdh', 'ping', 'onboard']]),
             ),
           },
+          draftSecrets: {
+            ...current.draftSecrets,
+            distributionPasswords: {},
+            profileFormPassword: '',
+            profileFormConfirm: '',
+          },
         }));
       },
       updateDistributionForm(memberIdx, field, value) {
         setState((current) => {
-          const share = current.generatedKeyset?.shares.find((entry) => entry.member_idx === memberIdx);
+          const share = current.pendingKeyset?.shares.find((entry) => entry.member_idx === memberIdx);
           return {
             ...current,
             drafts: {
@@ -847,8 +990,23 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           };
         });
       },
+      updateDistributionPassword(memberIdx, field, value) {
+        setState((current) => ({
+          ...current,
+          draftSecrets: {
+            ...current.draftSecrets,
+            distributionPasswords: {
+              ...current.draftSecrets.distributionPasswords,
+              [memberIdx]: {
+                ...ensureDistributionPasswordSlot(current.draftSecrets.distributionPasswords, memberIdx),
+                [field]: value,
+              },
+            },
+          },
+        }));
+      },
       async distributeShare(memberIdx, kind) {
-        if (!state.generatedKeyset || !state.distributionSession || !selectedProfile) {
+        if (!state.pendingKeyset || !state.distributionSession || !selectedProfile) {
           throw new Error('Create the primary device profile before distributing shares.');
         }
         const existing = state.distributionSession.results[memberIdx];
@@ -898,9 +1056,15 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           const form = ensureDistributionForm(
             state.drafts.distributionForms,
             memberIdx,
-            state.generatedKeyset.shares.find((share) => share.member_idx === memberIdx)?.name ?? `Member ${memberIdx}`,
+            state.pendingKeyset.shares.find((share) => share.member_idx === memberIdx)?.name ?? `Member ${memberIdx}`,
           );
-          if (form.password !== form.confirmPassword) {
+          // Share password lives in the segregated draftSecrets partition, not
+          // on the persistable distribution form.
+          const passwordSlot = ensureDistributionPasswordSlot(
+            state.draftSecrets.distributionPasswords,
+            memberIdx,
+          );
+          if (passwordSlot.password !== passwordSlot.confirmPassword) {
             throw new Error('Share password confirmation does not match.');
           }
           if (!form.label.trim()) {
@@ -908,10 +1072,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           }
 
           const result = await adapter.createOnboardingPackageForShare({
-            keyset: state.generatedKeyset,
+            keyset: state.pendingKeyset,
             shareMemberIdx: memberIdx,
             label: form.label,
-            password: form.password,
+            password: passwordSlot.password,
             relayUrls: selectedProfile.relays.join('\n'),
             signerPubkey: state.distributionSession.signer_pubkey,
           });
@@ -953,7 +1117,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         }
         if (kind === 'save') {
           const sharePublicKey =
-            state.generatedKeyset.shares.find((share) => share.member_idx === memberIdx)?.share_public_key ?? '';
+            state.pendingKeyset.shares.find((share) => share.member_idx === memberIdx)?.share_public_key ?? '';
           const saved = await saveTextToFile(
             buildProfileDownloadFilename(existing.label, sharePublicKey, 'bfonboard.txt'),
             existing.package_text,
@@ -970,7 +1134,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           : (state.drafts.distributionPermissions[memberIdx] ?? []).filter((entry) => entry !== permission);
 
         let runtimeSnapshot = state.runtimeSnapshot;
-        const share = state.generatedKeyset?.shares.find((entry) => entry.member_idx === memberIdx);
+        const share = state.pendingKeyset?.shares.find((entry) => entry.member_idx === memberIdx);
         if (share && runtimeSnapshot) {
           runtimeSnapshot = await adapter.applyPeerPolicy(runtimeSnapshot, share.share_public_key, 'request', permission, enabled);
           runtimeSnapshot = await adapter.applyPeerPolicy(runtimeSnapshot, share.share_public_key, 'respond', permission, enabled);
@@ -1002,7 +1166,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           throw new Error('Save the device profile before starting the onboarding client.');
         }
         if (state.runtimeSnapshot?.active) return;
-        const runtimeSnapshot = await adapter.startSession(selectedProfile, state.unlockPhrase);
+        const runtimeSnapshot = await adapter.startSession(selectedProfile, state.unlockPassphrase, controller);
         setState((current) => ({
           ...current,
           profiles:
@@ -1064,19 +1228,20 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
                 entry.id === persistedProfile.id
                   ? {
                       ...entry,
-                      runtime_snapshot_json:
-                        persistedProfile.runtime_snapshot_json ?? entry.runtime_snapshot_json ?? null,
+                      // Persisted runtime snapshots were dropped (they serialized
+                      // the share seckey at rest); only carry the non-secret peer
+                      // pubkey negotiated during distribution.
                       peer_pubkey: persistedProfile.peer_pubkey ?? entry.peer_pubkey ?? null,
                     }
                   : entry,
               )
             : current.profiles,
           // Purge in-memory setup secrets and return to the locked Welcome.
-          generatedKeyset: null,
+          pendingKeyset: null,
           selectedGeneratedShareIdx: null,
           distributionSession: null,
           runtimeSnapshot: null,
-          unlockPhrase: '',
+          unlockPassphrase: '',
           activeView: 'landing',
           activeDashboardTab: 'signer',
           drafts: {
@@ -1102,6 +1267,15 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           },
         }));
       },
+      updateImportProfilePassword(value) {
+        setState((current) => ({
+          ...current,
+          draftSecrets: {
+            ...current.draftSecrets,
+            importProfileFormPassword: value,
+          },
+        }));
+      },
       updateImportSaveForm(field, value) {
         setState((current) => ({
           ...current,
@@ -1114,10 +1288,22 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           },
         }));
       },
+      updateImportSavePassword(field, value) {
+        setState((current) => ({
+          ...current,
+          draftSecrets: {
+            ...current.draftSecrets,
+            [field === 'password' ? 'importSaveFormPassword' : 'importSaveFormConfirm']: value,
+          },
+        }));
+      },
       async loadBfProfile() {
         let confirmation: PwaLoadConfirmation;
         try {
-          confirmation = await adapter.importBfProfile(state.drafts.importProfileForm);
+          confirmation = await adapter.importBfProfile({
+            profileString: state.drafts.importProfileForm.profileString,
+            password: state.draftSecrets.importProfileFormPassword,
+          });
         } catch (error) {
           // Import failures land on the dedicated Import Error screen rather than the
           // global alert banner, matching the Paper design.
@@ -1142,9 +1328,12 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
               ...current.drafts.importSaveForm,
               label: confirmation.preview.label,
               relayUrls: confirmation.preview.relays.join('\n'),
-              password: '',
-              confirmPassword: '',
             },
+          },
+          draftSecrets: {
+            ...current.draftSecrets,
+            importSaveFormPassword: '',
+            importSaveFormConfirm: '',
           },
         }));
       },
@@ -1155,7 +1344,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         if (!state.pendingLoadConfirmation) {
           throw new Error('No confirmed profile is waiting to be loaded.');
         }
-        const { password, confirmPassword } = state.drafts.importSaveForm;
+        // The local-save password is a secret: read it from draftSecrets, not
+        // the persistable importSaveForm.
+        const password = state.draftSecrets.importSaveFormPassword;
+        const confirmPassword = state.draftSecrets.importSaveFormConfirm;
         if (!password) {
           throw new Error('Enter a password to protect this profile on the device.');
         }
@@ -1168,6 +1360,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           state.profiles.map((entry) => entry.id),
           localPassword,
         );
+        // The stored profile is re-encrypted under the new local password, so
+        // the session must be started with that password, not the import
+        // package's passphrase.
         await persistProfileToDashboard(profile, localPassword);
         setState((current) => ({
           ...current,
@@ -1180,6 +1375,12 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
             current.peerPermissionStates.length
               ? current.peerPermissionStates
               : adapter.defaultPeerPermissionStates(),
+          draftSecrets: {
+            ...current.draftSecrets,
+            importProfileFormPassword: '',
+            importSaveFormPassword: '',
+            importSaveFormConfirm: '',
+          },
         }));
       },
       updateOnboardConnectForm(field, value) {
@@ -1194,6 +1395,15 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           },
         }));
       },
+      updateOnboardConnectPassword(value) {
+        setState((current) => ({
+          ...current,
+          draftSecrets: {
+            ...current.draftSecrets,
+            onboardConnectFormPassword: value,
+          },
+        }));
+      },
       async connectOnboardingPackage() {
         setState((current) => ({
           ...current,
@@ -1202,7 +1412,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         }));
         try {
           await new Promise((resolve) => window.setTimeout(resolve, ONBOARD_HANDSHAKE_MINIMUM_MS));
-          const connection = await adapter.connectOnboardingPackage(state.drafts.onboardConnectForm);
+          const connection = await adapter.connectOnboardingPackage({
+            packageText: state.drafts.onboardConnectForm.packageText,
+            password: state.draftSecrets.onboardConnectFormPassword,
+          });
           setState((current) => ({
             ...current,
             pendingOnboardConnection: connection,
@@ -1236,20 +1449,30 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           },
         }));
       },
+      updateOnboardSavePassword(field, value) {
+        setState((current) => ({
+          ...current,
+          draftSecrets: {
+            ...current.draftSecrets,
+            [field === 'password' ? 'onboardSaveFormPassword' : 'onboardSaveFormConfirm']: value,
+          },
+        }));
+      },
       async finalizeOnboardedDevice() {
         if (!state.pendingOnboardConnection) {
           throw new Error('Connect an onboarding package first.');
         }
-        if (state.drafts.onboardSaveForm.password !== state.drafts.onboardSaveForm.confirmPassword) {
+        if (state.draftSecrets.onboardSaveFormPassword !== state.draftSecrets.onboardSaveFormConfirm) {
           throw new Error('Device password confirmation does not match.');
         }
+        const password = state.draftSecrets.onboardSaveFormPassword;
         const profile = await adapter.finalizeOnboardedDevice({
           connection: state.pendingOnboardConnection,
           label: state.drafts.onboardSaveForm.label,
-          password: state.drafts.onboardSaveForm.password,
+          password,
           existingProfileIds: state.profiles.map((entry) => entry.id),
         });
-        await persistProfileToDashboard(profile, state.drafts.onboardSaveForm.password);
+        await persistProfileToDashboard(profile, password);
         setState((current) => ({
           ...current,
           pendingOnboardConnection: null,
@@ -1258,6 +1481,12 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
             current.peerPermissionStates.length
               ? current.peerPermissionStates
               : adapter.defaultPeerPermissionStates(),
+          draftSecrets: {
+            ...current.draftSecrets,
+            onboardConnectFormPassword: '',
+            onboardSaveFormPassword: '',
+            onboardSaveFormConfirm: '',
+          },
         }));
       },
       startRotateKey() {
@@ -1271,8 +1500,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
             ...current.drafts,
             rotateConnectForm: {
               packageText: '',
-              password: '',
             },
+          },
+          draftSecrets: {
+            ...current.draftSecrets,
+            rotateConnectFormPassword: '',
           },
         }));
       },
@@ -1288,13 +1520,22 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           },
         }));
       },
+      updateRotateConnectPassword(value) {
+        setState((current) => ({
+          ...current,
+          draftSecrets: {
+            ...current.draftSecrets,
+            rotateConnectFormPassword: value,
+          },
+        }));
+      },
       async connectRotationPackage() {
         if (!selectedProfile) {
           throw new Error('Select a profile first.');
         }
         const connection = await adapter.connectOnboardingPackage({
           packageText: state.drafts.rotateConnectForm.packageText,
-          password: state.drafts.rotateConnectForm.password,
+          password: state.draftSecrets.rotateConnectFormPassword,
         });
         if (
           connection.profile_payload &&
@@ -1315,18 +1556,26 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         if (!selectedProfile || !state.pendingRotationConnection) {
           throw new Error('Connect a rotation package first.');
         }
+        // The profile being rotated is the active, unlocked one, so its
+        // passphrase is the current in-memory unlock passphrase.
+        const targetPassphrase = state.unlockPassphrase;
+        if (!targetPassphrase.trim()) {
+          throw new Error('Target profile passphrase is required to rotate.');
+        }
         if (state.runtimeSnapshot?.active) {
-          await adapter.stopSession(state.runtimeSnapshot);
+          await adapter.stopSession(state.runtimeSnapshot, controller);
         }
         const profile = await adapter.finalizeRotationUpdateFromConnection({
           targetProfile: selectedProfile,
+          targetPassphrase,
           connection: state.pendingRotationConnection,
           existingProfileIds: state.profiles.map((entry) => entry.id),
         });
+        const newPassphrase = state.pendingRotationConnection.passphrase;
         const saved = await saveBrowserProfileAndMaybeActivate({
           profile,
           autoStart: true,
-          activate: async () => await adapter.startSession(profile, profile.stored_password),
+          activate: async () => await adapter.startSession(profile, newPassphrase, controller),
         });
         const runtimeSnapshot = saved.runtime;
         setState((current) => ({
@@ -1340,10 +1589,14 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           activeDashboardTab: 'signer',
           runtimeSnapshot,
           runtimeWarning: saved.runtimeWarning?.message ?? null,
-          unlockPhrase: profile.stored_password,
+          unlockPassphrase: newPassphrase,
           pendingRotationConnection: null,
           peerPermissionStates:
             runtimeSnapshot?.peer_permission_states ?? adapter.defaultPeerPermissionStates(),
+          draftSecrets: {
+            ...current.draftSecrets,
+            rotateConnectFormPassword: '',
+          },
         }));
       },
       async copyProfilePackage(profileId, format) {
@@ -1368,13 +1621,13 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         }
         return await adapter.exportEncryptedPackage({
           profileString: profile.profile_string,
-          storedPassword: profile.stored_password,
+          storedPassword: state.unlockPassphrase,
           exportPassword,
           format,
         });
       },
       deleteProfile(profileId) {
-        void adapter.disposeRuntimeSessionForProfile(profileId);
+        void adapter.disposeRuntimeSessionForProfile(profileId, controller);
         setState((current) => ({
           ...current,
           profiles: current.profiles.filter((entry) => entry.id !== profileId),
@@ -1395,7 +1648,12 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           direction,
           method,
           value,
+          controller,
         );
+        // D.4: null return = session drift. Leave state untouched —
+        // the UI retains whatever runtimeSnapshot it last saw rather
+        // than surfacing a thrown error.
+        if (!runtimeSnapshot) return;
         setState((current) => ({
           ...current,
           peerPermissionStates:
@@ -1411,7 +1669,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         }));
       },
       async clearPeerPolicies() {
-        const runtimeSnapshot = await adapter.clearPeerPolicies(state.runtimeSnapshot);
+        const runtimeSnapshot = await adapter.clearPeerPolicies(state.runtimeSnapshot, controller);
+        if (!runtimeSnapshot) return;
         setState((current) => ({
           ...current,
           peerPermissionStates:
@@ -1427,7 +1686,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         }));
       },
       async clearLogs() {
-        const runtimeSnapshot = await adapter.clearSessionLogs(state.runtimeSnapshot);
+        const runtimeSnapshot = await adapter.clearSessionLogs(state.runtimeSnapshot, controller);
+        // Idempotent on snapshot/live-session drift: leave state untouched.
+        if (!runtimeSnapshot) return;
         setState((current) => ({
           ...current,
           runtimeWarning: null,
@@ -1436,7 +1697,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       },
       async startSigner() {
         if (!selectedProfile) return;
-        const runtimeSnapshot = await adapter.startSession(selectedProfile, state.unlockPhrase);
+        if (!state.unlockPassphrase.trim()) {
+          throw new Error('Enter the device passphrase to start the signer.');
+        }
+        const runtimeSnapshot = await adapter.startSession(selectedProfile, state.unlockPassphrase, controller);
         setState((current) => ({
           ...current,
           profiles:
@@ -1454,7 +1718,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         }));
       },
       async stopSigner() {
-        const runtimeSnapshot = await adapter.stopSession(state.runtimeSnapshot);
+        const runtimeSnapshot = await adapter.stopSession(state.runtimeSnapshot, controller);
         setState((current) => ({
           ...current,
           profiles:
@@ -1467,10 +1731,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
             runtimeSnapshot?.peer_permission_states ?? current.peerPermissionStates,
           runtimeWarning: null,
           runtimeSnapshot,
+          unlockPassphrase: '',
         }));
       },
       async refreshSigner() {
-        const runtimeSnapshot = await adapter.refreshSession(state.runtimeSnapshot);
+        const runtimeSnapshot = await adapter.refreshSession(state.runtimeSnapshot, controller);
         setState((current) => ({
           ...current,
           profiles:
@@ -1487,7 +1752,14 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       },
       async saveOperatorSettings(input) {
         if (!selectedProfile) return;
-        const runtimeSnapshot = await adapter.applyOperatorSettings(selectedProfile, state.runtimeSnapshot, input);
+        const runtimeSnapshot = await adapter.applyOperatorSettings(
+          selectedProfile,
+          state.runtimeSnapshot,
+          input,
+          controller,
+        );
+        // D.4: null return = session drift. UI keeps its current view.
+        if (!runtimeSnapshot) return;
         setState((current) => ({
           ...current,
           profiles:
@@ -1506,7 +1778,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       },
       async logout() {
         const stoppedSnapshot = state.runtimeSnapshot?.active
-          ? await adapter.stopSession(state.runtimeSnapshot)
+          ? await adapter.stopSession(state.runtimeSnapshot, controller)
           : null;
         setState((current) => ({
           ...current,
@@ -1521,7 +1793,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           runtimeSnapshot: null,
           activeView: 'landing',
           activeDashboardTab: 'signer',
-          unlockPhrase: '',
+          unlockPassphrase: '',
+          draftSecrets: createDefaultDraftSecrets(),
         }));
       },
       updateSettings(field, checked) {
@@ -1534,10 +1807,14 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         }));
       },
     }),
-    [persistProfileToDashboard, selectedProfile, state],
+    [controller, persistProfileToDashboard, selectedProfile, state],
   );
 
-  return <AppStore.Provider value={value}>{children}</AppStore.Provider>;
+  return (
+    <SessionControllerContext.Provider value={controller}>
+      <AppStore.Provider value={value}>{children}</AppStore.Provider>
+    </SessionControllerContext.Provider>
+  );
 }
 
 export function useStore() {

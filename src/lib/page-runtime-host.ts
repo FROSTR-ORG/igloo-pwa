@@ -1,4 +1,5 @@
 import {
+  BrowserBridgeNode,
   createBrowserRuntimeNodeInit,
   clearRuntimePeerPolicyOverridesOnNode,
   connectSignerNode,
@@ -16,7 +17,6 @@ import {
   updateRuntimeConfigOnNode,
   updateRuntimePeerPolicyOverrideOnNode,
   type DecodedOnboardingProfile,
-  type NodeWithEvents,
   type ObservabilityEvent,
   type RuntimeMetadata,
   type RuntimePeerPermissionState,
@@ -37,7 +37,6 @@ export type BrowserStoredProfile = {
   sharePublicKey?: string;
   peerPubkey?: string;
   signerSettings?: Partial<SignerSettings>;
-  runtimeSnapshotJson?: string | null;
 };
 
 export type BrowserBootstrapProfile = BrowserStoredProfile & {
@@ -48,23 +47,37 @@ export type BrowserBootstrapProfile = BrowserStoredProfile & {
 export type BrowserOnboardingResult = {
   decoded: DecodedOnboardingProfile;
   profile: BrowserStoredProfile;
+  /**
+   * One-shot snapshot JSON captured during onboarding. Used to derive
+   * the canonical profile payload (group + share) for the new device.
+   * This is the ONLY place the PWA calls `snapshot_state()`; the payload
+   * is immediately re-encrypted under the user's passphrase and the
+   * raw snapshot is discarded. Never persisted to localStorage.
+   */
   runtimeSnapshotJson: string;
   runtimeStatus: RuntimeStatusSummary;
   metadata: RuntimeMetadata;
   readiness: RuntimeReadiness;
 };
 
+// D.5: `runtime_snapshot_json` is no longer surfaced on the session
+// snapshot. Poll paths read `runtime_status` via `getRuntimeStatus(node)`
+// instead of `getRuntimeSnapshot(node)`, which closes the host-side use
+// of the bifrost-rs bootstrap leak (`RuntimeSnapshotExport.bootstrap`
+// carries `share.seckey` hex; `RuntimeStatusSummary` does not).
 export type BrowserRuntimeSessionSnapshot = {
   runtimeStatus: RuntimeStatusSummary;
   metadata: RuntimeMetadata;
   readiness: RuntimeReadiness;
   peerPermissionStates: RuntimePeerPermissionState[];
   signerSettings: SignerSettings;
-  runtimeSnapshotJson: string;
   // Structured runtime events retained host-side (domain/event/level/ts) so the
   // dashboard log can render type tags and a domain filter. The formatted string
   // `runtime_log_lines` is kept alongside for the plain-text fallback.
   events: ObservabilityEvent[];
+  // NOTE: `runtimeSnapshotJson` is intentionally NOT surfaced on the session
+  // snapshot — `getRuntimeSnapshot()`/`snapshot_state()` emits `bootstrap.share.seckey`
+  // hex. Poll/UI paths use the non-leaking `runtime_status` API instead.
 };
 
 export type BrowserRuntimeSession = {
@@ -95,9 +108,6 @@ type BrowserRuntimeTestHooks = {
     groupName?: string;
     signerSettings?: Partial<SignerSettings>;
   }) => Promise<BrowserOnboardingResult>;
-  startPersistedBrowserRuntimeSession?: (
-    profile: BrowserStoredProfile
-  ) => Promise<BrowserRuntimeSession>;
   startBrowserRuntimeSession?: (
     profile: BrowserBootstrapProfile
   ) => Promise<BrowserRuntimeSession>;
@@ -165,7 +175,7 @@ function snapshotHasUsableNonces(snapshot: unknown) {
   });
 }
 
-async function waitForNonceSnapshot(node: NodeWithEvents) {
+async function waitForNonceSnapshot(node: BrowserBridgeNode) {
   const startedAt = Date.now();
   let lastSnapshot: unknown = null;
   while (Date.now() - startedAt < NONCE_SNAPSHOT_WAIT_TIMEOUT_MS) {
@@ -197,7 +207,7 @@ function pushCapped<T>(buffer: T[], value: T) {
   if (buffer.length > LOG_BUFFER_LIMIT) buffer.splice(0, buffer.length - LOG_BUFFER_LIMIT);
 }
 
-function attachLogBuffer(node: NodeWithEvents) {
+function attachLogBuffer(node: BrowserBridgeNode) {
   const lines: string[] = [];
   const events: ObservabilityEvent[] = [];
 
@@ -234,8 +244,15 @@ function attachLogBuffer(node: NodeWithEvents) {
   };
 }
 
+/**
+ * Build a runtime snapshot for UI consumption from the non-leaking
+ * `runtime_status` API. Never calls `snapshot_state()` — that WASM
+ * export still emits `bootstrap.share.seckey` hex and is now reserved
+ * for the one-shot onboarding capture path. Structured `events` are
+ * forwarded from the host-side log buffer for the dashboard log.
+ */
 function buildSessionSnapshot(
-  node: NodeWithEvents,
+  node: BrowserBridgeNode,
   events: ObservabilityEvent[]
 ): BrowserRuntimeSessionSnapshot {
   const runtimeStatus = getRuntimeStatus(node);
@@ -245,7 +262,6 @@ function buildSessionSnapshot(
     readiness: getRuntimeReadiness(node),
     peerPermissionStates: getRuntimePeerPermissionStatesFromNode(node),
     signerSettings: normalizeSignerSettings(getRuntimeConfigFromNode(node)),
-    runtimeSnapshotJson: JSON.stringify(getRuntimeSnapshot(node)),
     events
   };
 }
@@ -273,6 +289,10 @@ export async function connectOnboardingPackageAndCaptureProfile(input: {
 
   try {
     await connectSignerNode(node);
+    // One-shot `snapshot_state()` to materialize the incoming profile
+    // payload (group + share). Not part of any poll path. The JSON is
+    // passed straight into the shared onboarding finalizer, never
+    // persisted to localStorage.
     const snapshot = await waitForNonceSnapshot(node);
     const runtimeSnapshotJson = JSON.stringify(snapshot);
     const runtimeStatus = getRuntimeStatus(node);
@@ -287,7 +307,6 @@ export async function connectOnboardingPackageAndCaptureProfile(input: {
         sharePublicKey: decoded.publicKey,
         peerPubkey: decoded.peerPubkey,
         signerSettings: normalizeSignerSettings(input.signerSettings),
-        runtimeSnapshotJson
       },
       runtimeSnapshotJson,
       runtimeStatus,
@@ -304,7 +323,7 @@ export async function connectOnboardingPackageAndCaptureProfile(input: {
   }
 }
 
-function createSession(node: NodeWithEvents, logs: ReturnType<typeof attachLogBuffer>): BrowserRuntimeSession {
+function createSession(node: BrowserBridgeNode, logs: ReturnType<typeof attachLogBuffer>): BrowserRuntimeSession {
   let stopped = false;
 
   return {
@@ -362,22 +381,6 @@ function createSession(node: NodeWithEvents, logs: ReturnType<typeof attachLogBu
       return buildSessionSnapshot(node, logs.collectEvents());
     }
   };
-}
-
-export async function startPersistedBrowserRuntimeSession(
-  profile: BrowserStoredProfile
-): Promise<BrowserRuntimeSession> {
-  ensureIglooSharedConfigured();
-  if (browserRuntimeTestHooks?.startPersistedBrowserRuntimeSession) {
-    return await browserRuntimeTestHooks.startPersistedBrowserRuntimeSession(profile);
-  }
-
-  const init = createBrowserRuntimeNodeInit(profile);
-  const node = createSignerNode(init.config, init.restoreOptions);
-  const logs = attachLogBuffer(node);
-  await connectSignerNode(node);
-  refreshAllPeersOnNode(node);
-  return createSession(node, logs);
 }
 
 export async function startBrowserRuntimeSession(

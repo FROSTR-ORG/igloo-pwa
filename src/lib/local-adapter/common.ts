@@ -128,21 +128,52 @@ function defaultPeerPermissionState(pubkey: string): PwaPeerPermissionState {
   };
 }
 
+export function memberIdxFromSharePackageJson(
+  sharePackageJson: string | null | undefined,
+): number {
+  if (!sharePackageJson) return 0;
+  try {
+    const parsed = JSON.parse(sharePackageJson) as { idx?: unknown };
+    if (typeof parsed.idx === 'number' && Number.isFinite(parsed.idx)) {
+      return Math.trunc(parsed.idx);
+    }
+    if (typeof parsed.idx === 'string' && /^\d+$/.test(parsed.idx)) {
+      return Number.parseInt(parsed.idx, 10);
+    }
+  } catch {
+    // fall through
+  }
+  return 0;
+}
+
 export function toPwaProfile(finalized: Awaited<ReturnType<typeof createFinalizedBrowserStoredProfile>>): PwaProfile {
+  // The shared preview carries a `share_package_json` field whose wire
+  // shape is `{idx, seckey}`. `seckey` is the raw FROST share secret and
+  // MUST NOT be stored on the persistable `PwaProfile`. We destructure
+  // it out here so only the public `member_idx` hops onto the profile
+  // record; callers that need the full share JSON read it from the
+  // in-memory `sharePackageJsonByProfileId` map populated at session
+  // start (see `startSession`).
+  const { share_package_json: sharePackageJson, ...publicPreview } = finalized.preview;
   return {
-    ...finalized.preview,
+    ...publicPreview,
+    member_idx: memberIdxFromSharePackageJson(sharePackageJson),
     id: finalized.summary.id,
     relay_profile: 'browser',
     group_ref: finalized.artifactRefs.groupRef,
     encrypted_profile_ref: finalized.artifactRefs.encryptedProfileRef,
     state_path: finalized.artifactRefs.statePath,
     created_at: now(),
-    stored_password: finalized.storedPassword,
+    // `shareString` is the bfshare1 bech32m artifact produced by the
+    // WASM `encode_bfshare_package` call — already password-encrypted.
+    // We surface it as `encrypted_bfshare_artifact` so the session-start
+    // flow can decode it with the user's passphrase instead of relying
+    // on a persisted `stored_password`.
+    encrypted_bfshare_artifact: finalized.shareString,
     profile_string: finalized.profileString,
     share_string: finalized.shareString,
     signer_settings: normalizePwaSignerSettings(finalized.summary.signerSettings),
     peer_pubkey: finalized.peerPubkey,
-    runtime_snapshot_json: finalized.runtimeSnapshotJson,
     onboarding_package: finalized.onboardingPackage,
     manual_peer_policy_overrides: finalized.manualPeerPolicyOverrides,
   } satisfies PwaProfile;
@@ -272,7 +303,6 @@ export async function createStoredProfileFromPayload(args: {
   profileString?: string;
   shareString?: string;
   onboardingPackage?: string | null;
-  runtimeSnapshotJson?: string | null;
   peerPubkey?: string | null;
   signerSettings?: Partial<PwaSignerSettings> | null;
 }) {
@@ -283,7 +313,8 @@ export async function createStoredProfileFromPayload(args: {
     existingProfileIds: args.existingProfileIds,
     signerSettings: args.signerSettings ?? DEFAULT_SIGNER_SETTINGS,
     peerPubkey: args.peerPubkey ?? null,
-    runtimeSnapshotJson: args.runtimeSnapshotJson ?? null,
+    // D.1/D.5: no runtime snapshot is ever persisted on a PwaProfile.
+    runtimeSnapshotJson: null,
     profileString: args.profileString,
     shareString: args.shareString,
     onboardingPackage: args.onboardingPackage ?? null,
@@ -291,20 +322,31 @@ export async function createStoredProfileFromPayload(args: {
   return toPwaProfile(finalized);
 }
 
-export function toRuntimeProfile(profile: PwaProfile, snapshot: ReturnType<BrowserRuntimeSession['read']>): PwaProfile {
+export function toRuntimeProfile(
+  profile: PwaProfile,
+  snapshot: ReturnType<BrowserRuntimeSession['read']>,
+  sharePackageJson: string,
+): PwaProfile {
+  // Runtime-snapshot JSON is no longer surfaced on the PwaProfile or the
+  // persisted shape (D.1 + D.5). We still run through the shared
+  // projection for label/relay normalization, but we feed it null for
+  // the runtime snapshot on both sides. The `sharePackageJson` argument
+  // is the in-memory-reconstructed `{idx, seckey}` wire JSON produced at
+  // session start — it is NOT read from the persisted profile record
+  // (which no longer carries a `share_package_json` field).
   const projection = createBrowserRuntimeProfileProjection({
     profile: {
       id: profile.id,
       label: profile.label,
       relays: profile.relays,
       groupPackageJson: profile.group_package_json,
-      sharePackageJson: profile.share_package_json,
+      sharePackageJson,
       manualPeerPolicyOverrides: profile.manual_peer_policy_overrides ?? [],
       peerPubkey: profile.peer_pubkey ?? null,
-      runtimeSnapshotJson: profile.runtime_snapshot_json ?? null,
+      runtimeSnapshotJson: null,
     },
     signerSettings: snapshot.signerSettings,
-    runtimeSnapshotJson: snapshot.runtimeSnapshotJson,
+    runtimeSnapshotJson: null,
     peerPermissionStates: snapshot.peerPermissionStates,
   });
   const summary = projection.summary;
@@ -315,16 +357,20 @@ export function toRuntimeProfile(profile: PwaProfile, snapshot: ReturnType<Brows
     group_public_key: summary.groupPublicKey,
     share_public_key: summary.sharePublicKey,
     manual_peer_policy_overrides: projection.manualPeerPolicyOverrides,
-    runtime_snapshot_json: summary.runtimeSnapshotJson ?? null,
     signer_settings: normalizePwaSignerSettings(snapshot.signerSettings),
     peer_pubkey: summary.peerPubkey ?? null,
   };
 }
 
-export function toRuntimeSnapshot(profile: PwaProfile, session: BrowserRuntimeSession, active: boolean): PwaRuntimeSnapshot {
+export function toRuntimeSnapshot(
+  profile: PwaProfile,
+  session: BrowserRuntimeSession,
+  active: boolean,
+  sharePackageJson: string,
+): PwaRuntimeSnapshot {
   const snapshot = session.read();
   const logs = session.collectLogs();
-  const runtimeProfile = toRuntimeProfile(profile, snapshot);
+  const runtimeProfile = toRuntimeProfile(profile, snapshot, sharePackageJson);
   return {
     active,
     profile: runtimeProfile,

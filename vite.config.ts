@@ -62,9 +62,20 @@ export default defineConfig(() => ({
       // stops at the first `.git` it finds, and `repos/igloo-pwa/.git` is a
       // submodule gitdir *file*, so it pins the allow list to repos/igloo-pwa and
       // blocks those sibling sources ("outside of Vite serving allow list").
-      // Allow the monorepo root so the shared submodule sources are served.
+      // Allow the monorepo root so the shared submodule sources — including the
+      // igloo-ui dist assets and its vendored fonts — are served.
       allow: [path.resolve(__dirname, '../..')]
+    },
+    headers: {
+      'Cross-Origin-Opener-Policy': 'same-origin',
+      'Cross-Origin-Embedder-Policy': 'require-corp',
+      'Cross-Origin-Resource-Policy': 'same-origin'
     }
+  },
+  test: {
+    include: ['test/frontend/**/*.test.{ts,tsx}'],
+    environment: 'jsdom',
+    setupFiles: ['./src/test/setup.ts']
   },
   clearScreen: false
 }));

@@ -64,7 +64,7 @@ describe('deriveGroupSummary', () => {
 describe('deriveExportSummary', () => {
   it('joins member, keyset, relays, and peer count into one line', () => {
     const summary = deriveExportSummary({
-      share_package_json: JSON.stringify({ idx: 1 }),
+      member_idx: 1,
       group_package_json: JSON.stringify({ group_name: 'Treasury', members: [{}, {}, {}] }),
       relays: ['wss://a', 'wss://b'],
     });
@@ -73,7 +73,7 @@ describe('deriveExportSummary', () => {
 
   it('singularizes a single relay and omits parts derived from malformed json', () => {
     const summary = deriveExportSummary({
-      share_package_json: 'not json',
+      member_idx: Number.NaN,
       group_package_json: 'not json',
       relays: ['wss://only'],
     });
