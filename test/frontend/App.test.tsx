@@ -13,7 +13,9 @@ import {
   cleanupLegacyPersistedState,
   createDebouncedPersistor,
   loadPersistedState,
+  partitionKeyFor,
 } from '@/lib/storage';
+import { __setInstanceIdForTests } from '@/lib/instance';
 import { toPersistable } from '@/lib/persist-allowlist';
 import type { PwaPersistedState, PwaProfile } from '@/lib/types';
 import { StoreProvider, useStore } from '@/lib/store';
@@ -34,6 +36,10 @@ function StoreHarness({ onReady }: { onReady: (store: ReturnType<typeof useStore
 
 beforeEach(() => {
   window.localStorage.clear();
+  window.sessionStorage.clear();
+  // Pin a fixed instance id so seeded blobs land in (and are read from) a
+  // deterministic partition (`igloo-pwa.state.v2::test`).
+  __setInstanceIdForTests('test');
   __resetLegacyCleanupSentinelForTests();
 });
 
@@ -51,7 +57,7 @@ describe('igloo-pwa app shell', () => {
   it('deletes a returning profile via the card menu after confirmation', async () => {
     cleanup();
     window.localStorage.setItem(
-      STORAGE_KEY,
+      partitionKeyFor(),
       JSON.stringify({
         profiles: [
           {
@@ -108,7 +114,7 @@ describe('igloo-pwa app shell', () => {
   it('opens the recover-key Collect Shares flow from the returning card menu', () => {
     cleanup();
     window.localStorage.setItem(
-      STORAGE_KEY,
+      partitionKeyFor(),
       JSON.stringify({
         profiles: [
           {
@@ -260,7 +266,7 @@ describe('igloo-pwa app shell', () => {
   it('rejects onboarding when the derived profile id already exists locally', async () => {
     cleanup();
     window.localStorage.setItem(
-      STORAGE_KEY,
+      partitionKeyFor(),
       JSON.stringify({
         profiles: [
           {
@@ -337,7 +343,7 @@ describe('igloo-pwa app shell', () => {
   it('normalizes legacy onboard-confirm state back to package entry (pending connection does not survive reload)', async () => {
     cleanup();
     window.localStorage.setItem(
-      STORAGE_KEY,
+      partitionKeyFor(),
       JSON.stringify({
         profiles: [],
         selectedProfileId: '',
@@ -405,7 +411,7 @@ describe('igloo-pwa app shell', () => {
   it('normalizes transient onboarding states back to package entry', async () => {
     cleanup();
     window.localStorage.setItem(
-      STORAGE_KEY,
+      partitionKeyFor(),
       JSON.stringify({
         profiles: [],
         selectedProfileId: '',
@@ -454,7 +460,7 @@ describe('igloo-pwa app shell', () => {
 
   it('persists browser settings across reloads', async () => {
     window.localStorage.setItem(
-      STORAGE_KEY,
+      partitionKeyFor(),
       JSON.stringify({
         profiles: [
           {
@@ -512,7 +518,7 @@ describe('igloo-pwa app shell', () => {
     fireEvent.click(toggle);
     await waitFor(
       () => {
-        const stored = window.localStorage.getItem(STORAGE_KEY);
+        const stored = window.localStorage.getItem(partitionKeyFor());
         expect(stored).toContain('"auto_open_signer":false');
       },
       { timeout: 2000 },
@@ -522,7 +528,7 @@ describe('igloo-pwa app shell', () => {
   it('shows the unified settings actions and no reset control', () => {
     cleanup();
     window.localStorage.setItem(
-      STORAGE_KEY,
+      partitionKeyFor(),
       JSON.stringify({
         profiles: [
           {

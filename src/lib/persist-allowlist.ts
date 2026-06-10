@@ -58,7 +58,15 @@ function toPersistableProfile(profile: PwaProfile): PersistableProfile {
   return out as PersistableProfile;
 }
 
+/**
+ * Schema version stamped into every persisted blob. Bump when the persisted
+ * shape changes incompatibly so `loadPersistedState` quarantines old blobs and
+ * boots clean instead of risking a hydrate-time crash.
+ */
+export const SCHEMA_VERSION = 2;
+
 export type PersistableState = {
+  schemaVersion: number;
   profiles: PersistableProfile[];
   peerPermissionStates: PwaPersistedState['peerPermissionStates'];
   selectedProfileId: PwaPersistedState['selectedProfileId'];
@@ -75,6 +83,7 @@ export type PersistableState = {
  */
 export function toPersistable(state: PwaPersistedState): PersistableState {
   return {
+    schemaVersion: SCHEMA_VERSION,
     profiles: state.profiles.map(toPersistableProfile),
     peerPermissionStates: state.peerPermissionStates,
     selectedProfileId: state.selectedProfileId,
