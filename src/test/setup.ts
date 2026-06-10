@@ -2,12 +2,51 @@ import '@testing-library/jest-dom/vitest';
 import { afterEach, beforeEach } from 'vitest';
 
 import {
+  __setProfileBackupPublishForTests,
   setInjectedWasmBridgeModuleForTests,
   setInjectedWasmProfileModuleForTests,
 } from 'igloo-shared';
 import { ensureLocalStorage } from 'igloo-shared/testing/setup-dom';
 import { setBrowserRuntimeTestHooks } from '@/lib/page-runtime-host';
 import { createFakeBrowserRuntimeSession } from '@/lib/page-runtime-host-fakes';
+
+// Keep unit tests off the real relay network. Two paths would otherwise open a
+// real WebSocket whose connection resolves via undici *after* the test tears
+// down — surfacing a spurious unhandled error (and making the create->finish
+// flow flaky / fail when relays are unreachable):
+//   1. igloo-shared `pingRelay` relay-connectivity checks use the global
+//      WebSocket — replace it with a stub that reports an instant connection.
+//   2. the create/import save flow publishes a profile-backup event via
+//      igloo-shared's `SimplePool` — disabled per-test via the seam below.
+class StubWebSocket {
+  static readonly CONNECTING = 0;
+  static readonly OPEN = 1;
+  static readonly CLOSING = 2;
+  static readonly CLOSED = 3;
+  onopen: ((event?: unknown) => void) | null = null;
+  onerror: ((event?: unknown) => void) | null = null;
+  onclose: ((event?: unknown) => void) | null = null;
+  onmessage: ((event?: unknown) => void) | null = null;
+  readyState = StubWebSocket.CONNECTING;
+  readonly url: string;
+
+  constructor(url: string) {
+    this.url = url;
+    queueMicrotask(() => {
+      this.readyState = StubWebSocket.OPEN;
+      this.onopen?.(new Event('open'));
+    });
+  }
+
+  send() {}
+  close() {
+    this.readyState = StubWebSocket.CLOSED;
+  }
+  addEventListener() {}
+  removeEventListener() {}
+}
+
+globalThis.WebSocket = StubWebSocket as unknown as typeof WebSocket;
 
 const mockRuntimeSnapshot = JSON.stringify({
   bootstrap: {
@@ -55,6 +94,8 @@ class MockWasmBridgeRuntime {
 
 beforeEach(() => {
   ensureLocalStorage();
+  // Skip the real SimplePool relay publish in the profile-backup save path.
+  __setProfileBackupPublishForTests(() => {});
   setInjectedWasmBridgeModuleForTests({
     WasmBridgeRuntime: MockWasmBridgeRuntime,
     create_onboarding_request_bundle: (_shareSecret, _peerPubkey32Hex, _eventKind, sentAtSeconds) =>
@@ -379,4 +420,5 @@ afterEach(() => {
   setBrowserRuntimeTestHooks(null);
   setInjectedWasmBridgeModuleForTests(null);
   setInjectedWasmProfileModuleForTests(null);
+  __setProfileBackupPublishForTests(null);
 });
