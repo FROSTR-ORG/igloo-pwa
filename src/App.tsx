@@ -52,6 +52,7 @@ import {
   type PolicyDashboardViewModel,
   type SignerDashboardViewModel,
   type WelcomeReturningProfileModel,
+  type WelcomeResumableDeviceModel,
 } from 'igloo-ui';
 import {
   pingRelay,
@@ -645,11 +646,23 @@ function AppShell() {
   // Other stored device partitions (from earlier browser sessions / closed
   // tabs) that hold profiles, excluding this tab's own instance. Computed once
   // per mount — the registry only changes via this tab's own writes.
-  const resumableDevices = React.useMemo(() => {
+  const resumeDevices = React.useMemo<WelcomeResumableDeviceModel[]>(() => {
     const currentId = getInstanceId();
     return readInstanceRegistry()
       .filter((record) => record.id !== currentId && record.profileCount > 0)
-      .sort((a, b) => b.updatedAt - a.updatedAt);
+      .sort((a, b) => b.updatedAt - a.updatedAt)
+      .map((record) => ({
+        id: record.id,
+        label: record.label ?? `Device ${record.id.slice(0, 8)}`,
+        metaLabel: `${record.profileCount} profile${record.profileCount === 1 ? '' : 's'}`,
+      }));
+  }, []);
+
+  // Adopt the selected partition's instance id into this tab, then reload so the
+  // store re-hydrates from it.
+  const resumeDevice = React.useCallback((deviceId: string) => {
+    adoptInstanceId(deviceId);
+    window.location.reload();
   }, []);
   const [operatorSettingsDraft, setOperatorSettingsDraft] = React.useState<OperatorSettingsDraft>(() =>
     buildOperatorSettingsDraft(selectedProfile),
@@ -765,82 +778,46 @@ function AppShell() {
     return <Alert tone="warning">{store.runtimeWarning}</Alert>;
   }
 
+  // Each browser tab is its own isolated signer instance (its state is
+  // partitioned per tab). A browser restart clears the tab's instance id, so a
+  // fresh tab surfaces any other stored devices here for one-click resume,
+  // rather than orphaning their profiles. The cards render inside the centered
+  // welcome hero so they share the Paper device-card treatment and layout.
   function renderLanding() {
     if (store.profiles.length === 0) {
       return (
-        <>
-          <WelcomeEntryHero
-            logoSrc="/igloo-paper-mark.png"
-            onNewKeyset={() => store.setActiveView('create-generate')}
-            onImportProfile={() => store.startLoadImport()}
-            onOnboard={() => store.setActiveView('onboard-connect')}
-          />
-          {renderResumeDevices()}
-        </>
+        <WelcomeEntryHero
+          logoSrc="/igloo-paper-mark.png"
+          onNewKeyset={() => store.setActiveView('create-generate')}
+          onImportProfile={() => store.startLoadImport()}
+          onOnboard={() => store.setActiveView('onboard-connect')}
+          resumeDevices={resumeDevices}
+          onResumeDevice={resumeDevice}
+        />
       );
     }
 
     return (
-      <>
-        <WelcomeReturningHero
-          logoSrc="/igloo-paper-mark.png"
-          layout={deriveWelcomeReturningLayout(store.profiles.length)}
-          profiles={store.profiles.map(deriveWelcomeReturningProfile)}
-          onUnlock={openWelcomeUnlock}
-          onRotate={(profileId) => {
-            store.selectProfile(profileId);
-            store.setActiveView('rotate-connect');
-          }}
-          onRecover={(profileId) => {
-            setRecoveredKey(null);
-            store.startRecoverKey(profileId);
-          }}
-          onDelete={openWelcomeDelete}
-          onNewKeyset={() => store.setActiveView('create-generate')}
-          onImportProfile={() => store.startLoadImport()}
-          onOnboard={() => store.setActiveView('onboard-connect')}
-        />
-        {renderResumeDevices()}
-      </>
-    );
-  }
-
-  // Each browser tab is its own isolated signer instance (its state is
-  // partitioned per tab). A browser restart clears the tab's instance id, so a
-  // fresh tab surfaces any other stored devices here for one-click resume,
-  // rather than orphaning their profiles.
-  function renderResumeDevices() {
-    if (resumableDevices.length === 0) return null;
-    return (
-      <div
-        className="mx-auto mt-6 w-full max-w-md space-y-2 text-left"
-        data-testid="welcomeResumeDevices"
-      >
-        <p className="text-xs uppercase tracking-wide text-gray-500">
-          Other signer devices saved in this browser
-        </p>
-        <div className="space-y-2">
-          {resumableDevices.map((device) => (
-            <button
-              key={device.id}
-              type="button"
-              className="flex w-full items-center justify-between rounded-lg border border-blue-900/30 bg-gray-950/30 px-4 py-3 text-sm text-blue-100 hover:border-blue-500/50 hover:text-blue-50"
-              data-testid="welcomeResumeDevice"
-              onClick={() => {
-                adoptInstanceId(device.id);
-                window.location.reload();
-              }}
-            >
-              <span className="font-medium">
-                {device.label ?? `Device ${device.id.slice(0, 8)}`}
-              </span>
-              <span className="text-xs text-gray-400">
-                {device.profileCount} profile{device.profileCount === 1 ? '' : 's'} · Resume
-              </span>
-            </button>
-          ))}
-        </div>
-      </div>
+      <WelcomeReturningHero
+        logoSrc="/igloo-paper-mark.png"
+        layout={deriveWelcomeReturningLayout(store.profiles.length)}
+        profiles={store.profiles.map(deriveWelcomeReturningProfile)}
+        onUnlock={openWelcomeUnlock}
+        onRotate={(profileId) => {
+          store.selectProfile(profileId);
+          store.setActiveView('rotate-connect');
+        }}
+        onRecover={(profileId) => {
+          setRecoveredKey(null);
+          store.startRecoverKey(profileId);
+        }}
+        onDelete={openWelcomeDelete}
+        onNewKeyset={() => store.setActiveView('create-generate')}
+        onImportProfile={() => store.startLoadImport()}
+        onOnboard={() => store.setActiveView('onboard-connect')}
+        resumeDevices={resumeDevices}
+        onResumeDevice={resumeDevice}
+      />
     );
   }
 

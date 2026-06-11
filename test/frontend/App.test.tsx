@@ -15,7 +15,8 @@ import {
   loadPersistedState,
   partitionKeyFor,
 } from '@/lib/storage';
-import { __setInstanceIdForTests } from '@/lib/instance';
+import { INSTANCE_REGISTRY_KEY, __setInstanceIdForTests } from '@/lib/instance';
+import { CRITICAL_E2E_TEST_IDS } from 'igloo-ui';
 import { toPersistable } from '@/lib/persist-allowlist';
 import type { PwaPersistedState, PwaProfile } from '@/lib/types';
 import { StoreProvider, useStore } from '@/lib/store';
@@ -52,6 +53,33 @@ describe('igloo-pwa app shell', () => {
     expect(screen.getByRole('button', { name: 'Generate Keyset' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Import Existing Device' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Onboard New Device' })).toBeInTheDocument();
+  });
+
+  it('surfaces a resumable device from another partition as a Paper device card', () => {
+    cleanup();
+    window.localStorage.clear();
+    // A device saved under a different (e.g. pre-restart) instance id. The
+    // current tab ('test') has no profiles, so this should render inside the
+    // centered welcome hero as a Paper device card with a Resume action —
+    // not as an orphaned block below the fold.
+    const now = 1700000000000;
+    window.localStorage.setItem(
+      INSTANCE_REGISTRY_KEY,
+      JSON.stringify([
+        { id: 'laptop-instance', label: 'Laptop Signer', createdAt: now, updatedAt: now, profileCount: 2 },
+      ]),
+    );
+
+    render(<App />);
+
+    // Rendered in the entry hero (no profiles in this partition), as a device
+    // card carrying the shared Paper test-id.
+    expect(screen.getByRole('heading', { name: 'Generate New Keyset' })).toBeInTheDocument();
+    const card = screen.getByTestId(CRITICAL_E2E_TEST_IDS.welcomeResumeDevice);
+    expect(card).toHaveAttribute('data-device-id', 'laptop-instance');
+    expect(screen.getByText('Laptop Signer')).toBeInTheDocument();
+    expect(screen.getByText('2 profiles')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Resume' })).toBeInTheDocument();
   });
 
   it('deletes a returning profile via the card menu after confirmation', async () => {
