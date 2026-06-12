@@ -174,7 +174,38 @@ export async function startSession(
   // Bridge onboard-served signals from this session to the store listener.
   attachOnboardCompleteForwarder(session);
 
+  // Re-apply host-persisted manual peer-policy overrides into the freshly started
+  // runtime. These overrides live on the profile (and travel inside export
+  // packages) but are NOT part of the signer's own restore path, so without this
+  // step a reload/restart would silently drop every operator override the runtime
+  // was last enforcing.
+  await applyPersistedPolicyOverrides(session, profile.manual_peer_policy_overrides);
+
   return toRuntimeSnapshot(profile, session, true, sharePackageJson);
+}
+
+const PERSISTED_POLICY_METHODS = ['ping', 'onboard', 'sign', 'ecdh'] as const;
+
+async function applyPersistedPolicyOverrides(
+  session: BrowserRuntimeSession,
+  overrides: PwaProfile['manual_peer_policy_overrides'],
+): Promise<void> {
+  if (!overrides?.length) return;
+  for (const entry of overrides) {
+    for (const direction of ['request', 'respond'] as const) {
+      const methods = entry.policy?.[direction];
+      if (!methods) continue;
+      for (const method of PERSISTED_POLICY_METHODS) {
+        const value = methods[method];
+        if (!value || value === 'unset') continue;
+        try {
+          await session.updatePeerPolicyOverride(entry.pubkey, { direction, method, value });
+        } catch {
+          // Best-effort: one malformed override entry must not abort signer startup.
+        }
+      }
+    }
+  }
 }
 
 export async function stopSession(
