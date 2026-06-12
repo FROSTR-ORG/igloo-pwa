@@ -97,6 +97,7 @@ type AppState = PwaPersistedState & {
   connectRotationPackage: () => Promise<void>;
   finalizeRotationUpdate: () => Promise<void>;
   startRecoverKey: (profileId: string) => void;
+  setRecoverDevicePassphrase: (value: string) => void;
   updateRecoverSource: (
     index: number,
     field: 'packageText' | 'password',
@@ -195,6 +196,7 @@ function createDefaultDraftSecrets(): PwaDraftSecrets {
     createFormPrivateKey: '',
     rotationSources: {},
     recoverKeySources: {},
+    recoverDevicePassphrase: '',
     profileFormPassword: '',
     profileFormConfirm: '',
     distributionPasswords: {},
@@ -740,7 +742,14 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           draftSecrets: {
             ...current.draftSecrets,
             recoverKeySources: {},
+            recoverDevicePassphrase: '',
           },
+        }));
+      },
+      setRecoverDevicePassphrase(value) {
+        setState((current) => ({
+          ...current,
+          draftSecrets: { ...current.draftSecrets, recoverDevicePassphrase: value },
         }));
       },
       updateRecoverSource(index, field, value) {
@@ -801,7 +810,16 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         }));
       },
       async recoverKeyFromShares() {
+        if (!selectedProfile) {
+          throw new Error('Select a device profile to recover its key.');
+        }
+        // The recovering device is a group member: its profile supplies the group
+        // package (public) and its own share (unlocked with the device passphrase),
+        // which counts toward the threshold. The remaining shares are pasted.
         const recovered = await adapter.recoverNsecFromShares({
+          groupPackageJson: selectedProfile.group_package_json,
+          encryptedShareArtifact: selectedProfile.encrypted_bfshare_artifact,
+          devicePassphrase: state.draftSecrets.recoverDevicePassphrase,
           sources: state.drafts.recoverKeyForm.sources
             .map((source, index) => ({
               packageText: source.packageText.trim(),
@@ -810,7 +828,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
             .filter((source) => source.packageText && source.password),
         });
         // The reconstructed key is never persisted; it is returned to the caller for
-        // in-memory display and the source inputs are cleared immediately.
+        // in-memory display and the source inputs/passphrase are cleared immediately.
         setState((current) => ({
           ...current,
           activeView: 'recover-key',
@@ -821,6 +839,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           draftSecrets: {
             ...current.draftSecrets,
             recoverKeySources: {},
+            recoverDevicePassphrase: '',
           },
         }));
         return recovered;
@@ -837,9 +856,13 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           || readProfileGroupName(sourceProfile)
           || sourceProfile?.label
           || '';
+        if (state.drafts.createForm.mode === 'rotate' && !sourceProfile) {
+          throw new Error('Select the device profile to rotate.');
+        }
         const keyset =
-          state.drafts.createForm.mode === 'rotate'
+          state.drafts.createForm.mode === 'rotate' && sourceProfile
             ? await adapter.createRotatedKeyset({
+                groupPackageJson: sourceProfile.group_package_json,
                 groupName: rotationGroupName,
                 threshold,
                 count,

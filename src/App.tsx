@@ -495,7 +495,9 @@ export function RecoverPrivateKeyView({
           <label>
             {fieldLabel}
             <div className="igloo-recover-key-field">
-              <span>{revealed ? displayValue : masked}</span>
+              <span data-testid={CRITICAL_E2E_TEST_IDS.recoverKeyValue}>
+                {revealed ? displayValue : masked}
+              </span>
             </div>
           </label>
 
@@ -515,7 +517,13 @@ export function RecoverPrivateKeyView({
             >
               QR code
             </Button>
-            <Button type="button" size="sm" variant="secondary" onClick={() => setRevealed((value) => !value)}>
+            <Button
+              type="button"
+              size="sm"
+              variant="secondary"
+              data-testid={CRITICAL_E2E_TEST_IDS.recoverRevealKey}
+              onClick={() => setRevealed((value) => !value)}
+            >
               {revealed ? 'Hide' : 'Reveal'}
             </Button>
             <Button type="button" size="sm" variant="secondary" onClick={onClear}>
@@ -1381,6 +1389,8 @@ function AppShell() {
           />
           <section className="igloo-flow-root">
             <RecoverCollectSharesPanel
+              devicePassphrase={store.draftSecrets.recoverDevicePassphrase}
+              onChangeDevicePassphrase={(value) => store.setRecoverDevicePassphrase(value)}
               sources={sources.map((source, index) => ({
                 packageText: source.packageText,
                 packagePassword: store.draftSecrets.recoverKeySources[index] ?? '',

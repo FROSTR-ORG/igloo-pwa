@@ -2,7 +2,6 @@ import '@testing-library/jest-dom/vitest';
 import { afterEach, beforeEach } from 'vitest';
 
 import {
-  __setProfileBackupPublishForTests,
   setInjectedWasmBridgeModuleForTests,
   setInjectedWasmProfileModuleForTests,
 } from 'igloo-shared';
@@ -94,8 +93,6 @@ class MockWasmBridgeRuntime {
 
 beforeEach(() => {
   ensureLocalStorage();
-  // Skip the real SimplePool relay publish in the profile-backup save path.
-  __setProfileBackupPublishForTests(() => {});
   setInjectedWasmBridgeModuleForTests({
     WasmBridgeRuntime: MockWasmBridgeRuntime,
     create_onboarding_request_bundle: (_shareSecret, _peerPubkey32Hex, _eventKind, sentAtSeconds) =>
@@ -420,5 +417,4 @@ afterEach(() => {
   setBrowserRuntimeTestHooks(null);
   setInjectedWasmBridgeModuleForTests(null);
   setInjectedWasmProfileModuleForTests(null);
-  __setProfileBackupPublishForTests(null);
 });

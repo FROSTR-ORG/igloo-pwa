@@ -1,11 +1,12 @@
 import {
-  buildRotationDraftFromBfshares,
+  buildRotationDraft,
+  decodeBfSharePackage,
   encodeBfOnboardPackage,
   getWasmKeysetApi,
+  groupPackageFromWireJson,
   groupPackageToWireJson,
   normalizeHex32,
   publicKeyFromSecret,
-  recoverRotationSourceFromBfshare,
   recoverSecretKeyFromShares,
   sharePackageToWireJson,
   type BrowserOnboardPackagePayload,
@@ -93,6 +94,9 @@ export async function createGeneratedKeyset(input: GeneratedKeysetInput): Promis
 }
 
 export async function createRotatedKeyset(input: {
+  // The rotating device's own profile group package (wire JSON) — supplies the
+  // member indices for the pasted shares, replacing the removed relay fetch.
+  groupPackageJson: string;
   groupName: string;
   threshold: number;
   count: number;
@@ -101,8 +105,12 @@ export async function createRotatedKeyset(input: {
   if (!input.groupName.trim()) {
     throw new Error('Group name is required.');
   }
-  const draft = await buildRotationDraftFromBfshares({
-    sources: input.sources,
+  // Decode the pasted current-keyset shares locally; the group context comes from
+  // the rotating device's own profile (no relay-backup fetch).
+  const shareSecrets = await decodeShareSecrets(input.sources);
+  const draft = await buildRotationDraft({
+    groupPackage: groupPackageFromWireJson(input.groupPackageJson),
+    shareSecrets,
     threshold: input.threshold,
     count: input.count,
     groupName: input.groupName.trim(),
@@ -129,17 +137,41 @@ export async function createRotatedKeyset(input: {
   };
 }
 
+// Decode a set of pasted bfshare packages into raw share secrets, skipping empty
+// rows. Each row's password decrypts its own package.
+async function decodeShareSecrets(
+  sources: Array<{ packageText: string; password: string }>,
+): Promise<string[]> {
+  const filled = sources.filter((source) => source.packageText.trim() && source.password);
+  const decoded = await Promise.all(
+    filled.map((source) => decodeBfSharePackage(source.packageText.trim(), source.password)),
+  );
+  return decoded.map((share) => share.shareSecret);
+}
+
 export async function recoverNsecFromShares(input: {
+  // The recovering device's own profile group package (wire JSON) — supplies the
+  // member indices for every share, replacing the removed relay fetch.
+  groupPackageJson: string;
+  // The recovering device's password-sealed bfshare artifact + its passphrase;
+  // the device contributes its own share toward the threshold.
+  encryptedShareArtifact: string;
+  devicePassphrase: string;
   sources: Array<{ packageText: string; password: string }>;
 }): Promise<{ nsec: string; signingKeyHex: string }> {
-  const recoveredSources = await Promise.all(
-    input.sources
-      .filter((source) => source.packageText.trim() && source.password)
-      .map((source) =>
-        recoverRotationSourceFromBfshare(source.packageText.trim(), source.password),
-      ),
-  );
-  return await recoverSecretKeyFromShares({ sources: recoveredSources });
+  const groupPackage = groupPackageFromWireJson(input.groupPackageJson);
+  let deviceShareSecret: string;
+  try {
+    const deviceShare = await decodeBfSharePackage(input.encryptedShareArtifact, input.devicePassphrase);
+    deviceShareSecret = deviceShare.shareSecret;
+  } catch {
+    throw new Error('Incorrect device passphrase.');
+  }
+  const pastedSecrets = await decodeShareSecrets(input.sources);
+  return await recoverSecretKeyFromShares({
+    groupPackage,
+    shareSecrets: [deviceShareSecret, ...pastedSecrets],
+  });
 }
 
 export async function createDeviceProfileFromGeneratedShare(

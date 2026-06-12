@@ -278,6 +278,8 @@ export type PwaDraftSecrets = {
   rotationSources: Record<number, string>;
   /** Per-source passphrases for the shares-based private-key recovery flow. */
   recoverKeySources: Record<number, string>;
+  /** Passphrase that unlocks this device's own share during key recovery. Never persisted. */
+  recoverDevicePassphrase: string;
   profileFormPassword: string;
   profileFormConfirm: string;
   distributionPasswords: Record<number, { password: string; confirmPassword: string }>;
