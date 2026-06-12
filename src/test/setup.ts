@@ -167,8 +167,6 @@ beforeEach(() => {
     bfshare_prefix: () => 'bfshare',
     bfonboard_prefix: () => 'bfonboard',
     bfprofile_prefix: () => 'bfprofile',
-    profile_backup_event_kind: () => 10000,
-    profile_backup_key_domain: () => 'frostr-profile-backup/v1',
     encode_bfshare_package: (_payload, _password) => 'bfshare1test',
     decode_bfshare_package: (_value, _password) =>
       JSON.stringify({
@@ -214,71 +212,6 @@ beforeEach(() => {
         profileString: 'bfprofile1test',
         shareString: 'bfshare1test'
       }),
-    create_encrypted_profile_backup: (_profile) =>
-      JSON.stringify({
-        version: 1,
-        device: {
-          name: 'Onboarded Device',
-          sharePublicKey: '33'.repeat(32),
-          manualPeerPolicyOverrides: [],
-          relays: ['wss://relay.primal.net']
-        },
-        groupPackage: {
-          groupName: 'Onboarded Device',
-          groupPk: '22'.repeat(32),
-          threshold: 2,
-          members: [
-            { idx: 1, pubkey: `02${'33'.repeat(32)}` },
-            { idx: 2, pubkey: `02${'44'.repeat(32)}` },
-            { idx: 3, pubkey: `02${'55'.repeat(32)}` }
-          ]
-        }
-      }),
-    derive_profile_backup_conversation_key_hex: () => 'aa'.repeat(32),
-    encrypt_profile_backup_content: (backupJson, _shareSecret) => backupJson,
-    decrypt_profile_backup_content: (ciphertext, _shareSecret) => ciphertext,
-    build_profile_backup_event: (_shareSecret, backupJson, createdAtSeconds) =>
-      JSON.stringify({
-        kind: 10000,
-        created_at: createdAtSeconds ?? Math.floor(Date.now() / 1000),
-        pubkey: '33'.repeat(32),
-        content: backupJson,
-        tags: [],
-        id: 'test-event',
-        sig: 'aa'.repeat(64)
-      }),
-    parse_profile_backup_event: (eventJson, _shareSecret) => {
-      const event = JSON.parse(eventJson) as { content?: string };
-      return typeof event.content === 'string' ? event.content : '{}';
-    },
-    recover_profile_from_share_and_backup: (shareJson, backupJson) => {
-      const share = JSON.parse(shareJson) as { shareSecret: string };
-      const backup = JSON.parse(backupJson) as {
-        version: number;
-        device: {
-          name: string;
-          manualPeerPolicyOverrides: [];
-          relays: string[];
-        };
-        groupPackage: {
-          groupName: string;
-          groupPk: string;
-          threshold: number;
-          members: Array<{ idx: number; pubkey: string }>;
-        };
-      };
-      return JSON.stringify({
-        profileId: share.shareSecret === '11'.repeat(32) ? '77'.repeat(32) : '88'.repeat(32),
-        version: backup.version,
-        device: {
-          name: backup.device.name,
-          shareSecret: share.shareSecret,
-          manualPeerPolicyOverrides: backup.device.manualPeerPolicyOverrides,
-          relays: backup.device.relays,
-        },
-        groupPackage: backup.groupPackage,
-      });
-    },
   });
   setBrowserRuntimeTestHooks({
     async connectOnboardingPackageAndCaptureProfile() {
