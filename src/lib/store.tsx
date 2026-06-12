@@ -548,7 +548,14 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   );
 
   const persistProfileToDashboard = React.useCallback(
-    async (profile: PwaProfile, passphrase: string, runtimeSnapshot?: PwaRuntimeSnapshot | null) => {
+    async (
+      profile: PwaProfile,
+      passphrase: string,
+      runtimeSnapshot?: PwaRuntimeSnapshot | null,
+      // In-memory onboard handoff snapshot (never persisted) — restores the
+      // exchanged nonce pool so a freshly-onboarded signer can co-sign immediately.
+      restoreSnapshotJson?: string | null,
+    ) => {
       ensureProfileIdAvailable(profile);
       const saved =
         runtimeSnapshot != null
@@ -560,7 +567,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           : await saveBrowserProfileAndMaybeActivate({
               profile,
               autoStart: state.settings.auto_open_signer,
-              activate: async () => await adapter.startSession(profile, passphrase, controller),
+              activate: async () =>
+                await adapter.startSession(profile, passphrase, controller, restoreSnapshotJson),
             });
       const snapshot = saved.runtime;
       const storedProfile = (snapshot?.profile ?? saved.profile) as PwaProfile;
@@ -1497,7 +1505,14 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           password,
           existingProfileIds: state.profiles.map((entry) => entry.id),
         });
-        await persistProfileToDashboard(profile, password);
+        // Hand the ephemeral onboard snapshot to the signer launch so it restores the
+        // nonce pool exchanged during onboarding (in-memory only; never persisted).
+        await persistProfileToDashboard(
+          profile,
+          password,
+          null,
+          state.pendingOnboardConnection.runtime_snapshot_json ?? null,
+        );
         setState((current) => ({
           ...current,
           pendingOnboardConnection: null,

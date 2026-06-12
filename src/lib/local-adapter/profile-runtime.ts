@@ -136,6 +136,12 @@ export async function startSession(
   profile: PwaProfile,
   passphrase: string,
   controller?: SessionController | null,
+  // Ephemeral, in-memory ONLY (never persisted). When supplied — currently only by
+  // the onboard handoff — the signer restores from this runtime snapshot (preserving
+  // the nonce pool both sides exchanged during onboarding) instead of re-initializing
+  // a fresh, empty pool. Without it a freshly-onboarded device strands the inviter's
+  // nonces and can't co-sign until a re-sync.
+  restoreSnapshotJson?: string | null,
 ): Promise<PwaRuntimeSnapshot> {
   if (!passphrase.trim()) {
     throw new Error('Passphrase is required.');
@@ -160,6 +166,9 @@ export async function startSession(
     signerSettings: profile.signer_settings,
     groupPackageJson: profile.group_package_json,
     sharePackageJson,
+    // Restore the exchanged nonce pool when handed an onboard snapshot; otherwise a
+    // fresh signer (null) bootstraps an empty pool. Never sourced from persistence.
+    runtimeSnapshotJson: restoreSnapshotJson ?? null,
   });
 
   // Bridge onboard-served signals from this session to the store listener.

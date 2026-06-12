@@ -135,6 +135,9 @@ export async function connectOnboardingPackage(input: OnboardConnectInput): Prom
     peer_pubkey: connection.peerPubkey ?? null,
     profile_payload: connection.profilePayload,
     manual_peer_policy_overrides: connection.manualPeerPolicyOverrides,
+    // In-memory handoff (never persisted): carries the exchanged nonce pool so the
+    // launched signer restores it instead of re-bootstrapping a fresh, empty pool.
+    runtime_snapshot_json: result.runtimeSnapshotJson,
   };
 }
 

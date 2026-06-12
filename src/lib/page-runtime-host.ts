@@ -42,6 +42,10 @@ export type BrowserStoredProfile = {
 export type BrowserBootstrapProfile = BrowserStoredProfile & {
   groupPackageJson: string;
   sharePackageJson: string;
+  // Ephemeral, in-memory ONLY (never persisted, D.1). When present, the signer
+  // restores from this onboard snapshot (preserving the exchanged nonce pool)
+  // instead of bootstrapping a fresh, empty pool.
+  runtimeSnapshotJson?: string | null;
 };
 
 export type BrowserOnboardingResult = {

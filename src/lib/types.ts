@@ -193,6 +193,12 @@ export type PwaOnboardConnection = {
   profile_payload?: BrowserProfilePackagePayload;
   manual_peer_policy_overrides?: BrowserManualPeerPolicyOverride[];
   peer_pubkey?: string | null;
+  // Ephemeral, in-memory ONLY (never persisted — its state_hex embeds the share
+  // secret, D.1). The onboard handshake's runtime snapshot, carrying the nonce
+  // pool both sides exchanged. Handed straight to the signer launch so it restores
+  // from it instead of re-initializing a fresh (empty) pool — which would strand
+  // the inviter's nonces and break the first signature until a re-sync.
+  runtime_snapshot_json?: string | null;
 };
 
 export type PwaDistributionStatus = 'draft' | 'packaged' | 'delivered' | 'saved' | 'onboarded';
