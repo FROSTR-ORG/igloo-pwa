@@ -9,6 +9,7 @@ import {
 
 import * as adapter from './local-adapter';
 import { saveTextToFile } from './file-save';
+import { gcEmptyInstances, getInstanceId } from './instance';
 import { toPersistable } from './persist-allowlist';
 import { SessionController } from './session-controller';
 import {
@@ -279,6 +280,18 @@ function ensureDistributionPasswordSlot(
 }
 
 function normalizeLoadedState(): PwaPersistedState {
+  try {
+    return normalizeLoadedStateFromStorage();
+  } catch {
+    // Defense in depth: a structurally-plausible blob that still trips
+    // normalization (a wrong-typed nested field that slipped past the storage
+    // guard) must never crash hydrate. Reset this partition to a clean slate.
+    clearPersistedState();
+    return createDefaultState();
+  }
+}
+
+function normalizeLoadedStateFromStorage(): PwaPersistedState {
   const loaded = loadPersistedState();
   if (!loaded) return createDefaultState();
   const loadedActiveView = (loaded as { activeView?: string }).activeView;
@@ -300,7 +313,9 @@ function normalizeLoadedState(): PwaPersistedState {
     sharePackageJsonByProfileId: {},
     draftSecrets: createDefaultDraftSecrets(),
     peerPermissionStates:
-      loaded.peerPermissionStates?.length ? loaded.peerPermissionStates : adapter.defaultPeerPermissionStates(),
+      Array.isArray(loaded.peerPermissionStates) && loaded.peerPermissionStates.length
+        ? loaded.peerPermissionStates
+        : adapter.defaultPeerPermissionStates(),
     drafts: {
       ...defaultDrafts,
       ...loaded.drafts,
@@ -309,15 +324,15 @@ function normalizeLoadedState(): PwaPersistedState {
         ...defaultDrafts.rotationForm,
         ...loaded.drafts?.rotationForm,
         sources:
-          loaded.drafts?.rotationForm?.sources?.length
-            ? loaded.drafts.rotationForm.sources.map((entry) => ({ packageText: entry.packageText ?? '' }))
+          Array.isArray(loaded.drafts?.rotationForm?.sources) && loaded.drafts.rotationForm.sources.length
+            ? loaded.drafts.rotationForm.sources.map((entry) => ({ packageText: entry?.packageText ?? '' }))
             : defaultDrafts.rotationForm.sources,
       },
       recoverKeyForm: {
         ...defaultDrafts.recoverKeyForm,
         ...loaded.drafts?.recoverKeyForm,
         sources:
-          loaded.drafts?.recoverKeyForm?.sources?.length
+          Array.isArray(loaded.drafts?.recoverKeyForm?.sources) && loaded.drafts.recoverKeyForm.sources.length
             ? loaded.drafts.recoverKeyForm.sources
             : defaultDrafts.recoverKeyForm.sources,
       },
@@ -404,6 +419,16 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     },
     [controller],
   );
+
+  // Reclaim empty storage partitions left by closed tabs (never touches a
+  // partition that holds profiles, nor this tab's own instance). Ref-gated so
+  // StrictMode's double mount doesn't run the sweep twice.
+  const gcRanRef = React.useRef(false);
+  React.useEffect(() => {
+    if (gcRanRef.current) return;
+    gcRanRef.current = true;
+    gcEmptyInstances({ keepId: getInstanceId() });
+  }, []);
 
   // D.1: the v1 per-tick `savePersistedState(state)` effect is replaced
   // with a debounced persistor that writes ONLY the allow-list fields
@@ -523,7 +548,14 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   );
 
   const persistProfileToDashboard = React.useCallback(
-    async (profile: PwaProfile, passphrase: string, runtimeSnapshot?: PwaRuntimeSnapshot | null) => {
+    async (
+      profile: PwaProfile,
+      passphrase: string,
+      runtimeSnapshot?: PwaRuntimeSnapshot | null,
+      // In-memory onboard handoff snapshot (never persisted) — restores the
+      // exchanged nonce pool so a freshly-onboarded signer can co-sign immediately.
+      restoreSnapshotJson?: string | null,
+    ) => {
       ensureProfileIdAvailable(profile);
       const saved =
         runtimeSnapshot != null
@@ -535,7 +567,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           : await saveBrowserProfileAndMaybeActivate({
               profile,
               autoStart: state.settings.auto_open_signer,
-              activate: async () => await adapter.startSession(profile, passphrase, controller),
+              activate: async () =>
+                await adapter.startSession(profile, passphrase, controller, restoreSnapshotJson),
             });
       const snapshot = saved.runtime;
       const storedProfile = (snapshot?.profile ?? saved.profile) as PwaProfile;
@@ -1472,7 +1505,14 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           password,
           existingProfileIds: state.profiles.map((entry) => entry.id),
         });
-        await persistProfileToDashboard(profile, password);
+        // Hand the ephemeral onboard snapshot to the signer launch so it restores the
+        // nonce pool exchanged during onboarding (in-memory only; never persisted).
+        await persistProfileToDashboard(
+          profile,
+          password,
+          null,
+          state.pendingOnboardConnection.runtime_snapshot_json ?? null,
+        );
         setState((current) => ({
           ...current,
           pendingOnboardConnection: null,

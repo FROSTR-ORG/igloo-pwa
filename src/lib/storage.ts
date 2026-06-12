@@ -1,7 +1,49 @@
+import {
+  getInstanceId,
+  quarantineCorruptState,
+  touchInstanceRegistry,
+} from './instance';
+import { SCHEMA_VERSION } from './persist-allowlist';
 import type { PwaPersistedState } from './types';
 
 export const STORAGE_KEY = 'igloo-pwa.state.v2';
 export const LEGACY_STORAGE_KEY_V1 = 'igloo-pwa.state.v1';
+
+/**
+ * Per-instance partition key, e.g. `igloo-pwa.state.v2::<instanceId>`. Each tab
+ * reads/writes its own partition so tabs never clobber each other's state.
+ */
+export function partitionKeyFor(id: string = getInstanceId()): string {
+  return `${STORAGE_KEY}::${id}`;
+}
+
+/**
+ * Structural + version guard. A blob is plausible if it is an object with a
+ * `profiles` array, an object-or-absent `drafts`, and either no `schemaVersion`
+ * (a pre-stamp blob) or the current one. Anything else is quarantined.
+ */
+function isPlausiblePersistedState(value: unknown): boolean {
+  if (value == null || typeof value !== 'object') return false;
+  const candidate = value as { profiles?: unknown; drafts?: unknown; schemaVersion?: unknown };
+  if (!Array.isArray(candidate.profiles)) return false;
+  if (
+    candidate.drafts !== undefined &&
+    (typeof candidate.drafts !== 'object' || candidate.drafts === null)
+  ) {
+    return false;
+  }
+  if (candidate.schemaVersion !== undefined && candidate.schemaVersion !== SCHEMA_VERSION) {
+    return false;
+  }
+  return true;
+}
+
+function derivePartitionLabel(state: PwaPersistedState): string | null {
+  const profiles = state.profiles;
+  if (!Array.isArray(profiles) || profiles.length === 0) return null;
+  const selected = profiles.find((profile) => profile.id === state.selectedProfileId);
+  return (selected ?? profiles[0])?.label ?? null;
+}
 
 let legacyCleanupDone = false;
 
@@ -34,23 +76,88 @@ export function __resetLegacyCleanupSentinelForTests() {
 export function loadPersistedState(): PwaPersistedState | null {
   if (typeof window === 'undefined') return null;
   cleanupLegacyPersistedState();
-  const raw = window.localStorage.getItem(STORAGE_KEY);
-  if (!raw) return null;
+  const partitionKey = partitionKeyFor();
+
+  let raw: string | null = null;
   try {
-    return JSON.parse(raw) as PwaPersistedState;
+    raw = window.localStorage.getItem(partitionKey);
   } catch {
     return null;
   }
+
+  // One-time migration: pre-partition single-tab users have their blob under
+  // the un-namespaced STORAGE_KEY. Adopt it into this tab's partition so their
+  // profiles survive the move to per-tab isolation.
+  if (raw == null) {
+    raw = adoptLegacyUnpartitionedState(partitionKey);
+    if (raw == null) return null;
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    quarantineCorruptState(partitionKey, raw);
+    return null;
+  }
+  if (!isPlausiblePersistedState(parsed)) {
+    quarantineCorruptState(partitionKey, raw);
+    return null;
+  }
+  return parsed as PwaPersistedState;
+}
+
+/**
+ * Adopt a legacy un-namespaced `igloo-pwa.state.v2` blob into the current
+ * partition (one-time, on the first load after the per-tab-isolation upgrade).
+ * Returns the adopted raw string, or null if there was nothing valid to adopt.
+ */
+function adoptLegacyUnpartitionedState(partitionKey: string): string | null {
+  if (partitionKey === STORAGE_KEY) return null; // never self-adopt
+  let legacyRaw: string | null = null;
+  try {
+    legacyRaw = window.localStorage.getItem(STORAGE_KEY);
+  } catch {
+    return null;
+  }
+  if (!legacyRaw) return null;
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(legacyRaw);
+  } catch {
+    return null; // leave a corrupt legacy blob alone; this tab boots fresh
+  }
+  if (!isPlausiblePersistedState(parsed)) return null;
+
+  try {
+    window.localStorage.setItem(partitionKey, legacyRaw);
+    window.localStorage.removeItem(STORAGE_KEY);
+    const profiles = (parsed as { profiles?: unknown[] }).profiles;
+    touchInstanceRegistry(getInstanceId(), {
+      profileCount: Array.isArray(profiles) ? profiles.length : 0,
+    });
+  } catch {
+    // If the adoption write fails, still return the raw so this session works.
+  }
+  return legacyRaw;
 }
 
 export function savePersistedState(state: PwaPersistedState) {
   if (typeof window === 'undefined') return;
-  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  const partitionKey = partitionKeyFor();
+  window.localStorage.setItem(partitionKey, JSON.stringify(state));
+  touchInstanceRegistry(getInstanceId(), {
+    profileCount: Array.isArray(state.profiles) ? state.profiles.length : 0,
+    label: derivePartitionLabel(state),
+  });
 }
 
 export function clearPersistedState() {
   if (typeof window === 'undefined') return;
-  window.localStorage.removeItem(STORAGE_KEY);
+  const partitionKey = partitionKeyFor();
+  window.localStorage.removeItem(partitionKey);
+  touchInstanceRegistry(getInstanceId(), { profileCount: 0 });
 }
 
 export type DebouncedSaveOptions = {

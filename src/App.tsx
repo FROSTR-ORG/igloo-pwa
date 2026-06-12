@@ -52,6 +52,7 @@ import {
   type PolicyDashboardViewModel,
   type SignerDashboardViewModel,
   type WelcomeReturningProfileModel,
+  type WelcomeResumableDeviceModel,
 } from 'igloo-ui';
 import {
   pingRelay,
@@ -62,6 +63,7 @@ import {
 import * as nip49 from 'nostr-tools/nip49';
 import { deriveExportSummary, toDashboardKey } from './lib/dashboard-view';
 import { saveTextToFile } from './lib/file-save';
+import { adoptInstanceId, getInstanceId, readInstanceRegistry } from './lib/instance';
 
 import { StoreProvider, useStore } from './lib/store';
 import type { PwaDistributionActionResult, PwaGeneratedShare } from './lib/types';
@@ -641,6 +643,27 @@ function AppShell() {
     const profile = store.profiles.find((entry) => entry.id === welcomeDeleteProfileId);
     return profile ? deriveWelcomeReturningProfile(profile) : null;
   }, [store.profiles, welcomeDeleteProfileId]);
+  // Other stored device partitions (from earlier browser sessions / closed
+  // tabs) that hold profiles, excluding this tab's own instance. Computed once
+  // per mount — the registry only changes via this tab's own writes.
+  const resumeDevices = React.useMemo<WelcomeResumableDeviceModel[]>(() => {
+    const currentId = getInstanceId();
+    return readInstanceRegistry()
+      .filter((record) => record.id !== currentId && record.profileCount > 0)
+      .sort((a, b) => b.updatedAt - a.updatedAt)
+      .map((record) => ({
+        id: record.id,
+        label: record.label ?? `Device ${record.id.slice(0, 8)}`,
+        metaLabel: `${record.profileCount} profile${record.profileCount === 1 ? '' : 's'}`,
+      }));
+  }, []);
+
+  // Adopt the selected partition's instance id into this tab, then reload so the
+  // store re-hydrates from it.
+  const resumeDevice = React.useCallback((deviceId: string) => {
+    adoptInstanceId(deviceId);
+    window.location.reload();
+  }, []);
   const [operatorSettingsDraft, setOperatorSettingsDraft] = React.useState<OperatorSettingsDraft>(() =>
     buildOperatorSettingsDraft(selectedProfile),
   );
@@ -755,6 +778,11 @@ function AppShell() {
     return <Alert tone="warning">{store.runtimeWarning}</Alert>;
   }
 
+  // Each browser tab is its own isolated signer instance (its state is
+  // partitioned per tab). A browser restart clears the tab's instance id, so a
+  // fresh tab surfaces any other stored devices here for one-click resume,
+  // rather than orphaning their profiles. The cards render inside the centered
+  // welcome hero so they share the Paper device-card treatment and layout.
   function renderLanding() {
     if (store.profiles.length === 0) {
       return (
@@ -763,6 +791,8 @@ function AppShell() {
           onNewKeyset={() => store.setActiveView('create-generate')}
           onImportProfile={() => store.startLoadImport()}
           onOnboard={() => store.setActiveView('onboard-connect')}
+          resumeDevices={resumeDevices}
+          onResumeDevice={resumeDevice}
         />
       );
     }
@@ -785,6 +815,8 @@ function AppShell() {
         onNewKeyset={() => store.setActiveView('create-generate')}
         onImportProfile={() => store.startLoadImport()}
         onOnboard={() => store.setActiveView('onboard-connect')}
+        resumeDevices={resumeDevices}
+        onResumeDevice={resumeDevice}
       />
     );
   }
