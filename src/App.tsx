@@ -878,6 +878,10 @@ function AppShell() {
                 id: profile.id,
                 label: `${profile.label || 'Unnamed device'} (${shortProfileId(profile.id)})`,
               }))}
+              devicePassphrase={store.draftSecrets.rotateDevicePassphrase}
+              onChangeDevicePassphrase={(value) => store.setRotateDevicePassphrase(value)}
+              deviceShareValidated={store.draftSecrets.rotateDeviceUnlockVerified}
+              onVerifyDevicePassphrase={() => void store.verifyRotateDeviceUnlock()}
               rotationSources={store.drafts.rotationForm.sources.map((source, index) => ({
                 packageText: source.packageText,
                 packagePassword: store.draftSecrets.rotationSources[index] ?? '',

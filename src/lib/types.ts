@@ -276,6 +276,14 @@ export type PwaDraftSecrets = {
   /** Raw nsec pasted into the create/rotate flow. Never persisted. */
   createFormPrivateKey: string;
   rotationSources: Record<number, string>;
+  /** Passphrase that unlocks this device's own share during keyset rotation. Never persisted. */
+  rotateDevicePassphrase: string;
+  /**
+   * True once `rotateDevicePassphrase` has been verified to unlock this device's
+   * share — gates the rotate "this device — validated" badge on a real unlock.
+   * In-memory only; reset whenever the passphrase changes.
+   */
+  rotateDeviceUnlockVerified: boolean;
   /** Per-source passphrases for the shares-based private-key recovery flow. */
   recoverKeySources: Record<number, string>;
   /** Passphrase that unlocks this device's own share during key recovery. Never persisted. */

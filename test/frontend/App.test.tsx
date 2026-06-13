@@ -328,6 +328,94 @@ describe('igloo-pwa app shell', () => {
     verifySpy.mockRestore();
   });
 
+  it('auto-includes the device share when rotating the keyset', async () => {
+    cleanup();
+    const profileId = '99'.repeat(32);
+    window.localStorage.setItem(
+      partitionKeyFor(),
+      JSON.stringify({
+        profiles: [
+          {
+            id: profileId,
+            label: 'Rotatable Key',
+            share_public_key: '66'.repeat(32),
+            group_public_key: '77'.repeat(32),
+            relays: ['wss://relay.primal.net'],
+            group_package_json:
+              '{"group_name":"Rotatable Key","group_pk":"77","threshold":2,"members":[{"idx":0},{"idx":1},{"idx":2}]}',
+            share_package_json: '{"idx":0}',
+            member_idx: 1,
+            source: 'generated',
+            relay_profile: 'browser',
+            group_ref: 'group-ref',
+            encrypted_profile_ref: 'encrypted-profile-ref',
+            encrypted_bfshare_artifact: 'bfshare1deviceartifact',
+            state_path: '/tmp/igloo-pwa/rotatable',
+            created_at: 1700000000000,
+            stored_password: 'pw',
+            profile_string: 'bfprofile1demo',
+            share_string: 'bfshare1demo',
+            onboarding_package: null,
+          },
+        ],
+        selectedProfileId: profileId,
+        activeView: 'landing',
+        activeDashboardTab: 'signer',
+        peerPermissionStates: [],
+      }),
+    );
+
+    const rotateSpy = vi.spyOn(adapter, 'createRotatedKeyset').mockResolvedValue({
+      group_name: 'Rotatable Key',
+      threshold: 2,
+      count: 3,
+      group_public_key: '77'.repeat(32),
+      group_package_json:
+        '{"group_name":"Rotatable Key","group_pk":"77","threshold":2,"members":[{"idx":1}]}',
+      shares: [
+        {
+          name: 'Rotatable Key Device 1',
+          member_idx: 1,
+          share_public_key: '66'.repeat(32),
+          share_package_json: '{"idx":1}',
+        },
+      ],
+    });
+
+    let latestStore: ReturnType<typeof useStore> | undefined;
+    render(
+      <StoreProvider>
+        <StoreHarness onReady={(store) => (latestStore = store)} />
+      </StoreProvider>,
+    );
+    await waitFor(() => expect(latestStore?.profiles).toHaveLength(1));
+
+    latestStore!.updateCreateForm('mode', 'rotate');
+    latestStore!.updateCreateForm('groupName', 'Rotatable Key');
+    latestStore!.updateCreateForm('threshold', '2');
+    latestStore!.updateCreateForm('count', '3');
+    latestStore!.updateRotationForm('sourceProfileId', profileId);
+    latestStore!.setRotateDevicePassphrase('device-pass');
+    latestStore!.updateRotationSource(0, 'packageText', 'bfshare1other');
+    latestStore!.updateRotationSource(0, 'password', 'pw0');
+
+    await waitFor(() => {
+      expect(latestStore?.draftSecrets.rotateDevicePassphrase).toBe('device-pass');
+      expect(latestStore?.drafts.createForm.mode).toBe('rotate');
+      expect(latestStore?.drafts.rotationForm.sourceProfileId).toBe(profileId);
+    });
+
+    await latestStore!.generateKeyset();
+
+    // The rotating device's own share is auto-included via its passphrase, so the
+    // operator only pastes the other members' bfshares.
+    expect(rotateSpy).toHaveBeenCalledTimes(1);
+    const call = rotateSpy.mock.calls[0][0];
+    expect(call.encryptedShareArtifact).toBe('bfshare1deviceartifact');
+    expect(call.devicePassphrase).toBe('device-pass');
+    rotateSpy.mockRestore();
+  });
+
   it('reveals, masks, and clears the recovered private key', () => {
     cleanup();
     const onClear = vi.fn();
@@ -890,6 +978,8 @@ describe('toPersistable allow-list (D.1)', () => {
       draftSecrets: {
         createFormPrivateKey: secretMarker,
         rotationSources: { 0: secretMarker },
+        rotateDevicePassphrase: secretMarker,
+        rotateDeviceUnlockVerified: false,
         recoverKeySources: { 0: secretMarker },
         recoverDevicePassphrase: secretMarker,
         recoverDeviceUnlockVerified: false,
@@ -1098,6 +1188,8 @@ describe('share_package_json runtime-only reconstruction (PR16b)', () => {
       draftSecrets: {
         createFormPrivateKey: '',
         rotationSources: {},
+        rotateDevicePassphrase: '',
+        rotateDeviceUnlockVerified: false,
         recoverKeySources: {},
         recoverDevicePassphrase: '',
         recoverDeviceUnlockVerified: false,

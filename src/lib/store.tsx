@@ -53,6 +53,10 @@ type AppState = PwaPersistedState & {
   ) => void;
   addRotationSource: () => void;
   removeRotationSource: (index: number) => void;
+  /** Passphrase that unlocks this device's own share for auto-include during rotation. */
+  setRotateDevicePassphrase: (value: string) => void;
+  /** Verify the entered rotate device passphrase actually unlocks this device's share. */
+  verifyRotateDeviceUnlock: () => Promise<void>;
   generateKeyset: () => Promise<void>;
   selectGeneratedShare: (memberIdx: number) => void;
   updateProfileForm: (field: keyof PwaDraftState['profileForm'], value: string) => void;
@@ -200,6 +204,8 @@ function createDefaultDraftSecrets(): PwaDraftSecrets {
   return {
     createFormPrivateKey: '',
     rotationSources: {},
+    rotateDevicePassphrase: '',
+    rotateDeviceUnlockVerified: false,
     recoverKeySources: {},
     recoverDevicePassphrase: '',
     recoverDeviceUnlockVerified: false,
@@ -761,6 +767,33 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           };
         });
       },
+      setRotateDevicePassphrase(value) {
+        setState((current) => ({
+          ...current,
+          draftSecrets: {
+            ...current.draftSecrets,
+            rotateDevicePassphrase: value,
+            // A changed passphrase must be re-verified before it counts again.
+            rotateDeviceUnlockVerified: false,
+          },
+        }));
+      },
+      async verifyRotateDeviceUnlock() {
+        const sourceProfile = state.profiles.find(
+          (profile) => profile.id === state.drafts.rotationForm.sourceProfileId,
+        );
+        if (!sourceProfile) {
+          return;
+        }
+        const verified = await adapter.verifyDeviceShareUnlock({
+          encryptedShareArtifact: sourceProfile.encrypted_bfshare_artifact,
+          devicePassphrase: state.draftSecrets.rotateDevicePassphrase,
+        });
+        setState((current) => ({
+          ...current,
+          draftSecrets: { ...current.draftSecrets, rotateDeviceUnlockVerified: verified },
+        }));
+      },
       startRecoverKey(profileId) {
         setState((current) => ({
           ...current,
@@ -938,6 +971,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
                 groupName: rotationGroupName,
                 threshold,
                 count,
+                // Auto-include the rotating device's own current share so the
+                // operator only pastes the other members' bfshares.
+                encryptedShareArtifact: sourceProfile.encrypted_bfshare_artifact,
+                devicePassphrase: state.draftSecrets.rotateDevicePassphrase,
                 sources: state.drafts.rotationForm.sources
                   .map((source, index) => ({
                     packageText: source.packageText.trim(),
@@ -972,6 +1009,12 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
               label: sourceProfile?.label ?? selectedShare?.name ?? `${keyset.group_name} Device`,
               relayUrls: sourceProfile?.relays?.join('\n') ?? current.drafts.profileForm.relayUrls,
             },
+          },
+          // The rotate device passphrase has served its purpose; do not retain it.
+          draftSecrets: {
+            ...current.draftSecrets,
+            rotateDevicePassphrase: '',
+            rotateDeviceUnlockVerified: false,
           },
         }));
       },

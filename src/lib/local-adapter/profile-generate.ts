@@ -100,6 +100,11 @@ export async function createRotatedKeyset(input: {
   groupName: string;
   threshold: number;
   count: number;
+  // The rotating device's own password-sealed bfshare artifact + its passphrase.
+  // When supplied, the device's own current share is auto-included toward the
+  // reconstruction threshold so the operator only pastes the other members'.
+  encryptedShareArtifact?: string | null;
+  devicePassphrase?: string | null;
   sources: Array<{ packageText: string; password: string }>;
 }): Promise<PwaGeneratedKeyset> {
   if (!input.groupName.trim()) {
@@ -108,6 +113,19 @@ export async function createRotatedKeyset(input: {
   // Decode the pasted current-keyset shares locally; the group context comes from
   // the rotating device's own profile (no relay-backup fetch).
   const shareSecrets = await decodeShareSecrets(input.sources);
+
+  // Auto-include the rotating device's own current share when its artifact +
+  // passphrase are provided (mirrors the recover flow).
+  if (input.encryptedShareArtifact?.trim() && input.devicePassphrase) {
+    let deviceShareSecret: string;
+    try {
+      const deviceShare = await decodeBfSharePackage(input.encryptedShareArtifact, input.devicePassphrase);
+      deviceShareSecret = deviceShare.shareSecret;
+    } catch {
+      throw new Error('Incorrect device passphrase.');
+    }
+    shareSecrets.unshift(deviceShareSecret);
+  }
   const draft = await buildRotationDraft({
     groupPackage: groupPackageFromWireJson(input.groupPackageJson),
     shareSecrets,
