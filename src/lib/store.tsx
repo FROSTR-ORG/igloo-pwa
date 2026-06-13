@@ -99,6 +99,10 @@ type AppState = PwaPersistedState & {
   finalizeRotationUpdate: () => Promise<void>;
   startRecoverKey: (profileId: string) => void;
   setRecoverDevicePassphrase: (value: string) => void;
+  /** Verify the entered device passphrase actually unlocks this device's share. */
+  verifyRecoverDeviceUnlock: () => Promise<void>;
+  /** Toggle lost-device recovery: reconstruct from pasted shares with no device. */
+  setRecoverLostDevice: (value: boolean) => void;
   updateRecoverSource: (
     index: number,
     field: 'packageText' | 'password',
@@ -198,6 +202,8 @@ function createDefaultDraftSecrets(): PwaDraftSecrets {
     rotationSources: {},
     recoverKeySources: {},
     recoverDevicePassphrase: '',
+    recoverDeviceUnlockVerified: false,
+    recoverLostDevice: false,
     profileFormPassword: '',
     profileFormConfirm: '',
     distributionPasswords: {},
@@ -771,13 +777,46 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
             ...current.draftSecrets,
             recoverKeySources: {},
             recoverDevicePassphrase: '',
+            recoverDeviceUnlockVerified: false,
+            recoverLostDevice: false,
           },
         }));
       },
       setRecoverDevicePassphrase(value) {
         setState((current) => ({
           ...current,
-          draftSecrets: { ...current.draftSecrets, recoverDevicePassphrase: value },
+          draftSecrets: {
+            ...current.draftSecrets,
+            recoverDevicePassphrase: value,
+            // A changed passphrase must be re-verified before it counts again.
+            recoverDeviceUnlockVerified: false,
+          },
+        }));
+      },
+      async verifyRecoverDeviceUnlock() {
+        if (!selectedProfile) {
+          return;
+        }
+        const verified = await adapter.verifyDeviceShareUnlock({
+          encryptedShareArtifact: selectedProfile.encrypted_bfshare_artifact,
+          devicePassphrase: state.draftSecrets.recoverDevicePassphrase,
+        });
+        setState((current) => ({
+          ...current,
+          draftSecrets: { ...current.draftSecrets, recoverDeviceUnlockVerified: verified },
+        }));
+      },
+      setRecoverLostDevice(value) {
+        setState((current) => ({
+          ...current,
+          draftSecrets: {
+            ...current.draftSecrets,
+            recoverLostDevice: value,
+            // Entering lost-device mode drops the device passphrase + its verified
+            // state; the device share is not used on that path.
+            recoverDevicePassphrase: value ? '' : current.draftSecrets.recoverDevicePassphrase,
+            recoverDeviceUnlockVerified: value ? false : current.draftSecrets.recoverDeviceUnlockVerified,
+          },
         }));
       },
       updateRecoverSource(index, field, value) {
@@ -841,13 +880,16 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         if (!selectedProfile) {
           throw new Error('Select a device profile to recover its key.');
         }
-        // The recovering device is a group member: its profile supplies the group
-        // package (public) and its own share (unlocked with the device passphrase),
-        // which counts toward the threshold. The remaining shares are pasted.
+        const lostDevice = state.draftSecrets.recoverLostDevice;
+        // Normal path: the recovering device is a group member, so its profile
+        // supplies the group package (public) and its own share (unlocked with the
+        // device passphrase), which counts toward the threshold; the rest are pasted.
+        // Lost-device path: the device share/passphrase are omitted and the full
+        // threshold is met from pasted shares alone.
         const recovered = await adapter.recoverNsecFromShares({
           groupPackageJson: selectedProfile.group_package_json,
-          encryptedShareArtifact: selectedProfile.encrypted_bfshare_artifact,
-          devicePassphrase: state.draftSecrets.recoverDevicePassphrase,
+          encryptedShareArtifact: lostDevice ? null : selectedProfile.encrypted_bfshare_artifact,
+          devicePassphrase: lostDevice ? null : state.draftSecrets.recoverDevicePassphrase,
           sources: state.drafts.recoverKeyForm.sources
             .map((source, index) => ({
               packageText: source.packageText.trim(),
@@ -868,6 +910,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
             ...current.draftSecrets,
             recoverKeySources: {},
             recoverDevicePassphrase: '',
+            recoverDeviceUnlockVerified: false,
+            recoverLostDevice: false,
           },
         }));
         return recovered;

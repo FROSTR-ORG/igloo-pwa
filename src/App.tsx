@@ -1377,7 +1377,13 @@ function AppShell() {
       }
     })();
     const sources = store.drafts.recoverKeyForm.sources;
-    const collectedCount = 1 + sources.filter((source) => source.packageText.trim().length > 0).length;
+    const lostDevice = store.draftSecrets.recoverLostDevice;
+    const deviceShareValidated = store.draftSecrets.recoverDeviceUnlockVerified;
+    const pastedCount = sources.filter((source) => source.packageText.trim().length > 0).length;
+    // The device share counts toward the threshold only once its passphrase has
+    // actually unlocked it; in lost-device mode it never counts.
+    const deviceContribution = lostDevice ? 0 : deviceShareValidated ? 1 : 0;
+    const collectedCount = deviceContribution + pastedCount;
     return (
       <>
         <PublicTaskShell>
@@ -1391,6 +1397,10 @@ function AppShell() {
             <RecoverCollectSharesPanel
               devicePassphrase={store.draftSecrets.recoverDevicePassphrase}
               onChangeDevicePassphrase={(value) => store.setRecoverDevicePassphrase(value)}
+              lostDeviceMode={lostDevice}
+              onToggleLostDevice={(value) => store.setRecoverLostDevice(value)}
+              deviceShareValidated={deviceShareValidated}
+              onVerifyDevicePassphrase={() => void store.verifyRecoverDeviceUnlock()}
               sources={sources.map((source, index) => ({
                 packageText: source.packageText,
                 packagePassword: store.draftSecrets.recoverKeySources[index] ?? '',

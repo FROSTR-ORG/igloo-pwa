@@ -280,6 +280,17 @@ export type PwaDraftSecrets = {
   recoverKeySources: Record<number, string>;
   /** Passphrase that unlocks this device's own share during key recovery. Never persisted. */
   recoverDevicePassphrase: string;
+  /**
+   * True once `recoverDevicePassphrase` has been verified to unlock this device's
+   * share — gates the "this device — validated" recover meter on a real unlock.
+   * In-memory only; reset whenever the passphrase changes so it never outlives it.
+   */
+  recoverDeviceUnlockVerified: boolean;
+  /**
+   * Lost-device recovery mode: reconstruct from a full threshold of pasted shares
+   * with no device share/passphrase. In-memory only.
+   */
+  recoverLostDevice: boolean;
   profileFormPassword: string;
   profileFormConfirm: string;
   distributionPasswords: Record<number, { password: string; confirmPassword: string }>;

@@ -149,28 +149,55 @@ async function decodeShareSecrets(
   return decoded.map((share) => share.shareSecret);
 }
 
+// Verify a device passphrase unlocks its own bfshare artifact, without running a
+// full recovery. Lets the recover UI gate the "this device — validated" state on
+// a real unlock instead of optimistically counting the device share.
+export async function verifyDeviceShareUnlock(input: {
+  encryptedShareArtifact: string;
+  devicePassphrase: string;
+}): Promise<boolean> {
+  if (!input.encryptedShareArtifact?.trim() || !input.devicePassphrase) {
+    return false;
+  }
+  try {
+    await decodeBfSharePackage(input.encryptedShareArtifact, input.devicePassphrase);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export async function recoverNsecFromShares(input: {
   // The recovering device's own profile group package (wire JSON) — supplies the
   // member indices for every share, replacing the removed relay fetch.
   groupPackageJson: string;
   // The recovering device's password-sealed bfshare artifact + its passphrase;
-  // the device contributes its own share toward the threshold.
-  encryptedShareArtifact: string;
-  devicePassphrase: string;
+  // the device contributes its own share toward the threshold. Both are omitted
+  // on the lost-device path, where the threshold is met from pasted shares alone.
+  encryptedShareArtifact?: string | null;
+  devicePassphrase?: string | null;
   sources: Array<{ packageText: string; password: string }>;
 }): Promise<{ nsec: string; signingKeyHex: string }> {
   const groupPackage = groupPackageFromWireJson(input.groupPackageJson);
-  let deviceShareSecret: string;
-  try {
-    const deviceShare = await decodeBfSharePackage(input.encryptedShareArtifact, input.devicePassphrase);
-    deviceShareSecret = deviceShare.shareSecret;
-  } catch {
-    throw new Error('Incorrect device passphrase.');
+  const shareSecrets = await decodeShareSecrets(input.sources);
+
+  // Contribute the device's own share only when its artifact + passphrase are
+  // supplied. The lost-device path omits both and relies on the threshold check
+  // in recoverSecretKeyFromShares to require enough pasted shares.
+  if (input.encryptedShareArtifact?.trim() && input.devicePassphrase) {
+    let deviceShareSecret: string;
+    try {
+      const deviceShare = await decodeBfSharePackage(input.encryptedShareArtifact, input.devicePassphrase);
+      deviceShareSecret = deviceShare.shareSecret;
+    } catch {
+      throw new Error('Incorrect device passphrase.');
+    }
+    shareSecrets.unshift(deviceShareSecret);
   }
-  const pastedSecrets = await decodeShareSecrets(input.sources);
+
   return await recoverSecretKeyFromShares({
     groupPackage,
-    shareSecrets: [deviceShareSecret, ...pastedSecrets],
+    shareSecrets,
   });
 }
 

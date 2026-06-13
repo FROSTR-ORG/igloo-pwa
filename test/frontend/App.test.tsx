@@ -190,6 +190,144 @@ describe('igloo-pwa app shell', () => {
     expect(screen.getByRole('button', { name: 'Next Step' })).toBeInTheDocument();
   });
 
+  it('recovers via the lost-device path without the device share', async () => {
+    cleanup();
+    const profileId = '99'.repeat(32);
+    window.localStorage.setItem(
+      partitionKeyFor(),
+      JSON.stringify({
+        profiles: [
+          {
+            id: profileId,
+            label: 'Recoverable Key',
+            share_public_key: '66'.repeat(32),
+            group_public_key: '77'.repeat(32),
+            relays: ['wss://relay.primal.net'],
+            group_package_json:
+              '{"group_name":"Recoverable Key","group_pk":"77","threshold":2,"members":[{"idx":0},{"idx":1},{"idx":2}]}',
+            share_package_json: '{"idx":0}',
+            source: 'generated',
+            relay_profile: 'browser',
+            group_ref: 'group-ref',
+            encrypted_profile_ref: 'encrypted-profile-ref',
+            encrypted_bfshare_artifact: 'bfshare1deviceartifact',
+            state_path: '/tmp/igloo-pwa/recoverable',
+            created_at: 1700000000000,
+            stored_password: 'pw',
+            profile_string: 'bfprofile1demo',
+            share_string: 'bfshare1demo',
+            onboarding_package: null,
+          },
+        ],
+        selectedProfileId: profileId,
+        activeView: 'landing',
+        activeDashboardTab: 'signer',
+        peerPermissionStates: [],
+      }),
+    );
+
+    const recoverSpy = vi
+      .spyOn(adapter, 'recoverNsecFromShares')
+      .mockResolvedValue({ nsec: 'nsec1demo', signingKeyHex: 'ab'.repeat(32) });
+
+    let latestStore: ReturnType<typeof useStore> | undefined;
+    render(
+      <StoreProvider>
+        <StoreHarness onReady={(store) => (latestStore = store)} />
+      </StoreProvider>,
+    );
+    await waitFor(() => expect(latestStore?.profiles).toHaveLength(1));
+
+    latestStore!.startRecoverKey(profileId);
+    latestStore!.setRecoverLostDevice(true);
+    latestStore!.updateRecoverSource(0, 'packageText', 'bfshare1aaa');
+    latestStore!.updateRecoverSource(0, 'password', 'pw0');
+    latestStore!.addRecoverSource();
+    latestStore!.updateRecoverSource(1, 'packageText', 'bfshare1bbb');
+    latestStore!.updateRecoverSource(1, 'password', 'pw1');
+
+    // Wait for the store re-render so recoverKeyFromShares reads the latest state.
+    await waitFor(() => {
+      expect(latestStore?.draftSecrets.recoverLostDevice).toBe(true);
+      expect(latestStore?.drafts.recoverKeyForm.sources).toHaveLength(2);
+    });
+
+    await latestStore!.recoverKeyFromShares();
+
+    // Lost-device path: the device share/passphrase are omitted; only pasted
+    // shares are forwarded, and the threshold check lives downstream.
+    expect(recoverSpy).toHaveBeenCalledTimes(1);
+    const call = recoverSpy.mock.calls[0][0];
+    expect(call.encryptedShareArtifact).toBeNull();
+    expect(call.devicePassphrase).toBeNull();
+    expect(call.sources).toHaveLength(2);
+    recoverSpy.mockRestore();
+  });
+
+  it('gates the device-share validated flag on a successful unlock and resets it on passphrase change', async () => {
+    cleanup();
+    const profileId = '99'.repeat(32);
+    window.localStorage.setItem(
+      partitionKeyFor(),
+      JSON.stringify({
+        profiles: [
+          {
+            id: profileId,
+            label: 'Recoverable Key',
+            share_public_key: '66'.repeat(32),
+            group_public_key: '77'.repeat(32),
+            relays: ['wss://relay.primal.net'],
+            group_package_json:
+              '{"group_name":"Recoverable Key","group_pk":"77","threshold":2,"members":[{"idx":0},{"idx":1},{"idx":2}]}',
+            share_package_json: '{"idx":0}',
+            source: 'generated',
+            relay_profile: 'browser',
+            group_ref: 'group-ref',
+            encrypted_profile_ref: 'encrypted-profile-ref',
+            encrypted_bfshare_artifact: 'bfshare1deviceartifact',
+            state_path: '/tmp/igloo-pwa/recoverable',
+            created_at: 1700000000000,
+            stored_password: 'pw',
+            profile_string: 'bfprofile1demo',
+            share_string: 'bfshare1demo',
+            onboarding_package: null,
+          },
+        ],
+        selectedProfileId: profileId,
+        activeView: 'landing',
+        activeDashboardTab: 'signer',
+        peerPermissionStates: [],
+      }),
+    );
+
+    const verifySpy = vi.spyOn(adapter, 'verifyDeviceShareUnlock').mockResolvedValue(true);
+
+    let latestStore: ReturnType<typeof useStore> | undefined;
+    render(
+      <StoreProvider>
+        <StoreHarness onReady={(store) => (latestStore = store)} />
+      </StoreProvider>,
+    );
+    await waitFor(() => expect(latestStore?.profiles).toHaveLength(1));
+
+    latestStore!.startRecoverKey(profileId);
+    latestStore!.setRecoverDevicePassphrase('correct-horse');
+    await waitFor(() => expect(latestStore?.draftSecrets.recoverDevicePassphrase).toBe('correct-horse'));
+    // Not counted until actually verified.
+    expect(latestStore?.draftSecrets.recoverDeviceUnlockVerified).toBe(false);
+
+    await latestStore!.verifyRecoverDeviceUnlock();
+    await waitFor(() => expect(latestStore?.draftSecrets.recoverDeviceUnlockVerified).toBe(true));
+    expect(verifySpy).toHaveBeenCalledWith(
+      expect.objectContaining({ encryptedShareArtifact: 'bfshare1deviceartifact', devicePassphrase: 'correct-horse' }),
+    );
+
+    // Changing the passphrase invalidates the prior verification.
+    latestStore!.setRecoverDevicePassphrase('different');
+    await waitFor(() => expect(latestStore?.draftSecrets.recoverDeviceUnlockVerified).toBe(false));
+    verifySpy.mockRestore();
+  });
+
   it('reveals, masks, and clears the recovered private key', () => {
     cleanup();
     const onClear = vi.fn();
@@ -754,6 +892,8 @@ describe('toPersistable allow-list (D.1)', () => {
         rotationSources: { 0: secretMarker },
         recoverKeySources: { 0: secretMarker },
         recoverDevicePassphrase: secretMarker,
+        recoverDeviceUnlockVerified: false,
+        recoverLostDevice: false,
         profileFormPassword: secretMarker,
         profileFormConfirm: secretMarker,
         distributionPasswords: {},
@@ -960,6 +1100,8 @@ describe('share_package_json runtime-only reconstruction (PR16b)', () => {
         rotationSources: {},
         recoverKeySources: {},
         recoverDevicePassphrase: '',
+        recoverDeviceUnlockVerified: false,
+        recoverLostDevice: false,
         profileFormPassword: '',
         profileFormConfirm: '',
         distributionPasswords: {},
