@@ -62,6 +62,15 @@ export type BrowserOnboardingResult = {
   runtimeStatus: RuntimeStatusSummary;
   metadata: RuntimeMetadata;
   readiness: RuntimeReadiness;
+  /**
+   * The live onboarding node, wrapped as a session and kept running — present
+   * only when the caller passed `keepAlive` (the genuine onboard flow). The
+   * onboarding node is already a fully-initialized signer after `connect()`, so
+   * the caller adopts it as the durable session instead of capturing a snapshot
+   * and relaunching a second node. Absent for the rotation flow, where the node
+   * is shut down after the one-shot capture (`keepAlive` omitted).
+   */
+  stagedSession?: BrowserRuntimeSession;
 };
 
 // D.5: `runtime_snapshot_json` is no longer surfaced on the session
@@ -111,6 +120,7 @@ type BrowserRuntimeTestHooks = {
     password: string;
     groupName?: string;
     signerSettings?: Partial<SignerSettings>;
+    keepAlive?: boolean;
   }) => Promise<BrowserOnboardingResult>;
   startBrowserRuntimeSession?: (
     profile: BrowserBootstrapProfile
@@ -275,6 +285,11 @@ export async function connectOnboardingPackageAndCaptureProfile(input: {
   password: string;
   groupName?: string;
   signerSettings?: Partial<SignerSettings>;
+  // When set (the genuine onboard flow), keep the live onboarding node running
+  // and return it as `stagedSession` for adoption as the durable signer. When
+  // omitted (the rotation flow), the node is shut down after the one-shot
+  // snapshot capture — today's capture-then-relaunch behavior.
+  keepAlive?: boolean;
 }): Promise<BrowserOnboardingResult> {
   ensureIglooSharedConfigured();
   if (browserRuntimeTestHooks?.connectOnboardingPackageAndCaptureProfile) {
@@ -296,18 +311,38 @@ export async function connectOnboardingPackageAndCaptureProfile(input: {
     // One-shot `snapshot_state()` to materialize the incoming profile
     // payload (group + share). Not part of any poll path. The JSON is
     // passed straight into the shared onboarding finalizer, never
-    // persisted to localStorage.
+    // persisted to localStorage. Needed on both paths for payload derivation;
+    // on the keep-alive path it is NOT used to restore a second node.
     const snapshot = await waitForNonceSnapshot(node);
     const runtimeSnapshotJson = JSON.stringify(snapshot);
     const runtimeStatus = getRuntimeStatus(node);
     const metadata = getRuntimeMetadata(node);
     const readiness = getRuntimeReadiness(node);
+    // Read node-derived values before the branch — on the rotation path the node
+    // is shut down below, after which it can no longer be queried.
+    const groupPublicKey = getPublicKeyFromNode(node);
+
+    let stagedSession: BrowserRuntimeSession | undefined;
+    if (input.keepAlive) {
+      // The onboarding node is already a fully-initialized, running signer
+      // after `connect()` (it restored its runtime and subscribed to relay
+      // ingress). Adopt it directly: refresh peers once for parity with
+      // `startBrowserRuntimeSession` (onboarding mode skips the startup
+      // refresh), then hand it back wrapped as a session. The session now owns
+      // `logs`, so we must NOT detach or shut the node down here.
+      refreshAllPeersOnNode(node);
+      stagedSession = createSession(node, logs);
+    } else {
+      logs.detach();
+      await (node as typeof node & { shutdown: () => Promise<void> }).shutdown();
+    }
+
     return {
       decoded,
       profile: {
         groupName: input.groupName,
         relays: decoded.relays,
-        groupPublicKey: getPublicKeyFromNode(node),
+        groupPublicKey,
         sharePublicKey: decoded.publicKey,
         peerPubkey: decoded.peerPubkey,
         signerSettings: normalizeSignerSettings(input.signerSettings),
@@ -315,15 +350,17 @@ export async function connectOnboardingPackageAndCaptureProfile(input: {
       runtimeSnapshotJson,
       runtimeStatus,
       metadata,
-      readiness
+      readiness,
+      stagedSession
     };
   } catch (error) {
     const lines = logs.collect().slice(-20);
     const suffix = lines.length > 0 ? ` | runtime_logs=${JSON.stringify(lines)}` : '';
-    throw new Error(`${toErrorMessage(error)}${suffix}`);
-  } finally {
     logs.detach();
-    await (node as typeof node & { shutdown: () => Promise<void> }).shutdown();
+    await (node as typeof node & { shutdown: () => Promise<void> })
+      .shutdown()
+      .catch(() => undefined);
+    throw new Error(`${toErrorMessage(error)}${suffix}`);
   }
 }
 

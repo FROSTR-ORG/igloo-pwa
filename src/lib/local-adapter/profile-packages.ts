@@ -7,7 +7,10 @@ import {
   importBrowserProfilePackage,
 } from 'igloo-shared';
 
-import { connectOnboardingPackageAndCaptureProfile } from '../page-runtime-host';
+import {
+  connectOnboardingPackageAndCaptureProfile,
+  type BrowserRuntimeSession,
+} from '../page-runtime-host';
 import type {
   PwaLoadConfirmation,
   PwaOnboardConnection,
@@ -107,16 +110,21 @@ export async function finalizeRotationUpdateFromConnection(input: {
   } satisfies PwaProfile;
 }
 
-export async function connectOnboardingPackage(input: OnboardConnectInput): Promise<PwaOnboardConnection> {
+export async function connectOnboardingPackage(
+  input: OnboardConnectInput,
+): Promise<{ connection: PwaOnboardConnection; stagedSession?: BrowserRuntimeSession }> {
   const result = await connectOnboardingPackageAndCaptureProfile({
     packageText: input.packageText.trim(),
     password: input.password,
     groupName: 'Onboarded Device',
+    keepAlive: input.keepAlive,
   });
   // The one-shot snapshot JSON carries the incoming share + group. It is
   // only used here to derive the canonical profile payload; the payload
   // is immediately re-encrypted as `encrypted_bfshare_artifact` and the
-  // raw snapshot is never persisted to localStorage (D.1).
+  // raw snapshot is never persisted to localStorage (D.1). On the onboard
+  // (keep-alive) flow the exchanged nonce pool is preserved by adopting the
+  // live `stagedSession`, not by restoring this snapshot into a second node.
   const connection = await createBrowserOnboardingConnection({
     packageText: input.packageText,
     password: input.password,
@@ -127,17 +135,19 @@ export async function connectOnboardingPackage(input: OnboardConnectInput): Prom
   });
 
   return {
-    preview: connection.preview,
-    passphrase: connection.storedPassword,
-    package_text: connection.packageText,
-    profile_string: connection.profileString,
-    share_string: connection.shareString,
-    peer_pubkey: connection.peerPubkey ?? null,
-    profile_payload: connection.profilePayload,
-    manual_peer_policy_overrides: connection.manualPeerPolicyOverrides,
-    // In-memory handoff (never persisted): carries the exchanged nonce pool so the
-    // launched signer restores it instead of re-bootstrapping a fresh, empty pool.
-    runtime_snapshot_json: result.runtimeSnapshotJson,
+    connection: {
+      preview: connection.preview,
+      passphrase: connection.storedPassword,
+      package_text: connection.packageText,
+      profile_string: connection.profileString,
+      share_string: connection.shareString,
+      peer_pubkey: connection.peerPubkey ?? null,
+      profile_payload: connection.profilePayload,
+      manual_peer_policy_overrides: connection.manualPeerPolicyOverrides,
+    },
+    // The live onboarding node, present only on the keep-alive (onboard) path.
+    // The caller stages it in the SessionController and adopts it at finalize.
+    stagedSession: result.stagedSession,
   };
 }
 

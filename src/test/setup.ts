@@ -66,6 +66,75 @@ const mockRuntimeSnapshot = JSON.stringify({
   }
 });
 
+// Shared session-snapshot shape for the runtime test hooks. Used both by the
+// `startBrowserRuntimeSession` fake and by the `stagedSession` the onboard hook
+// returns (the live onboarding node the store adopts as the durable signer).
+function buildMockSessionSnapshot(
+  sharePublicKey: string = '33'.repeat(32),
+  groupPublicKey: string = '22'.repeat(32),
+) {
+  return {
+    runtimeStatus: {
+      status: {
+        device_id: 'browser-device',
+        pending_ops: 0,
+        last_active: Date.now(),
+        known_peers: 2,
+        request_seq: 1
+      },
+      metadata: {
+        device_id: 'browser-device',
+        member_idx: 1,
+        share_public_key: sharePublicKey,
+        group_public_key: groupPublicKey,
+        peers: ['44'.repeat(32), '55'.repeat(32)]
+      },
+      readiness: {
+        runtime_ready: true,
+        restore_complete: true,
+        sign_ready: true,
+        ecdh_ready: true,
+        threshold: 2,
+        signing_peer_count: 2,
+        ecdh_peer_count: 2,
+        last_refresh_at: Date.now(),
+        degraded_reasons: []
+      },
+      peer_permission_states: [],
+      peers: [],
+      pending_operations: []
+    },
+    metadata: {
+      device_id: 'browser-device',
+      member_idx: 1,
+      share_public_key: sharePublicKey,
+      group_public_key: groupPublicKey,
+      peers: ['44'.repeat(32), '55'.repeat(32)]
+    },
+    readiness: {
+      runtime_ready: true,
+      restore_complete: true,
+      sign_ready: true,
+      ecdh_ready: true,
+      threshold: 2,
+      signing_peer_count: 2,
+      ecdh_peer_count: 2,
+      last_refresh_at: Date.now(),
+      degraded_reasons: []
+    },
+    peerPermissionStates: [],
+    signerSettings: {
+      sign_timeout_secs: 30,
+      ping_timeout_secs: 15,
+      request_ttl_secs: 300,
+      state_save_interval_secs: 30,
+      peer_selection_strategy: 'deterministic_sorted' as const
+    },
+    runtimeSnapshotJson: mockRuntimeSnapshot,
+    events: []
+  };
+}
+
 class MockWasmBridgeRuntime {
   init_runtime() {}
   restore_runtime() {}
@@ -277,71 +346,18 @@ beforeEach(() => {
           ecdh_peer_count: 2,
           last_refresh_at: Date.now(),
           degraded_reasons: []
-        }
+        },
+        // The live onboarding node the store adopts as the durable signer.
+        stagedSession: createFakeBrowserRuntimeSession(buildMockSessionSnapshot())
       };
     },
     async startBrowserRuntimeSession(profile) {
-      const buildSnapshot = () => ({
-        runtimeStatus: {
-          status: {
-            device_id: 'browser-device',
-            pending_ops: 0,
-            last_active: Date.now(),
-            known_peers: 2,
-            request_seq: 1
-          },
-          metadata: {
-            device_id: 'browser-device',
-            member_idx: 1,
-            share_public_key: profile.sharePublicKey ?? '33'.repeat(32),
-            group_public_key: profile.groupPublicKey ?? '22'.repeat(32),
-            peers: ['44'.repeat(32), '55'.repeat(32)]
-          },
-          readiness: {
-            runtime_ready: true,
-            restore_complete: true,
-            sign_ready: true,
-            ecdh_ready: true,
-            threshold: 2,
-            signing_peer_count: 2,
-            ecdh_peer_count: 2,
-            last_refresh_at: Date.now(),
-            degraded_reasons: []
-          },
-          peer_permission_states: [],
-          peers: [],
-          pending_operations: []
-        },
-        metadata: {
-          device_id: 'browser-device',
-          member_idx: 1,
-          share_public_key: profile.sharePublicKey ?? '33'.repeat(32),
-          group_public_key: profile.groupPublicKey ?? '22'.repeat(32),
-          peers: ['44'.repeat(32), '55'.repeat(32)]
-        },
-        readiness: {
-          runtime_ready: true,
-          restore_complete: true,
-          sign_ready: true,
-          ecdh_ready: true,
-          threshold: 2,
-          signing_peer_count: 2,
-          ecdh_peer_count: 2,
-          last_refresh_at: Date.now(),
-          degraded_reasons: []
-        },
-        peerPermissionStates: [],
-        signerSettings: {
-          sign_timeout_secs: 30,
-          ping_timeout_secs: 15,
-          request_ttl_secs: 300,
-          state_save_interval_secs: 30,
-          peer_selection_strategy: 'deterministic_sorted' as const
-        },
-        runtimeSnapshotJson: mockRuntimeSnapshot,
-        events: []
-      });
-      return createFakeBrowserRuntimeSession(buildSnapshot());
+      return createFakeBrowserRuntimeSession(
+        buildMockSessionSnapshot(
+          profile.sharePublicKey ?? '33'.repeat(32),
+          profile.groupPublicKey ?? '22'.repeat(32),
+        ),
+      );
     },
   });
 });

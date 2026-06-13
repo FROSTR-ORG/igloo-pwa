@@ -56,6 +56,17 @@ export class SessionController {
   private epoch: SessionEpoch = 0;
 
   /**
+   * A live signer session that has been built (the onboarding node, already
+   * connected and holding the exchanged nonce pool) but not yet adopted as the
+   * active session — because its durable profile is not finalized/saved until
+   * the user names + protects the device. Held here, out of React state, so the
+   * onboard flow can adopt it (`adoptStagedAsActive`) or tear it down
+   * (`discardStagedSession`) at finalize/cancel without a second node + snapshot
+   * restore round-trip. At most one staged session exists at a time.
+   */
+  private stagedSession: BrowserRuntimeSession | null = null;
+
+  /**
    * In-memory cache of the reconstructed `{idx, seckey}` share package
    * JSON per profile id. Populated by whoever owns the unlocked
    * passphrase (typically the `startSession` adapter helper) and read
@@ -129,8 +140,10 @@ export class SessionController {
     input: SessionBootstrapInput,
     _passphraseForObservability?: Passphrase,
   ): Promise<SessionStartOutcome> {
-    // Drop any pre-existing session before attaching a new one. `stop()`
-    // is idempotent so this is safe even on a fresh controller.
+    // Drop any pre-existing session before attaching a new one. `stop()` is
+    // idempotent so this is safe even on a fresh controller, and it also
+    // discards any stranded staged onboarding node (starting a genuine session
+    // means we have left the onboard flow).
     await this.stop();
 
     const session = await startBrowserRuntimeSession(input);
@@ -147,6 +160,76 @@ export class SessionController {
   }
 
   /**
+   * Park a freshly-built onboarding session (the live node that performed the
+   * onboard handshake) until the device profile is finalized. Any previously
+   * staged session is discarded first — re-connecting an onboarding package
+   * supersedes the prior staged node. Does not touch the active session.
+   */
+  stageOnboardSession(session: BrowserRuntimeSession): void {
+    this.discardStagedSession();
+    this.stagedSession = session;
+  }
+
+  /** `true` while an onboarding session is staged for adoption. */
+  hasStagedSession(): boolean {
+    return this.stagedSession != null;
+  }
+
+  /**
+   * Promote the staged onboarding session to the active session for the given
+   * profile id. Stops any current active session first (mirrors `start()`),
+   * bumps the epoch, and caches the reconstructed share JSON. Returns the same
+   * `SessionStartOutcome` shape as `start()` — but adopts the already-running
+   * node instead of building a fresh one and restoring a snapshot.
+   *
+   * Throws only if nothing is staged (a genuine programming error in the
+   * onboard flow ordering).
+   */
+  async adoptStagedAsActive(
+    profileId: string,
+    sharePackageJson: string,
+  ): Promise<SessionStartOutcome> {
+    const staged = this.stagedSession;
+    if (!staged) {
+      throw new Error('No staged onboarding session to adopt.');
+    }
+    // Consume the staged slot up front so the `stop()` below (which clears the
+    // active session) cannot also tear down the node we are about to adopt.
+    this.stagedSession = null;
+    await this.stop();
+
+    this.session = staged;
+    this.profileId = profileId;
+    this.epoch += 1;
+    this.sharePackageJsonByProfileId.set(profileId, sharePackageJson);
+
+    return {
+      epoch: this.epoch,
+      session: staged,
+      profileId,
+    };
+  }
+
+  /**
+   * Tear down and clear the staged onboarding session, if any. Idempotent and
+   * never throws — safe to call from any onboard-flow exit (cancel, re-connect,
+   * navigation away). The share secret + relay subscriptions held by the live
+   * node are released here.
+   */
+  discardStagedSession(): void {
+    const staged = this.stagedSession;
+    if (!staged) {
+      return;
+    }
+    this.stagedSession = null;
+    try {
+      staged.stop();
+    } catch {
+      // Never rethrow on a legitimate teardown.
+    }
+  }
+
+  /**
    * Stop the currently-attached session. Idempotent: a second call (or
    * a call on a fresh controller) returns `false` without throwing.
    *
@@ -155,6 +238,10 @@ export class SessionController {
    * profiles.
    */
   async stop(): Promise<boolean> {
+    // Tearing the active session down also abandons any in-progress onboard
+    // flow (e.g. logout / clear-credentials mid-onboard), so release a stranded
+    // staged node here too. Runs regardless of whether an active session exists.
+    this.discardStagedSession();
     const session = this.session;
     const profileId = this.profileId;
     if (!session) {

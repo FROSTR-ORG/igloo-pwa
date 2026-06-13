@@ -96,6 +96,7 @@ type AppState = PwaPersistedState & {
   updateOnboardSaveForm: (field: 'label' | 'relayUrls', value: string) => void;
   updateOnboardSavePassword: (field: 'password' | 'confirmPassword', value: string) => void;
   finalizeOnboardedDevice: () => Promise<void>;
+  cancelOnboarding: () => void;
   startRotateKey: () => void;
   updateRotateConnectForm: (field: 'packageText', value: string) => void;
   updateRotateConnectPassword: (value: string) => void;
@@ -584,9 +585,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       profile: PwaProfile,
       passphrase: string,
       runtimeSnapshot?: PwaRuntimeSnapshot | null,
-      // In-memory onboard handoff snapshot (never persisted) — restores the
-      // exchanged nonce pool so a freshly-onboarded signer can co-sign immediately.
-      restoreSnapshotJson?: string | null,
+      // When true (the onboard flow), the just-finalized device adopts the live
+      // staged onboarding session as its durable signer — preserving the exchanged
+      // nonce pool so it can co-sign immediately — instead of starting a fresh
+      // node. Only consulted when auto-open triggers activation.
+      adoptStaged?: boolean,
     ) => {
       ensureProfileIdAvailable(profile);
       const saved =
@@ -600,7 +603,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
               profile,
               autoStart: state.settings.auto_open_signer,
               activate: async () =>
-                await adapter.startSession(profile, passphrase, controller, restoreSnapshotJson),
+                adoptStaged
+                  ? await adapter.adoptStagedOnboardSession(profile, passphrase, controller)
+                  : await adapter.startSession(profile, passphrase, controller),
             });
       const snapshot = saved.runtime;
       const storedProfile = (snapshot?.profile ?? saved.profile) as PwaProfile;
@@ -640,6 +645,13 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     () => ({
       ...state,
       setActiveView(view) {
+        // Universal disposal choke point: navigating to any non-onboard view
+        // releases a staged onboarding node that was never adopted. Idempotent —
+        // a no-op once the node has been adopted as the active session or when
+        // nothing is staged. Onboard-flow views (`onboard-*`) keep it alive.
+        if (!view.startsWith('onboard')) {
+          controller.discardStagedSession();
+        }
         setState((current) => ({ ...current, activeView: view }));
       },
       setDashboardTab(tab) {
@@ -1581,6 +1593,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         }));
       },
       async connectOnboardingPackage() {
+        // Fresh entry: release any node staged by a prior (abandoned) handshake
+        // before starting a new one.
+        controller.discardStagedSession();
         setState((current) => ({
           ...current,
           activeView: 'onboard-handshake',
@@ -1588,10 +1603,17 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         }));
         try {
           await new Promise((resolve) => window.setTimeout(resolve, ONBOARD_HANDSHAKE_MINIMUM_MS));
-          const connection = await adapter.connectOnboardingPackage({
+          const { connection, stagedSession } = await adapter.connectOnboardingPackage({
             packageText: state.drafts.onboardConnectForm.packageText,
             password: state.draftSecrets.onboardConnectFormPassword,
+            // Keep the live onboarding node alive so finalize can adopt it as the
+            // durable signer (no capture-then-relaunch seam).
+            keepAlive: true,
           });
+          // Park the live node until the device profile is finalized + saved.
+          if (stagedSession) {
+            controller.stageOnboardSession(stagedSession);
+          }
           setState((current) => ({
             ...current,
             pendingOnboardConnection: connection,
@@ -1648,14 +1670,17 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           password,
           existingProfileIds: state.profiles.map((entry) => entry.id),
         });
-        // Hand the ephemeral onboard snapshot to the signer launch so it restores the
-        // nonce pool exchanged during onboarding (in-memory only; never persisted).
-        await persistProfileToDashboard(
-          profile,
-          password,
-          null,
-          state.pendingOnboardConnection.runtime_snapshot_json ?? null,
-        );
+        try {
+          // Adopt the live staged onboarding node as the durable signer (when
+          // auto-open is enabled) instead of relaunching from a snapshot — the
+          // exchanged nonce pool is already live in that node, so the device can
+          // co-sign immediately with no capture-then-relaunch seam.
+          await persistProfileToDashboard(profile, password, null, /* adoptStaged */ true);
+        } finally {
+          // Release the staged node if it was not adopted (auto-open disabled, or
+          // an activation error). No-op once adopted as the active session.
+          controller.discardStagedSession();
+        }
         setState((current) => ({
           ...current,
           pendingOnboardConnection: null,
@@ -1664,6 +1689,22 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
             current.peerPermissionStates.length
               ? current.peerPermissionStates
               : adapter.defaultPeerPermissionStates(),
+          draftSecrets: {
+            ...current.draftSecrets,
+            onboardConnectFormPassword: '',
+            onboardSaveFormPassword: '',
+            onboardSaveFormConfirm: '',
+          },
+        }));
+      },
+      cancelOnboarding() {
+        // Abandon the onboard flow: tear down the staged (never-adopted) node and
+        // clear the in-memory connection + device-password drafts before leaving.
+        controller.discardStagedSession();
+        setState((current) => ({
+          ...current,
+          pendingOnboardConnection: null,
+          activeView: 'landing',
           draftSecrets: {
             ...current.draftSecrets,
             onboardConnectFormPassword: '',
@@ -1716,7 +1757,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         if (!selectedProfile) {
           throw new Error('Select a profile first.');
         }
-        const connection = await adapter.connectOnboardingPackage({
+        // Rotation derives a new keyset and starts a fresh node, so it does NOT
+        // keep the onboarding node alive (no `keepAlive`); today's capture-then-
+        // shutdown behavior is preserved and there is no staged session to adopt.
+        const { connection } = await adapter.connectOnboardingPackage({
           packageText: state.drafts.rotateConnectForm.packageText,
           password: state.draftSecrets.rotateConnectFormPassword,
         });

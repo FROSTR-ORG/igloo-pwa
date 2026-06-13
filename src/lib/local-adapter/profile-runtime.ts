@@ -136,12 +136,6 @@ export async function startSession(
   profile: PwaProfile,
   passphrase: string,
   controller?: SessionController | null,
-  // Ephemeral, in-memory ONLY (never persisted). When supplied — currently only by
-  // the onboard handoff — the signer restores from this runtime snapshot (preserving
-  // the nonce pool both sides exchanged during onboarding) instead of re-initializing
-  // a fresh, empty pool. Without it a freshly-onboarded device strands the inviter's
-  // nonces and can't co-sign until a re-sync.
-  restoreSnapshotJson?: string | null,
 ): Promise<PwaRuntimeSnapshot> {
   if (!passphrase.trim()) {
     throw new Error('Passphrase is required.');
@@ -166,9 +160,11 @@ export async function startSession(
     signerSettings: profile.signer_settings,
     groupPackageJson: profile.group_package_json,
     sharePackageJson,
-    // Restore the exchanged nonce pool when handed an onboard snapshot; otherwise a
-    // fresh signer (null) bootstraps an empty pool. Never sourced from persistence.
-    runtimeSnapshotJson: restoreSnapshotJson ?? null,
+    // The PWA never restores from a snapshot: a fresh start bootstraps cleanly
+    // from the profile packages, and the onboard flow preserves the exchanged
+    // nonce pool by adopting the live onboarding node (`adoptStagedOnboardSession`)
+    // rather than capturing and restoring a snapshot.
+    runtimeSnapshotJson: null,
   });
 
   // Bridge onboard-served signals from this session to the store listener.
@@ -179,6 +175,46 @@ export async function startSession(
   // packages) but are NOT part of the signer's own restore path, so without this
   // step a reload/restart would silently drop every operator override the runtime
   // was last enforcing.
+  await applyPersistedPolicyOverrides(session, profile.manual_peer_policy_overrides);
+
+  return toRuntimeSnapshot(profile, session, true, sharePackageJson);
+}
+
+/**
+ * Adopt the live onboarding node as the durable signer for a freshly-finalized
+ * device profile. Parallels {@link startSession} for every post-start step, but
+ * promotes the already-running staged session (`controller.adoptStagedAsActive`)
+ * instead of building a new node and restoring a snapshot — the onboarding node
+ * already holds the exchanged nonce pool, so the device can co-sign immediately
+ * with no capture-then-relaunch seam.
+ *
+ * The passphrase is still used to reconstruct the share JSON (from the profile's
+ * just-written encrypted artifact) so the controller's per-profile share cache —
+ * read by the rotation and runtime-snapshot paths — is populated exactly as it
+ * is for a normal start. Throws if no onboarding session is staged.
+ */
+export async function adoptStagedOnboardSession(
+  profile: PwaProfile,
+  passphrase: string,
+  controller?: SessionController | null,
+): Promise<PwaRuntimeSnapshot> {
+  if (!passphrase.trim()) {
+    throw new Error('Passphrase is required.');
+  }
+  if (!profile.encrypted_bfshare_artifact?.trim()) {
+    throw new Error(
+      'Onboarded profile is missing its encrypted share artifact; re-onboard the device to continue.',
+    );
+  }
+
+  const target = resolveController(controller);
+  const sharePackageJson = await unlockShareFromArtifact(profile, passphrase);
+
+  const { session } = await target.adoptStagedAsActive(profile.id, sharePackageJson);
+
+  // Same post-start wiring as `startSession`: forward onboard-served signals and
+  // re-apply any host-persisted manual peer-policy overrides.
+  attachOnboardCompleteForwarder(session);
   await applyPersistedPolicyOverrides(session, profile.manual_peer_policy_overrides);
 
   return toRuntimeSnapshot(profile, session, true, sharePackageJson);

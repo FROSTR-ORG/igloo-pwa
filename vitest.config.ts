@@ -13,7 +13,10 @@ export default defineConfig({
   plugins: [react()],
   resolve: resolveConfig,
   test: createVitestBaseConfig({
-    include: ['test/frontend/**/*.test.tsx'],
+    // Match both `.test.ts` and `.test.tsx` — non-JSX suites (e.g. the
+    // SessionController lifecycle tests) live as `.ts` and were silently
+    // excluded by a `.tsx`-only glob.
+    include: ['test/frontend/**/*.test.{ts,tsx}'],
     setupFiles: ['./src/test/setup.ts'],
   }),
 });

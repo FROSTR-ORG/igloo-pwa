@@ -1236,6 +1236,7 @@ function AppShell() {
       <>
         <PublicTaskShell>
           <StepProgress steps={ONBOARD_FLOW_STEPS} active={2} />
+          <PageBackLink label="Cancel" onBack={() => store.cancelOnboarding()} />
           <PublicTaskTitle
             title="Save Profile"
             description="Name and protect this profile on the device before launching the signer."

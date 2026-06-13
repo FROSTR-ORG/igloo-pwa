@@ -2,7 +2,23 @@ import { describe, expect, it } from 'vitest';
 
 import { SessionController } from '@/lib/session-controller';
 import * as adapter from '@/lib/local-adapter';
+import { createFakeBrowserRuntimeSession } from '@/lib/page-runtime-host-fakes';
+import type { BrowserRuntimeSessionSnapshot } from '@/lib/page-runtime-host';
 import type { PwaProfile, PwaRuntimeSnapshot } from '@/lib/types';
+
+// Minimal staged-session double with a stop counter — the controller only stops
+// or promotes a staged session, so the snapshot contents are irrelevant here.
+function fakeStagedSession() {
+  let stops = 0;
+  const snapshot = {} as BrowserRuntimeSessionSnapshot;
+  const session = createFakeBrowserRuntimeSession(snapshot, {
+    stop: () => {
+      stops += 1;
+      return snapshot;
+    },
+  });
+  return { session, stops: () => stops };
+}
 
 function buildProfile(id = '77'.repeat(32)): PwaProfile {
   return {
@@ -261,5 +277,107 @@ describe('SessionController idempotent lifecycle (D.4)', () => {
 
     await a.stop();
     expect(a.isActive()).toBe(false);
+  });
+});
+
+describe('SessionController staged onboarding adoption', () => {
+  it('adopts a staged session as active without building a new node', async () => {
+    const controller = new SessionController();
+    const { session } = fakeStagedSession();
+
+    controller.stageOnboardSession(session);
+    expect(controller.hasStagedSession()).toBe(true);
+    expect(controller.isActive()).toBe(false);
+
+    const outcome = await controller.adoptStagedAsActive('77'.repeat(32), 'bfshare-json');
+    expect(outcome.profileId).toBe('77'.repeat(32));
+    expect(outcome.epoch).toBe(1);
+    expect(controller.isActive()).toBe(true);
+    expect(controller.getActiveProfileId()).toBe('77'.repeat(32));
+    expect(controller.getActiveSession()).toBe(session);
+    // The reconstructed share JSON is cached for the new profile id, exactly as
+    // a normal `start()` would — rotation / snapshot reads depend on it.
+    expect(controller.getSharePackageJson('77'.repeat(32))).toBe('bfshare-json');
+    // The staged slot is consumed by adoption.
+    expect(controller.hasStagedSession()).toBe(false);
+
+    await controller.stop();
+  });
+
+  it('discardStagedSession stops the staged node and clears the slot', () => {
+    const controller = new SessionController();
+    const { session, stops } = fakeStagedSession();
+
+    controller.stageOnboardSession(session);
+    controller.discardStagedSession();
+
+    expect(stops()).toBe(1);
+    expect(controller.hasStagedSession()).toBe(false);
+    // Idempotent: a second discard is a no-op.
+    controller.discardStagedSession();
+    expect(stops()).toBe(1);
+  });
+
+  it('re-staging discards the previously staged node', () => {
+    const controller = new SessionController();
+    const first = fakeStagedSession();
+    const second = fakeStagedSession();
+
+    controller.stageOnboardSession(first.session);
+    controller.stageOnboardSession(second.session);
+
+    expect(first.stops()).toBe(1);
+    expect(second.stops()).toBe(0);
+    expect(controller.hasStagedSession()).toBe(true);
+  });
+
+  it('stop() releases a stranded staged node', async () => {
+    const controller = new SessionController();
+    const { session, stops } = fakeStagedSession();
+
+    controller.stageOnboardSession(session);
+    await controller.stop();
+
+    expect(stops()).toBe(1);
+    expect(controller.hasStagedSession()).toBe(false);
+  });
+
+  it('starting a real session discards a stranded staged node', async () => {
+    const controller = new SessionController();
+    const { session, stops } = fakeStagedSession();
+    const profile = buildProfile();
+
+    controller.stageOnboardSession(session);
+    await adapter.startSession(profile, 'test-passphrase', controller);
+
+    expect(stops()).toBe(1);
+    expect(controller.hasStagedSession()).toBe(false);
+    expect(controller.getActiveProfileId()).toBe(profile.id);
+
+    await controller.stop();
+  });
+
+  it('adopting stops the current active session first', async () => {
+    const controller = new SessionController();
+    const profile = buildProfile();
+    await adapter.startSession(profile, 'test-passphrase', controller);
+    const epochAfterStart = controller.currentEpoch();
+
+    const { session } = fakeStagedSession();
+    controller.stageOnboardSession(session);
+    await controller.adoptStagedAsActive('88'.repeat(32), 'bfshare-json');
+
+    expect(controller.currentEpoch()).toBe(epochAfterStart + 1);
+    expect(controller.getActiveProfileId()).toBe('88'.repeat(32));
+    expect(controller.getActiveSession()).toBe(session);
+
+    await controller.stop();
+  });
+
+  it('adoptStagedAsActive throws when nothing is staged', async () => {
+    const controller = new SessionController();
+    await expect(
+      controller.adoptStagedAsActive('77'.repeat(32), 'bfshare-json'),
+    ).rejects.toThrow(/no staged onboarding session/i);
   });
 });

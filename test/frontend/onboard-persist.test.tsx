@@ -58,6 +58,11 @@ describe('onboarded profile persistence (data-loss regression)', () => {
 
     await store!.finalizeOnboardedDevice();
 
+    // Adoption ran end-to-end: the live staged onboarding node was promoted to
+    // the active signer (auto-open default), so the device is signing without a
+    // second node + snapshot-restore round-trip.
+    await waitFor(() => expect(store!.runtimeSnapshot?.active).toBe(true));
+
     // No timer advance: the debounced persist effect has NOT fired, so the only
     // path to localStorage is the synchronous flush. Read the partition blob
     // exactly as a fresh page load would (`loadPersistedState`).
@@ -65,5 +70,30 @@ describe('onboarded profile persistence (data-loss regression)', () => {
     expect(persisted).not.toBeNull();
     expect(persisted?.profiles.map((profile) => profile.id)).toContain('77'.repeat(32));
     expect(persisted?.activeView).toBe('dashboard');
+  });
+
+  it('cancelOnboarding clears the pending connection and leaves the flow', async () => {
+    let store: ReturnType<typeof useStore> | undefined;
+    render(
+      <StoreProvider>
+        <StoreHarness onReady={(s) => (store = s)} />
+      </StoreProvider>,
+    );
+    await waitFor(() => expect(store).toBeDefined());
+
+    store!.updateOnboardConnectForm('packageText', `bfonboard1${'q'.repeat(96)}`);
+    store!.updateOnboardConnectPassword('playwright-onboard-pass');
+    await store!.connectOnboardingPackage();
+    await waitFor(() => expect(store!.pendingOnboardConnection).not.toBeNull());
+
+    store!.cancelOnboarding();
+
+    // The staged onboarding node is torn down inside the controller; the store
+    // clears the in-memory connection + device-password drafts and leaves the
+    // flow. A subsequent finalize is rejected (nothing pending).
+    await waitFor(() => expect(store!.pendingOnboardConnection).toBeNull());
+    expect(store!.activeView).toBe('landing');
+    expect(store!.draftSecrets.onboardSaveFormPassword).toBe('');
+    await expect(store!.finalizeOnboardedDevice()).rejects.toThrow(/connect an onboarding package/i);
   });
 });

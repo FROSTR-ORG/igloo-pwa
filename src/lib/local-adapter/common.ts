@@ -48,6 +48,11 @@ export type LoadInput = {
 export type OnboardConnectInput = {
   packageText: string;
   password: string;
+  // The genuine onboard flow sets this so the live onboarding node is kept
+  // running and adopted as the durable signer. The rotation flow omits it
+  // (it derives a new keyset and starts a fresh node), keeping today's
+  // capture-then-shutdown behavior.
+  keepAlive?: boolean;
 };
 
 export type OnboardFinalizeInput = {
