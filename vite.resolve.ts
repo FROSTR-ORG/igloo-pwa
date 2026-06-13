@@ -9,7 +9,11 @@ import path from 'node:path';
 // node resolution + the package exports map rather than the source alias.
 export const resolveConfig = {
   preserveSymlinks: true,
-  dedupe: ['react', 'react-dom'],
+  // nostr-tools must collapse to a single instance: igloo-shared is bundled from
+  // source under preserveSymlinks, so without dedupe it resolves its own nested
+  // copy while the app resolves another — splitting module-level singletons
+  // (useWebSocketImplementation / SimplePool relay pools).
+  dedupe: ['react', 'react-dom', 'nostr-tools'],
   alias: [
     { find: '@', replacement: path.resolve(__dirname, 'src') },
     { find: /^igloo-shared$/, replacement: path.resolve(__dirname, '../igloo-shared/src/index.ts') },
