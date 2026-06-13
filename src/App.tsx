@@ -180,6 +180,29 @@ type PwaRuntimeStatus = {
   };
 };
 
+// Per-peer telemetry the runtime now supplies (capability badges, latency, nonce
+// history). Only the live `summary.peers` source carries real values; peers known
+// only from a policy or the roster default to "not capable / no data".
+type PwaPeerTelemetry = {
+  canSign: boolean;
+  canEcdh: boolean;
+  canPing: boolean;
+  lastResponseLatencyMs: number | null;
+  avgLatencyMs: number | null;
+  nonceSeries: Array<{ ts: number; held: number }>;
+};
+
+type PwaPeerRow = PeerPolicy & PwaPeerTelemetry;
+
+const EMPTY_PEER_TELEMETRY: PwaPeerTelemetry = {
+  canSign: false,
+  canEcdh: false,
+  canPing: false,
+  lastResponseLatencyMs: null,
+  avgLatencyMs: null,
+  nonceSeries: [],
+};
+
 function derivePwaPeers(
   policies: Array<{
     pubkey: string;
@@ -189,8 +212,8 @@ function derivePwaPeers(
     };
   }>,
   runtimeStatus: RuntimeStatusSummary | null | undefined,
-): PeerPolicy[] {
-  const base = new Map<string, PeerPolicy>();
+): PwaPeerRow[] {
+  const base = new Map<string, PwaPeerRow>();
 
   for (const [index, policy] of policies.entries()) {
     base.set(policy.pubkey.toLowerCase(), {
@@ -205,6 +228,7 @@ function derivePwaPeers(
       outgoingAvailable: 0,
       outgoingSpent: 0,
       shouldSendNonces: false,
+      ...EMPTY_PEER_TELEMETRY,
     });
   }
 
@@ -224,6 +248,12 @@ function derivePwaPeers(
       outgoingAvailable: existing?.outgoingAvailable ?? 0,
       outgoingSpent: existing?.outgoingSpent ?? 0,
       shouldSendNonces: existing?.shouldSendNonces ?? false,
+      canSign: existing?.canSign ?? false,
+      canEcdh: existing?.canEcdh ?? false,
+      canPing: existing?.canPing ?? false,
+      lastResponseLatencyMs: existing?.lastResponseLatencyMs ?? null,
+      avgLatencyMs: existing?.avgLatencyMs ?? null,
+      nonceSeries: existing?.nonceSeries ?? [],
     });
   }
 
@@ -246,6 +276,12 @@ function derivePwaPeers(
       outgoingAvailable: peer.outgoing_available,
       outgoingSpent: peer.outgoing_spent,
       shouldSendNonces: peer.should_send_nonces,
+      canSign: peer.can_sign,
+      canEcdh: peer.can_ecdh,
+      canPing: peer.can_ping,
+      lastResponseLatencyMs: peer.last_response_latency_ms,
+      avgLatencyMs: peer.avg_latency_ms,
+      nonceSeries: peer.nonce_history.map((point) => ({ ts: point.ts, held: point.held })),
     });
   }
 
@@ -312,6 +348,12 @@ function deriveSignerDashboardView(
       pubkey: peer.pubkey,
       state: peer.state,
       statusLabel: peer.statusLabel ?? peer.state,
+      canSign: peer.canSign,
+      canEcdh: peer.canEcdh,
+      canPing: peer.canPing,
+      lastResponseLatencyMs: peer.lastResponseLatencyMs,
+      avgLatencyMs: peer.avgLatencyMs,
+      nonceSeries: peer.nonceSeries,
       lastSeenLabel: peer.lastSeen ? `last seen ${formatRuntimeTimestamp(peer.lastSeen)}` : undefined,
       incomingAvailable: peer.incomingAvailable,
       outgoingAvailable: peer.outgoingAvailable,
