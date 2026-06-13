@@ -121,6 +121,9 @@ function defaultPeerPermissionState(pubkey: string): PwaPeerPermissionState {
       respond: { ping: 'unset', onboard: 'unset', sign: 'unset', ecdh: 'unset' },
     },
     remote_observation: null,
+    // Permissive default mirrors bifrost-core MethodPolicy::default() — a settled
+    // product decision (see docs/PROTOCOL.md "Default Peer Permissions"). Manual
+    // overrides above stay 'unset' so operators opt into tightening per peer.
     effective_policy: {
       request: { ping: true, onboard: true, sign: true, ecdh: true },
       respond: { ping: true, onboard: true, sign: true, ecdh: true },
