@@ -416,6 +416,60 @@ describe('igloo-pwa app shell', () => {
     rotateSpy.mockRestore();
   });
 
+  it('clears all stored credentials and resets to landing', async () => {
+    cleanup();
+    const profileId = '99'.repeat(32);
+    window.localStorage.setItem(
+      partitionKeyFor(),
+      JSON.stringify({
+        profiles: [
+          {
+            id: profileId,
+            label: 'Doomed Key',
+            share_public_key: '66'.repeat(32),
+            group_public_key: '77'.repeat(32),
+            relays: ['wss://relay.primal.net'],
+            group_package_json: '{"group_name":"Doomed Key","group_pk":"77","threshold":2,"members":[{"idx":0}]}',
+            share_package_json: '{"idx":0}',
+            source: 'generated',
+            relay_profile: 'browser',
+            group_ref: 'group-ref',
+            encrypted_profile_ref: 'encrypted-profile-ref',
+            state_path: '/tmp/igloo-pwa/doomed',
+            created_at: 1700000000000,
+            stored_password: 'pw',
+            profile_string: 'bfprofile1demo',
+            share_string: 'bfshare1demo',
+            onboarding_package: null,
+          },
+        ],
+        selectedProfileId: profileId,
+        activeView: 'dashboard',
+        activeDashboardTab: 'settings',
+        peerPermissionStates: [],
+      }),
+    );
+
+    let latestStore: ReturnType<typeof useStore> | undefined;
+    render(
+      <StoreProvider>
+        <StoreHarness onReady={(store) => (latestStore = store)} />
+      </StoreProvider>,
+    );
+    await waitFor(() => expect(latestStore?.profiles).toHaveLength(1));
+
+    await latestStore!.clearDeviceCredentials();
+
+    await waitFor(() => expect(latestStore?.profiles).toHaveLength(0));
+    expect(latestStore?.selectedProfileId).toBe('');
+    expect(latestStore?.activeView).toBe('landing');
+    // The seeded profile no longer survives in the persisted partition.
+    const persisted = window.localStorage.getItem(partitionKeyFor());
+    if (persisted) {
+      expect(JSON.parse(persisted).profiles ?? []).toHaveLength(0);
+    }
+  });
+
   it('reveals, masks, and clears the recovered private key', () => {
     cleanup();
     const onClear = vi.fn();

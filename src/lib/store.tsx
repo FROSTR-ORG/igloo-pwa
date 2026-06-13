@@ -139,6 +139,11 @@ type AppState = PwaPersistedState & {
     signerSettings: PwaSignerSettings;
   }) => Promise<void>;
   logout: () => Promise<void>;
+  /**
+   * Destructive: stop the signer, tear down every runtime session, erase this
+   * device/partition's persisted credentials, and reset to a clean landing.
+   */
+  clearDeviceCredentials: () => Promise<void>;
   updateSettings: (field: keyof PwaSettings, checked: boolean) => void;
 };
 
@@ -1974,6 +1979,19 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           unlockPassphrase: '',
           draftSecrets: createDefaultDraftSecrets(),
         }));
+      },
+      async clearDeviceCredentials() {
+        // Stop the live signer, then tear down every profile's runtime session.
+        if (state.runtimeSnapshot?.active) {
+          await adapter.stopSession(state.runtimeSnapshot, controller).catch(() => null);
+        }
+        for (const profile of state.profiles) {
+          void adapter.disposeRuntimeSessionForProfile(profile.id, controller);
+        }
+        // Erase the persisted partition and reset to a clean default in-memory
+        // state so a reload also starts fresh.
+        clearPersistedState();
+        setState(() => createDefaultState());
       },
       updateSettings(field, checked) {
         setState((current) => ({

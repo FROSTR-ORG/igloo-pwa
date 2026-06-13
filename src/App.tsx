@@ -614,6 +614,7 @@ function AppShell() {
   // Unsaved-changes guard for the Settings tab: tracks the pending nav target while
   // the confirm modal is open.
   const [pendingSettingsNav, setPendingSettingsNav] = React.useState<'signer' | 'permissions' | 'settings' | null>(null);
+  const [clearCredentialsOpen, setClearCredentialsOpen] = React.useState(false);
 
   // DEV-only seam: lets the visual harness render the recover-success screen with a
   // FAKE nsec injected on the window. Stripped from production builds (guarded on
@@ -1621,6 +1622,16 @@ function AppShell() {
                     disabled: !selectedProfile,
                     onAction: () => void run(() => store.logout()),
                   },
+                  {
+                    title: 'Clear Credentials',
+                    description:
+                      'Permanently remove every stored profile and credential from this device. This cannot be undone.',
+                    actionLabel: 'Clear Credentials',
+                    testId: CRITICAL_E2E_TEST_IDS.settingsClearCredentials,
+                    variant: 'destructive',
+                    disabled: store.profiles.length === 0,
+                    onAction: () => setClearCredentialsOpen(true),
+                  },
                 ]}
                 extraSections={
                   <ContentCard
@@ -1744,6 +1755,19 @@ function AppShell() {
           setPendingSettingsNav(null);
         }}
         onCancel={() => setPendingSettingsNav(null)}
+      />
+      <ConfirmDialog
+        open={clearCredentialsOpen}
+        variant="danger"
+        title="Clear all credentials?"
+        message="This permanently removes every stored profile and credential from this device and cannot be undone. Export anything you need first."
+        confirmLabel="Clear this device"
+        cancelLabel="Cancel"
+        onConfirm={() => {
+          setClearCredentialsOpen(false);
+          void run(() => store.clearDeviceCredentials());
+        }}
+        onCancel={() => setClearCredentialsOpen(false)}
       />
       {store.activeView === 'landing' ? renderLanding() : null}
       {store.activeView === 'create-generate' ? renderCreateGenerate() : null}
