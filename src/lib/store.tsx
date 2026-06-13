@@ -1,4 +1,5 @@
 import * as React from 'react';
+import { flushSync } from 'react-dom';
 import {
   buildProfileDownloadFilename,
   DEFAULT_RELAYS,
@@ -456,6 +457,18 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     persistorRef.current.schedule(persistable as unknown as PwaPersistedState);
   }, [state]);
 
+  // Force the given dashboard state to localStorage synchronously, bypassing the
+  // debounce. The reactive effect above only *schedules* a write (250/500ms), and
+  // `pendingOnboardConnection` is reset on load for security — so a device created
+  // or onboarded just before an immediate reload would otherwise be lost. Callers
+  // that create a durable profile flush through this. Respects the
+  // remember-browser-state toggle, matching the reactive effect.
+  const persistImmediately = React.useCallback((snapshot: PwaPersistedState) => {
+    if (!snapshot.settings.remember_browser_state) return;
+    persistorRef.current.schedule(toPersistable(snapshot) as unknown as PwaPersistedState);
+    persistorRef.current.flush();
+  }, []);
+
   const selectedProfile = React.useMemo(
     () => state.profiles.find((profile) => profile.id === state.selectedProfileId) ?? null,
     [state.profiles, state.selectedProfileId],
@@ -575,20 +588,35 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       const snapshot = saved.runtime;
       const storedProfile = (snapshot?.profile ?? saved.profile) as PwaProfile;
 
-      setState((current) => ({
-        ...current,
-        profiles: [storedProfile, ...current.profiles.filter((entry) => entry.id !== storedProfile.id)],
-        peerPermissionStates:
-          snapshot?.peer_permission_states ?? current.peerPermissionStates ?? adapter.defaultPeerPermissionStates(),
-        runtimeWarning: saved.runtimeWarning?.message ?? null,
-        selectedProfileId: storedProfile.id,
-        activeView: 'dashboard',
-        activeDashboardTab: 'signer',
-        runtimeSnapshot: snapshot,
-        unlockPassphrase: passphrase,
-      }));
+      // `flushSync` so the updater runs and commits synchronously — we need the
+      // computed `next` state in hand to persist it before this call returns
+      // (a plain setState defers the updater, leaving nothing to flush).
+      let committed: PwaPersistedState | null = null;
+      flushSync(() => {
+        setState((current) => {
+          const next: PwaPersistedState = {
+            ...current,
+            profiles: [storedProfile, ...current.profiles.filter((entry) => entry.id !== storedProfile.id)],
+            peerPermissionStates:
+              snapshot?.peer_permission_states ?? current.peerPermissionStates ?? adapter.defaultPeerPermissionStates(),
+            runtimeWarning: saved.runtimeWarning?.message ?? null,
+            selectedProfileId: storedProfile.id,
+            activeView: 'dashboard',
+            activeDashboardTab: 'signer',
+            runtimeSnapshot: snapshot,
+            unlockPassphrase: passphrase,
+          };
+          committed = next;
+          return next;
+        });
+      });
+      // Persist the new device now — a reload inside the debounce window must not
+      // lose a just-created/onboarded/imported profile (see `persistImmediately`).
+      if (committed) {
+        persistImmediately(committed);
+      }
     },
-    [controller, ensureProfileIdAvailable, state.settings.auto_open_signer],
+    [controller, ensureProfileIdAvailable, persistImmediately, state.settings.auto_open_signer],
   );
 
   const value = React.useMemo<AppState>(
