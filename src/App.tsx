@@ -43,6 +43,7 @@ import {
   WelcomeDeleteModal,
   WelcomeUnlockModal,
   CRITICAL_E2E_TEST_IDS,
+  buildPeerReadinessRows,
   observabilityEventsToEventRows,
   passwordManagerOptOutProps,
   type DashboardKeyModel,
@@ -180,114 +181,6 @@ type PwaRuntimeStatus = {
   };
 };
 
-// Per-peer telemetry the runtime now supplies (capability badges, latency, nonce
-// history). Only the live `summary.peers` source carries real values; peers known
-// only from a policy or the roster default to "not capable / no data".
-type PwaPeerTelemetry = {
-  canSign: boolean;
-  canEcdh: boolean;
-  canPing: boolean;
-  lastResponseLatencyMs: number | null;
-  avgLatencyMs: number | null;
-  nonceSeries: Array<{ ts: number; held: number }>;
-};
-
-type PwaPeerRow = PeerPolicy & PwaPeerTelemetry;
-
-const EMPTY_PEER_TELEMETRY: PwaPeerTelemetry = {
-  canSign: false,
-  canEcdh: false,
-  canPing: false,
-  lastResponseLatencyMs: null,
-  avgLatencyMs: null,
-  nonceSeries: [],
-};
-
-function derivePwaPeers(
-  policies: Array<{
-    pubkey: string;
-    effective_policy: {
-      request: { sign: boolean };
-      respond: { sign: boolean };
-    };
-  }>,
-  runtimeStatus: RuntimeStatusSummary | null | undefined,
-): PwaPeerRow[] {
-  const base = new Map<string, PwaPeerRow>();
-
-  for (const [index, policy] of policies.entries()) {
-    base.set(policy.pubkey.toLowerCase(), {
-      alias: `Peer ${index + 1}`,
-      pubkey: policy.pubkey.toLowerCase(),
-      send: policy.effective_policy.request.sign,
-      receive: policy.effective_policy.respond.sign,
-      state: 'offline',
-      statusLabel: 'offline',
-      lastSeen: null,
-      incomingAvailable: 0,
-      outgoingAvailable: 0,
-      outgoingSpent: 0,
-      shouldSendNonces: false,
-      ...EMPTY_PEER_TELEMETRY,
-    });
-  }
-
-  const summary = runtimeStatus;
-  for (const [index, peer] of (summary?.metadata?.peers ?? []).entries()) {
-    const normalized = peer.toLowerCase();
-    const existing = base.get(normalized);
-    base.set(normalized, {
-      alias: existing?.alias ?? `Peer ${index + 1}`,
-      pubkey: normalized,
-      send: existing?.send ?? true,
-      receive: existing?.receive ?? true,
-      state: 'idle',
-      statusLabel: 'known',
-      lastSeen: existing?.lastSeen ?? null,
-      incomingAvailable: existing?.incomingAvailable ?? 0,
-      outgoingAvailable: existing?.outgoingAvailable ?? 0,
-      outgoingSpent: existing?.outgoingSpent ?? 0,
-      shouldSendNonces: existing?.shouldSendNonces ?? false,
-      canSign: existing?.canSign ?? false,
-      canEcdh: existing?.canEcdh ?? false,
-      canPing: existing?.canPing ?? false,
-      lastResponseLatencyMs: existing?.lastResponseLatencyMs ?? null,
-      avgLatencyMs: existing?.avgLatencyMs ?? null,
-      nonceSeries: existing?.nonceSeries ?? [],
-    });
-  }
-
-  for (const peer of summary?.peers ?? []) {
-    const normalized = peer.pubkey.toLowerCase();
-    const existing = base.get(normalized);
-    base.set(normalized, {
-      alias: existing?.alias ?? `Peer ${peer.idx}`,
-      pubkey: normalized,
-      send: existing?.send ?? true,
-      receive: existing?.receive ?? true,
-      // Match the igloo-ui runtime adapter: a reachable peer is online/idle, a
-      // known-but-unreachable peer warns, everything else is offline. (The prior
-      // mapping flagged sign-ready peers as 'warning', contradicting the
-      // 'sign-ready' status label and the shared adapter.)
-      state: peer.online ? (peer.can_sign ? 'online' : 'idle') : peer.known ? 'warning' : 'offline',
-      statusLabel: peer.can_sign ? 'sign-ready' : peer.online ? 'online' : peer.known ? 'known' : 'offline',
-      lastSeen: peer.last_seen,
-      incomingAvailable: peer.incoming_available,
-      outgoingAvailable: peer.outgoing_available,
-      outgoingSpent: peer.outgoing_spent,
-      shouldSendNonces: peer.should_send_nonces,
-      canSign: peer.can_sign,
-      canEcdh: peer.can_ecdh,
-      canPing: peer.can_ping,
-      lastResponseLatencyMs: peer.last_response_latency_ms,
-      avgLatencyMs: peer.avg_latency_ms,
-      nonceSeries: peer.nonce_history.map((point) => ({ ts: point.ts, held: point.held })),
-    });
-  }
-
-  return Array.from(base.values()).sort((a, b) => a.pubkey.localeCompare(b.pubkey));
-}
-
 function derivePendingOperations(runtimeStatus: unknown) {
   const summary = (runtimeStatus ?? null) as PwaRuntimeStatus | null;
   return (summary?.pending_operations ?? []).map((operation) => ({
@@ -324,7 +217,7 @@ function deriveSignerDashboardView(
 ): SignerDashboardViewModel | null {
   if (!profile) return null;
 
-  const summary = (runtimeSnapshot?.runtime_status ?? null) as PwaRuntimeStatus | null;
+  const summary = (runtimeSnapshot?.runtime_status ?? null) as RuntimeStatusSummary | null;
   const readiness = (runtimeSnapshot?.readiness ?? null) as (PwaRuntimeReadiness & { threshold?: number }) | null;
   const peerTotal = summary?.metadata?.peers?.length ? summary.metadata.peers.length + 1 : null;
   const thresholdLabel =
@@ -342,23 +235,11 @@ function deriveSignerDashboardView(
     readinessLabel: deriveRuntimeSummaryLabel(runtimeSnapshot),
     relaySummary: runtimeSnapshot?.active ? 'Browser runtime connected' : 'Runtime stopped',
     pendingApprovalRows: [],
-    peerRows: derivePwaPeers(peerPermissionStates, runtimeSnapshot?.runtime_status).map((peer) => ({
-      id: peer.pubkey,
-      alias: peer.alias,
-      pubkey: peer.pubkey,
-      state: peer.state,
-      statusLabel: peer.statusLabel ?? peer.state,
-      canSign: peer.canSign,
-      canEcdh: peer.canEcdh,
-      canPing: peer.canPing,
-      lastResponseLatencyMs: peer.lastResponseLatencyMs,
-      avgLatencyMs: peer.avgLatencyMs,
-      nonceSeries: peer.nonceSeries,
-      lastSeenLabel: peer.lastSeen ? `last seen ${formatRuntimeTimestamp(peer.lastSeen)}` : undefined,
-      incomingAvailable: peer.incomingAvailable,
-      outgoingAvailable: peer.outgoingAvailable,
-      outgoingSpent: peer.outgoingSpent,
-    })),
+    peerRows: buildPeerReadinessRows({
+      peers: summary?.peers ?? [],
+      rosterPubkeys: summary?.metadata?.peers ?? [],
+      policyPubkeys: peerPermissionStates.map((state) => state.pubkey),
+    }),
     pendingOperationRows: derivePendingOperations(runtimeSnapshot?.runtime_status),
     // Prefer structured events (domain/event tags + filter); fall back to the
     // formatted log lines for sessions that only surface plain strings.
