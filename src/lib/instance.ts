@@ -210,6 +210,9 @@ function removePartition(id: string): void {
   }
 }
 
+/** Keep at most this many `${partitionKey}.corrupt.<ts>` copies per partition. */
+const QUARANTINE_KEEP_NEWEST = 3;
+
 /**
  * Copy a bad persisted blob aside for debugging, then drop the live key so the
  * next load boots clean instead of crashing.
@@ -221,10 +224,44 @@ export function quarantineCorruptState(partitionKey: string, raw: string): void 
   } catch {
     // quota/unavailable — still drop the live key below.
   }
+  // A repeatedly-corrupted partition would otherwise accumulate unbounded
+  // `.corrupt.<ts>` copies; keep only the newest few.
+  pruneQuarantineCopies(partitionKey);
   try {
     window.localStorage.removeItem(partitionKey);
   } catch {
     // best effort
+  }
+}
+
+/**
+ * Cap the `${partitionKey}.corrupt.<ts>` quarantine copies at the newest
+ * {@link QUARANTINE_KEEP_NEWEST}, removing older ones. Best-effort: any failure
+ * leaves the existing copies in place.
+ */
+function pruneQuarantineCopies(partitionKey: string): void {
+  if (!hasWindow()) return;
+  const prefix = `${partitionKey}.corrupt.`;
+  try {
+    const keys: string[] = [];
+    for (let i = 0; i < window.localStorage.length; i += 1) {
+      const key = window.localStorage.key(i);
+      if (key && key.startsWith(prefix)) keys.push(key);
+    }
+    if (keys.length <= QUARANTINE_KEEP_NEWEST) return;
+    keys
+      // Newest first by the numeric timestamp suffix.
+      .sort((a, b) => Number(b.slice(prefix.length)) - Number(a.slice(prefix.length)))
+      .slice(QUARANTINE_KEEP_NEWEST)
+      .forEach((key) => {
+        try {
+          window.localStorage.removeItem(key);
+        } catch {
+          // best effort
+        }
+      });
+  } catch {
+    // enumeration failed — leave copies in place
   }
 }
 

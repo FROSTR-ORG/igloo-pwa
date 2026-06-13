@@ -11,6 +11,7 @@ import {
   __setInstanceIdForTests,
   INSTANCE_REGISTRY_KEY,
   gcEmptyInstances,
+  quarantineCorruptState,
   readInstanceRegistry,
 } from '@/lib/instance';
 import type { PwaPersistedState } from '@/lib/types';
@@ -44,6 +45,30 @@ describe('per-tab partition load hardening', () => {
     expect(
       localStorageKeys().some((key) => key.startsWith(`${partitionKeyFor()}.corrupt.`)),
     ).toBe(true);
+  });
+
+  it('caps quarantine copies at the newest few', () => {
+    __setInstanceIdForTests('cap');
+    const prefix = `${partitionKeyFor()}.corrupt.`;
+    // Seed four older copies with ascending timestamps.
+    for (const ts of [1, 2, 3, 4]) {
+      window.localStorage.setItem(`${prefix}${ts}`, `old-${ts}`);
+    }
+
+    // A fresh quarantine writes a new (now-stamped) copy and prunes the oldest.
+    quarantineCorruptState(partitionKeyFor(), 'newest');
+
+    const copies = localStorageKeys()
+      .filter((key) => key.startsWith(prefix))
+      .map((key) => Number(key.slice(prefix.length)))
+      .sort((a, b) => a - b);
+    // Kept the newest three: the two newest seeds (3, 4) plus the now-stamped one.
+    expect(copies).toHaveLength(3);
+    expect(copies.slice(0, 2)).toEqual([3, 4]);
+    expect(copies[2]).toBeGreaterThan(4);
+    // The two oldest were pruned.
+    expect(window.localStorage.getItem(`${prefix}1`)).toBeNull();
+    expect(window.localStorage.getItem(`${prefix}2`)).toBeNull();
   });
 
   it('quarantines a schema-version mismatch', () => {
