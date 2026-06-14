@@ -35,7 +35,7 @@ export type PwaPeerSelectionStrategy = 'deterministic_sorted' | 'random';
 
 export type PwaSignerSettings = SharedSignerSettings;
 
-export type PwaPolicyOverrideValue = 'unset' | 'allow' | 'deny';
+export type PwaPolicyOverrideValue = 'unset' | 'allow' | 'deny' | 'ask';
 
 export type PwaMethodPolicy = {
   ping: boolean;

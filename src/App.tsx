@@ -44,6 +44,7 @@ import {
   WelcomeUnlockModal,
   CRITICAL_E2E_TEST_IDS,
   buildPeerReadinessRows,
+  buildPendingApprovalRows,
   observabilityEventsToEventRows,
   passwordManagerOptOutProps,
   type DashboardKeyModel,
@@ -223,6 +224,12 @@ function deriveSignerDashboardView(
   const thresholdLabel =
     typeof readiness?.threshold === 'number' && peerTotal ? `${readiness.threshold}/${peerTotal}` : 'threshold n/a';
 
+  const peerRows = buildPeerReadinessRows({
+    peers: summary?.peers ?? [],
+    rosterPubkeys: summary?.metadata?.peers ?? [],
+    policyPubkeys: peerPermissionStates.map((state) => state.pubkey),
+  });
+
   return {
     profileName: profile.label || 'Unnamed device',
     thresholdLabel,
@@ -234,12 +241,11 @@ function deriveSignerDashboardView(
     running: Boolean(runtimeSnapshot?.active),
     readinessLabel: deriveRuntimeSummaryLabel(runtimeSnapshot),
     relaySummary: runtimeSnapshot?.active ? 'Browser runtime connected' : 'Runtime stopped',
-    pendingApprovalRows: [],
-    peerRows: buildPeerReadinessRows({
-      peers: summary?.peers ?? [],
-      rosterPubkeys: summary?.metadata?.peers ?? [],
-      policyPubkeys: peerPermissionStates.map((state) => state.pubkey),
+    pendingApprovalRows: buildPendingApprovalRows({
+      approvals: summary?.pending_approvals ?? [],
+      peerAliases: Object.fromEntries(peerRows.map((row) => [row.pubkey, row.alias])),
     }),
+    peerRows,
     pendingOperationRows: derivePendingOperations(runtimeSnapshot?.runtime_status),
     // Prefer structured events (domain/event tags + filter); fall back to the
     // formatted log lines for sessions that only surface plain strings.
@@ -1418,6 +1424,18 @@ function AppShell() {
                 onClearLogs={
                   store.runtimeSnapshot?.active ? () => void run(() => store.clearLogs()) : undefined
                 }
+                onApproveOnce={(id) => void run(() => store.resolveApproval(id, true))}
+                onDenyApproval={(id) => void run(() => store.resolveApproval(id, false))}
+                onAlwaysAllow={(id) => {
+                  const row = signerView?.pendingApprovalRows?.find((approval) => approval.id === id);
+                  if (!row) return;
+                  // Approve this request, then persist an Allow override so future
+                  // requests for this peer+method skip the queue.
+                  void run(async () => {
+                    await store.resolveApproval(id, true);
+                    await store.updatePeerPolicy(row.pubkey, 'respond', row.method, 'allow');
+                  });
+                }}
               />
             </div>
           ) : null}
@@ -1430,7 +1448,7 @@ function AppShell() {
                 onRefresh={() => void run(() => store.refreshSigner())}
                 onClearAllPeerPermissions={() => void run(() => store.clearPeerPolicies())}
                 onPeerPolicyOverrideChange={(pubkey, direction, method, value) =>
-                  void run(() => store.updatePeerPolicy(pubkey, direction, method, value === 'allow'))
+                  void run(() => store.updatePeerPolicy(pubkey, direction, method, value))
                 }
                 peerClearAllLabel="Remove Overrides"
                 peerDescription="Live outbound and inbound peer policy state for the active browser signer."

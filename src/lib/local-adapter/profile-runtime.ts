@@ -1,4 +1,4 @@
-import { decodeBfSharePackage, sharePackageToWireJson } from 'igloo-shared';
+import { decodeBfSharePackage, sharePackageToWireJson, type PolicyOverrideValue } from 'igloo-shared';
 
 import type { PwaProfile, PwaRuntimeSnapshot } from '../types';
 import {
@@ -350,7 +350,7 @@ export async function applyPeerPolicy(
   pubkey: string,
   direction: 'request' | 'respond',
   method: 'ping' | 'onboard' | 'sign' | 'ecdh',
-  value: boolean,
+  value: PolicyOverrideValue,
   controller?: SessionController | null,
 ): Promise<PwaRuntimeSnapshot | null> {
   if (!current?.profile) return null;
@@ -366,7 +366,7 @@ export async function applyPeerPolicy(
     pubkey,
     direction,
     method,
-    value: value ? 'allow' : 'deny',
+    value,
   });
   if (!applied) {
     return null;
@@ -377,6 +377,24 @@ export async function applyPeerPolicy(
     return null;
   }
   return toRuntimeSnapshot(current.profile, session, true, sharePackageJson);
+}
+
+/**
+ * Resolve a parked approval on the active session (the `ask` disposition).
+ * Fire-and-forget: the next runtime-status sync reflects the dequeued request.
+ * No-op on session drift, mirroring {@link applyPeerPolicy}.
+ */
+export async function resolveApproval(
+  current: PwaRuntimeSnapshot | null,
+  requestId: string,
+  approved: boolean,
+  controller?: SessionController | null,
+): Promise<void> {
+  if (!current?.profile) return;
+  const target = resolveController(controller);
+  const profileId = current.profile.id;
+  if (!current.active || target.getActiveProfileId() !== profileId) return;
+  await target.resolveApproval(profileId, target.currentEpoch(), requestId, approved);
 }
 
 export async function clearPeerPolicies(

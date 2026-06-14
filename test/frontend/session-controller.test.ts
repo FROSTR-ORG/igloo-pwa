@@ -255,7 +255,7 @@ describe('SessionController idempotent lifecycle (D.4)', () => {
         '99'.repeat(32),
         'request',
         'sign',
-        true,
+        'allow',
         controller,
       ),
     ).resolves.toBeNull();

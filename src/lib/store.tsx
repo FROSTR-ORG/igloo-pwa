@@ -6,6 +6,7 @@ import {
   groupPublicKeyFromPackage,
   saveBrowserProfileAndMaybeActivate,
   shortProfileId,
+  type PolicyOverrideValue,
 } from 'igloo-shared';
 
 import * as adapter from './local-adapter';
@@ -127,8 +128,10 @@ type AppState = PwaPersistedState & {
     pubkey: string,
     direction: 'request' | 'respond',
     method: 'ping' | 'onboard' | 'sign' | 'ecdh',
-    value: boolean
+    value: PolicyOverrideValue
   ) => Promise<void>;
+  /** Resolve a parked approval (the `ask` disposition): true approves, false denies. */
+  resolveApproval: (requestId: string, approved: boolean) => Promise<void>;
   clearPeerPolicies: () => Promise<void>;
   clearLogs: () => Promise<void>;
   startSigner: () => Promise<void>;
@@ -1324,8 +1327,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         let runtimeSnapshot = state.runtimeSnapshot;
         const share = state.pendingKeyset?.shares.find((entry) => entry.member_idx === memberIdx);
         if (share && runtimeSnapshot) {
-          runtimeSnapshot = await adapter.applyPeerPolicy(runtimeSnapshot, share.share_public_key, 'request', permission, enabled);
-          runtimeSnapshot = await adapter.applyPeerPolicy(runtimeSnapshot, share.share_public_key, 'respond', permission, enabled);
+          const distributionValue: PolicyOverrideValue = enabled ? 'allow' : 'deny';
+          runtimeSnapshot = await adapter.applyPeerPolicy(runtimeSnapshot, share.share_public_key, 'request', permission, distributionValue);
+          runtimeSnapshot = await adapter.applyPeerPolicy(runtimeSnapshot, share.share_public_key, 'respond', permission, distributionValue);
         }
 
         setState((current) => ({
@@ -1894,6 +1898,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
                 ),
           runtimeSnapshot,
         }));
+      },
+      async resolveApproval(requestId, approved) {
+        await adapter.resolveApproval(state.runtimeSnapshot, requestId, approved, controller);
       },
       async clearPeerPolicies() {
         const runtimeSnapshot = await adapter.clearPeerPolicies(state.runtimeSnapshot, controller);

@@ -19,7 +19,7 @@ export type SessionPolicyPatch = {
   pubkey: string;
   direction: 'request' | 'respond';
   method: 'ping' | 'onboard' | 'sign' | 'ecdh';
-  value: 'unset' | 'allow' | 'deny';
+  value: 'unset' | 'allow' | 'deny' | 'ask';
 };
 
 export type SessionBootstrapInput = Omit<BrowserBootstrapProfile, 'sharePackageJson'> & {
@@ -314,6 +314,23 @@ export class SessionController {
       });
     } catch {
       return null;
+    }
+  }
+
+  /**
+   * Resolve a parked approval (the `ask` disposition). No-op on drift; never throws.
+   */
+  async resolveApproval(
+    profileId: string,
+    epoch: SessionEpoch,
+    requestId: string,
+    approved: boolean,
+  ): Promise<void> {
+    if (!this.isFresh(profileId, epoch)) return;
+    try {
+      await this.session!.resolveApproval(requestId, approved);
+    } catch {
+      // Fire-and-forget: the next runtime-status sync recovers the truth.
     }
   }
 

@@ -2,6 +2,7 @@ import {
   BrowserBridgeNode,
   createBrowserRuntimeNodeInit,
   clearRuntimePeerPolicyOverridesOnNode,
+  resolveApprovalOnNode,
   connectSignerNode,
   createSignerNode,
   decodeOnboardingProfile,
@@ -103,10 +104,11 @@ export type BrowserRuntimeSession = {
     patch: {
       direction: 'request' | 'respond';
       method: 'ping' | 'onboard' | 'sign' | 'ecdh';
-      value: 'unset' | 'allow' | 'deny';
+      value: 'unset' | 'allow' | 'deny' | 'ask';
     }
   ) => Promise<BrowserRuntimeSessionSnapshot>;
   clearPeerPolicyOverrides: () => Promise<BrowserRuntimeSessionSnapshot>;
+  resolveApproval: (requestId: string, approved: boolean) => Promise<BrowserRuntimeSessionSnapshot>;
   updateConfig: (settings: Partial<SignerSettings>) => BrowserRuntimeSessionSnapshot;
   // Subscribe to onboard-served signals (the runtime served an onboard response to
   // a peer). Returns an unsubscribe. `peerPubkey` is the peer's x-only pubkey.
@@ -388,6 +390,10 @@ function createSession(node: BrowserBridgeNode, logs: ReturnType<typeof attachLo
     },
     async clearPeerPolicyOverrides() {
       await clearRuntimePeerPolicyOverridesOnNode(node);
+      return buildSessionSnapshot(node, logs.collectEvents());
+    },
+    async resolveApproval(requestId, approved) {
+      await resolveApprovalOnNode(node, requestId, approved);
       return buildSessionSnapshot(node, logs.collectEvents());
     },
     updateConfig(settings) {
