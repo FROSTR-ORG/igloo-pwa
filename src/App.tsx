@@ -27,6 +27,9 @@ import {
   OperatorPermissionsPanel,
   OperatorSettingsPanel,
   OperatorSignerPanel,
+  DashboardLoadingScreen,
+  DashboardLoadFailedScreen,
+  DashboardConditionBanner,
   PageLayout,
   PageBackLink,
   PasswordField,
@@ -45,6 +48,7 @@ import {
   CRITICAL_E2E_TEST_IDS,
   buildPeerReadinessRows,
   buildPendingApprovalRows,
+  deriveDashboardState,
   observabilityEventsToEventRows,
   passwordManagerOptOutProps,
   type DashboardKeyModel,
@@ -508,6 +512,8 @@ function AppShell() {
   const [welcomeDeleteProfileId, setWelcomeDeleteProfileId] = React.useState<string | null>(null);
   const [recoveredKey, setRecoveredKey] = React.useState<{ nsec: string; signingKeyHex: string } | null>(null);
   const [dashboardCopiedField, setDashboardCopiedField] = React.useState<'group' | 'share' | null>(null);
+  // request_id of a signing-failed banner the operator dismissed.
+  const [dismissedSignFailureId, setDismissedSignFailureId] = React.useState<string | null>(null);
 
   const copyDashboardKey = React.useCallback(
     (field: 'group' | 'share', keyModel: DashboardKeyModel | undefined, format?: 'npub' | 'hex') => {
@@ -1400,11 +1406,44 @@ function AppShell() {
     const runtimeControlLabel = runtimeState === 'running' ? 'Stop Signer' : 'Start Signer';
     const signerView = deriveSignerDashboardView(selectedProfile, store.runtimeSnapshot, store.peerPermissionStates);
     const policyView = derivePolicyDashboardView(Boolean(store.runtimeSnapshot?.active), store.peerPermissionStates);
+    const dashboardState = deriveDashboardState({
+      active: Boolean(store.runtimeSnapshot?.active),
+      status: (store.runtimeSnapshot?.runtime_status ?? null) as RuntimeStatusSummary | null,
+      // Hard browser load failures throw out of connect() and keep the user off
+      // the dashboard, so the renderable load-failed signal is the host-enriched
+      // status.last_load_error (deriveDashboardState falls back to it).
+      dismissedSignFailureId,
+    });
 
     return (
       <div data-testid={CRITICAL_E2E_TEST_IDS.dashboardRoot} className="space-y-6">
           {store.activeDashboardTab === 'signer' ? (
             <div role="tabpanel" id="operator-panel-signer" aria-labelledby="operator-tab-signer">
+              {dashboardState.kind === 'loading' ? (
+                <DashboardLoadingScreen detail={dashboardState.detail} />
+              ) : dashboardState.kind === 'load-failed' ? (
+                <DashboardLoadFailedScreen
+                  message={dashboardState.message}
+                  timestampLabel={dashboardState.at ? formatRuntimeTimestamp(dashboardState.at) : undefined}
+                  onRetry={() => void run(() => store.startSigner())}
+                  onClear={() => setClearCredentialsOpen(true)}
+                />
+              ) : (
+                <>
+                  {dashboardState.banners.map((banner) => (
+                    <DashboardConditionBanner
+                      key={banner.kind}
+                      banner={banner}
+                      timestampLabel={
+                        banner.kind === 'signing-failed' ? formatRuntimeTimestamp(banner.at) : undefined
+                      }
+                      onDismiss={
+                        banner.kind === 'signing-failed'
+                          ? () => setDismissedSignFailureId(banner.requestId)
+                          : undefined
+                      }
+                    />
+                  ))}
               <OperatorSignerPanel
                 view={signerView}
                 introMessage="The browser signer runs locally inside the PWA workbench. This dashboard mirrors the operator workflow used by igloo-chrome."
@@ -1437,6 +1476,8 @@ function AppShell() {
                   });
                 }}
               />
+                </>
+              )}
             </div>
           ) : null}
 
