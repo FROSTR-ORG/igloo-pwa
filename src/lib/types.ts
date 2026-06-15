@@ -329,6 +329,12 @@ export type PwaPersistedState = {
   pendingLoadConfirmation: PwaLoadConfirmation | null;
   /** In-memory only. Non-secret error string from the last load attempt. */
   pendingLoadError: string | null;
+  /**
+   * In-memory only. Set when starting/restoring the signer fails, so the
+   * dashboard can show the full-panel load-failed screen (Retry / Clear).
+   * Cleared on a successful start, stop, refresh, or logout.
+   */
+  dashboardLoadError: { message: string; at: number } | null;
   /** In-memory only. */
   pendingOnboardConnection: PwaOnboardConnection | null;
   /** In-memory only. */

@@ -328,6 +328,68 @@ describe('igloo-pwa app shell', () => {
     verifySpy.mockRestore();
   });
 
+  it('captures a signer-start failure as dashboardLoadError and routes to the dashboard', async () => {
+    cleanup();
+    const profileId = 'aa'.repeat(32);
+    window.localStorage.setItem(
+      partitionKeyFor(),
+      JSON.stringify({
+        selectedProfileId: profileId,
+        profiles: [
+          {
+            id: profileId,
+            label: 'Load-Fail Device',
+            share_public_key: '44'.repeat(32),
+            group_public_key: '55'.repeat(32),
+            relays: ['wss://relay.primal.net'],
+            group_package_json:
+              '{"group_name":"Load-Fail","group_pk":"55","threshold":2,"members":[{"idx":0},{"idx":1},{"idx":2}]}',
+            share_package_json: '{"idx":0}',
+            member_idx: 1,
+            source: 'generated',
+            relay_profile: 'browser',
+            group_ref: 'group-ref',
+            encrypted_profile_ref: 'encrypted-profile-ref',
+            state_path: '/tmp/igloo-pwa/load-fail',
+            created_at: 1700000000000,
+            stored_password: 'pw',
+            profile_string: 'bfprofile1demo',
+            share_string: 'bfshare1demo',
+            onboarding_package: null,
+          },
+        ],
+      }),
+    );
+
+    const startSpy = vi
+      .spyOn(adapter, 'startSession')
+      .mockRejectedValue(new Error('snapshot restore failed'));
+
+    let latestStore: ReturnType<typeof useStore> | undefined;
+    render(
+      <StoreProvider>
+        <StoreHarness onReady={(store) => (latestStore = store)} />
+      </StoreProvider>,
+    );
+    await waitFor(() => expect(latestStore?.profiles).toHaveLength(1));
+
+    latestStore!.setUnlockPassphrase('pw');
+    await waitFor(() => expect(latestStore?.unlockPassphrase).toBe('pw'));
+
+    await expect(latestStore!.startSigner()).rejects.toThrow('snapshot restore failed');
+    await waitFor(() => expect(latestStore?.dashboardLoadError?.message).toBe('snapshot restore failed'));
+    // Routed to the signer dashboard so the full-panel load-failed screen shows.
+    expect(latestStore?.activeView).toBe('dashboard');
+    expect(latestStore?.activeDashboardTab).toBe('signer');
+
+    // Stopping the signer clears the stale load error.
+    vi.spyOn(adapter, 'stopSession').mockResolvedValue(null);
+    await latestStore!.stopSigner();
+    await waitFor(() => expect(latestStore?.dashboardLoadError).toBeNull());
+
+    startSpy.mockRestore();
+  });
+
   it('auto-includes the device share when rotating the keyset', async () => {
     cleanup();
     const profileId = '99'.repeat(32);
@@ -1002,6 +1064,7 @@ describe('toPersistable allow-list (D.1)', () => {
       selectedGeneratedShareIdx: null,
       pendingLoadConfirmation: null,
       pendingLoadError: null,
+      dashboardLoadError: null,
       pendingOnboardConnection: null,
       pendingRotationConnection: null,
       distributionSession: null,
@@ -1216,6 +1279,7 @@ describe('share_package_json runtime-only reconstruction (PR16b)', () => {
       selectedGeneratedShareIdx: null,
       pendingLoadConfirmation: null,
       pendingLoadError: null,
+      dashboardLoadError: null,
       pendingOnboardConnection: null,
       pendingRotationConnection: null,
       distributionSession: null,

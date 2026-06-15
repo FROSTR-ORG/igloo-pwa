@@ -272,6 +272,7 @@ function createDefaultState(): PwaPersistedState {
     selectedGeneratedShareIdx: null,
     pendingLoadConfirmation: null,
     pendingLoadError: null,
+    dashboardLoadError: null,
     pendingOnboardConnection: null,
     pendingRotationConnection: null,
     distributionSession: null,
@@ -1934,7 +1935,22 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         if (!state.unlockPassphrase.trim()) {
           throw new Error('Enter the device passphrase to start the signer.');
         }
-        const runtimeSnapshot = await adapter.startSession(selectedProfile, state.unlockPassphrase, controller);
+        let runtimeSnapshot: PwaRuntimeSnapshot;
+        try {
+          runtimeSnapshot = await adapter.startSession(selectedProfile, state.unlockPassphrase, controller);
+        } catch (error) {
+          // A hard start/restore failure leaves no runtime to query, so surface
+          // it as the full-panel load-failed screen on the dashboard (Retry /
+          // Clear) rather than only a transient toast.
+          const message = error instanceof Error && error.message.trim() ? error.message : 'Failed to start the signer.';
+          setState((current) => ({
+            ...current,
+            dashboardLoadError: { message, at: Math.floor(Date.now() / 1000) },
+            activeView: 'dashboard',
+            activeDashboardTab: 'signer',
+          }));
+          throw error;
+        }
         setState((current) => ({
           ...current,
           profiles:
@@ -1946,6 +1962,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           peerPermissionStates:
             runtimeSnapshot.peer_permission_states ?? adapter.defaultPeerPermissionStates(),
           runtimeWarning: null,
+          dashboardLoadError: null,
           runtimeSnapshot,
           activeView: 'dashboard',
           activeDashboardTab: 'signer',
@@ -1964,6 +1981,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           peerPermissionStates:
             runtimeSnapshot?.peer_permission_states ?? current.peerPermissionStates,
           runtimeWarning: null,
+          dashboardLoadError: null,
           runtimeSnapshot,
           unlockPassphrase: '',
         }));
@@ -1981,6 +1999,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           peerPermissionStates:
             runtimeSnapshot?.peer_permission_states ?? current.peerPermissionStates,
           runtimeWarning: null,
+          dashboardLoadError: null,
           runtimeSnapshot,
         }));
       },

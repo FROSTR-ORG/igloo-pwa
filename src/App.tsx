@@ -1409,9 +1409,10 @@ function AppShell() {
     const dashboardState = deriveDashboardState({
       active: Boolean(store.runtimeSnapshot?.active),
       status: (store.runtimeSnapshot?.runtime_status ?? null) as RuntimeStatusSummary | null,
-      // Hard browser load failures throw out of connect() and keep the user off
-      // the dashboard, so the renderable load-failed signal is the host-enriched
-      // status.last_load_error (deriveDashboardState falls back to it).
+      // A hard start/restore failure throws out of connect() (no runtime to
+      // query), so startSigner captures it into store.dashboardLoadError and
+      // routes here to show the full-panel load-failed screen.
+      loadError: store.dashboardLoadError,
       dismissedSignFailureId,
     });
 
