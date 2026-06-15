@@ -144,50 +144,8 @@ function buildOperatorSettingsDraft(
   };
 }
 
-type PwaRuntimePeerStatus = {
-  idx: number;
-  pubkey: string;
-  known: boolean;
-  last_seen: number | null;
-  online: boolean;
-  incoming_available: number;
-  outgoing_available: number;
-  outgoing_spent: number;
-  can_sign: boolean;
-  should_send_nonces: boolean;
-};
-
-type PwaRuntimePendingOperation = {
-  request_id: string;
-  op_type: string;
-  threshold: number;
-  started_at: number | null;
-  timeout_at: number | null;
-  collected_responses: unknown[];
-  target_peers: string[];
-};
-
-type PwaRuntimeReadiness = {
-  runtime_ready: boolean;
-  restore_complete: boolean;
-  sign_ready: boolean;
-  ecdh_ready: boolean;
-  last_refresh_at: number | null;
-};
-
-type PwaRuntimeStatus = {
-  peers?: PwaRuntimePeerStatus[];
-  pending_operations?: PwaRuntimePendingOperation[];
-  metadata?: {
-    peers?: string[];
-  };
-  status?: {
-    last_active?: number;
-  };
-};
-
 function derivePendingOperations(runtimeStatus: unknown) {
-  const summary = (runtimeStatus ?? null) as PwaRuntimeStatus | null;
+  const summary = (runtimeStatus ?? null) as RuntimeStatusSummary | null;
   return (summary?.pending_operations ?? []).map((operation) => ({
     id: operation.request_id,
     operationLabel: operation.op_type,
@@ -223,7 +181,7 @@ function deriveSignerDashboardView(
   if (!profile) return null;
 
   const summary = (runtimeSnapshot?.runtime_status ?? null) as RuntimeStatusSummary | null;
-  const readiness = (runtimeSnapshot?.readiness ?? null) as (PwaRuntimeReadiness & { threshold?: number }) | null;
+  const readiness = (runtimeSnapshot?.readiness ?? null) as RuntimeReadiness | null;
   const peerTotal = summary?.metadata?.peers?.length ? summary.metadata.peers.length + 1 : null;
   const thresholdLabel =
     typeof readiness?.threshold === 'number' && peerTotal ? `${readiness.threshold}/${peerTotal}` : 'threshold n/a';
@@ -713,7 +671,9 @@ function AppShell() {
   );
 
   function renderError() {
-    if (!uiError) return null;
+    // When a signer-start failure is showing as the full-panel load-failed
+    // screen, suppress the duplicate top-level banner (it carries the same message).
+    if (!uiError || store.dashboardLoadError) return null;
     return <Alert tone="danger">{uiError}</Alert>;
   }
 
