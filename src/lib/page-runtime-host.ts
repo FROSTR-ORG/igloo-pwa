@@ -356,8 +356,19 @@ export async function connectOnboardingPackageAndCaptureProfile(input: {
       stagedSession
     };
   } catch (error) {
-    const lines = logs.collect().slice(-20);
-    const suffix = lines.length > 0 ? ` | runtime_logs=${JSON.stringify(lines)}` : '';
+    // Allow-list the runtime breadcrumb appended to the surfaced error: only
+    // non-secret structured fields (domain.event + request_id), never the
+    // verbatim `error_message`, which can carry relay URLs / other sensitive
+    // detail and reaches the UI banner.
+    const breadcrumb = logs
+      .collectEvents()
+      .slice(-20)
+      .map((event) => {
+        const requestId = (event as { request_id?: unknown }).request_id;
+        const tag = `${event.domain}.${event.event}`;
+        return typeof requestId === 'string' ? `${tag}#${requestId}` : tag;
+      });
+    const suffix = breadcrumb.length > 0 ? ` | runtime_events=${JSON.stringify(breadcrumb)}` : '';
     logs.detach();
     await (node as typeof node & { shutdown: () => Promise<void> })
       .shutdown()

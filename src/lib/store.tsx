@@ -44,7 +44,6 @@ type AppState = PwaPersistedState & {
   setUnlockPassphrase: (value: string) => void;
   selectProfile: (profileId: string) => void;
   loadStoredProfile: (profileId: string, passphrase: string) => Promise<void>;
-  startCreateChoice: () => void;
   updateCreateForm: (field: keyof PwaDraftState['createForm'] | 'privateKey', value: string) => void;
   updateRotationForm: (field: 'sourceProfileId', value: string) => void;
   updateRotationSource: (
@@ -409,8 +408,8 @@ function normalizeLoadedStateFromStorage(): PwaPersistedState {
   ) {
     // The in-flight keyset is in-memory only (it holds share secrets) and is
     // never persisted, so a reload can't resume mid-create. Bounce back to the
-    // create entry point instead of stranding the user on a keyset-less step.
-    normalized.activeView = 'create-choice';
+    // landing entry point instead of stranding the user on a keyset-less step.
+    normalized.activeView = 'landing';
   }
 
   return normalized;
@@ -687,9 +686,6 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
             entry.id === profile.id && runtimeSnapshot.profile ? runtimeSnapshot.profile : entry,
           ),
         }));
-      },
-      startCreateChoice() {
-        setState((current) => ({ ...current, activeView: 'create-choice' }));
       },
       updateCreateForm(field, value) {
         setState((current) => {

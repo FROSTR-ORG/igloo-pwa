@@ -11,7 +11,6 @@ import type {
 
 export type PwaView =
   | 'landing'
-  | 'create-choice'
   | 'create-generate'
   | 'create-select-share'
   | 'create-save-profile'
@@ -27,8 +26,7 @@ export type PwaView =
   | 'rotate-save'
   | 'recover-collect'
   | 'recover-key'
-  | 'dashboard'
-  | 'settings';
+  | 'dashboard';
 
 export type PwaDashboardTab = 'signer' | 'permissions' | 'settings';
 export type PwaPeerSelectionStrategy = 'deterministic_sorted' | 'random';

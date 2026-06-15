@@ -1041,7 +1041,6 @@ function AppShell() {
               onLabelChange={(value) => store.updateImportSaveForm('label', value)}
               onPrimarySecretChange={(value) => store.updateImportSavePassword('password', value)}
               onSecondarySecretChange={(value) => store.updateImportSavePassword('confirmPassword', value)}
-              onRelaysChange={(relays) => store.updateImportSaveForm('relayUrls', relays.join('\n'))}
               onPingRelay={(url) => pingRelay(url)}
               onAction={() => void run(() => store.acceptPendingLoadConfirmation())}
             />
@@ -1150,7 +1149,6 @@ function AppShell() {
               onLabelChange={(value) => store.updateOnboardSaveForm('label', value)}
               onPrimarySecretChange={(value) => store.updateOnboardSavePassword('password', value)}
               onSecondarySecretChange={(value) => store.updateOnboardSavePassword('confirmPassword', value)}
-              onRelaysChange={(relays) => store.updateOnboardSaveForm('relayUrls', relays.join('\n'))}
               onPingRelay={(url) => pingRelay(url)}
               onAction={() => void run(() => store.finalizeOnboardedDevice())}
             />
