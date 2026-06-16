@@ -1385,7 +1385,6 @@ function AppShell() {
                   ))}
               <OperatorSignerPanel
                 view={signerView}
-                introMessage="The browser signer runs locally inside the PWA workbench. This dashboard mirrors the operator workflow used by igloo-chrome."
                 emptyDescription="Load or onboard a device profile before opening the signer dashboard."
                 runtimeControlLabel={runtimeControlLabel}
                 copiedField={dashboardCopiedField}
@@ -1394,7 +1393,6 @@ function AppShell() {
                 onPrimaryAction={() =>
                   void run(() => (store.runtimeSnapshot?.active ? store.stopSigner() : store.startSigner()))
                 }
-                primaryActionVariant={store.runtimeSnapshot?.active ? 'destructive' : 'success'}
                 onRefreshPeers={() => void run(() => store.refreshSigner())}
                 refreshPeersDisabled={!store.runtimeSnapshot?.active}
                 // Clearing the host-side log buffer requires an active session, so
