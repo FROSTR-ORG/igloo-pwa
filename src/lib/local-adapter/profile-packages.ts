@@ -5,6 +5,7 @@ import {
   finalizeConnectedBrowserProfile,
   finalizeRotatedBrowserProfile,
   importBrowserProfilePackage,
+  Secret,
 } from 'igloo-shared';
 
 import {
@@ -184,7 +185,7 @@ export async function exportEncryptedPackage(input: {
   exportPassword: string;
   format: 'bfprofile' | 'bfshare';
 }): Promise<string> {
-  const payload = await decodeBfProfilePackage(input.profileString, input.storedPassword);
-  const pair = await createProfilePackagePair(payload, input.exportPassword);
+  const payload = await decodeBfProfilePackage(input.profileString, Secret.of(input.storedPassword));
+  const pair = await createProfilePackagePair(payload, Secret.of(input.exportPassword));
   return input.format === 'bfprofile' ? pair.profileString : pair.shareString;
 }

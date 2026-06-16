@@ -1,4 +1,4 @@
-import { decodeBfSharePackage, sharePackageToWireJson, type PolicyOverrideValue } from 'igloo-shared';
+import { decodeBfSharePackage, Secret, sharePackageToWireJson, type PolicyOverrideValue } from 'igloo-shared';
 
 import type { PwaProfile, PwaRuntimeSnapshot } from '../types';
 import {
@@ -119,7 +119,7 @@ export async function unlockShareFromArtifact(
   try {
     const decoded = await decodeBfSharePackage(
       profile.encrypted_bfshare_artifact,
-      passphrase,
+      Secret.of(passphrase),
     );
     // `member_idx` is persisted directly on the profile record (v2). For
     // legacy callers that still have an older shape, we fall back to 1

@@ -8,6 +8,7 @@ import {
   normalizeHex32,
   publicKeyFromSecret,
   recoverSecretKeyFromShares,
+  Secret,
   sharePackageToWireJson,
   type BrowserOnboardPackagePayload,
 } from 'igloo-shared';
@@ -119,7 +120,7 @@ export async function createRotatedKeyset(input: {
   if (input.encryptedShareArtifact?.trim() && input.devicePassphrase) {
     let deviceShareSecret: string;
     try {
-      const deviceShare = await decodeBfSharePackage(input.encryptedShareArtifact, input.devicePassphrase);
+      const deviceShare = await decodeBfSharePackage(input.encryptedShareArtifact, Secret.of(input.devicePassphrase));
       deviceShareSecret = deviceShare.shareSecret;
     } catch {
       throw new Error('Incorrect device passphrase.');
@@ -162,7 +163,7 @@ async function decodeShareSecrets(
 ): Promise<string[]> {
   const filled = sources.filter((source) => source.packageText.trim() && source.password);
   const decoded = await Promise.all(
-    filled.map((source) => decodeBfSharePackage(source.packageText.trim(), source.password)),
+    filled.map((source) => decodeBfSharePackage(source.packageText.trim(), Secret.of(source.password))),
   );
   return decoded.map((share) => share.shareSecret);
 }
@@ -178,7 +179,7 @@ export async function verifyDeviceShareUnlock(input: {
     return false;
   }
   try {
-    await decodeBfSharePackage(input.encryptedShareArtifact, input.devicePassphrase);
+    await decodeBfSharePackage(input.encryptedShareArtifact, Secret.of(input.devicePassphrase));
     return true;
   } catch {
     return false;
@@ -205,7 +206,7 @@ export async function recoverNsecFromShares(input: {
   if (input.encryptedShareArtifact?.trim() && input.devicePassphrase) {
     let deviceShareSecret: string;
     try {
-      const deviceShare = await decodeBfSharePackage(input.encryptedShareArtifact, input.devicePassphrase);
+      const deviceShare = await decodeBfSharePackage(input.encryptedShareArtifact, Secret.of(input.devicePassphrase));
       deviceShareSecret = deviceShare.shareSecret;
     } catch {
       throw new Error('Incorrect device passphrase.');
@@ -265,7 +266,7 @@ export async function createOnboardingPackageForShare(input: DistributionPackage
   };
 
   return {
-    package_text: await encodeBfOnboardPackage(payload, input.password),
+    package_text: await encodeBfOnboardPackage(payload, Secret.of(input.password)),
     preview: {
       label: input.label.trim(),
       share_public_key: share.share_public_key,
