@@ -1,20 +1,19 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import {
-  STORAGE_KEY,
-  clearPersistedState,
-  loadPersistedState,
-  partitionKeyFor,
-  savePersistedState,
+  GLOBAL_STORE_KEY,
+  clearGlobalState,
+  clearSessionState,
+  deleteProfileGlobal,
+  loadGlobalState,
+  loadSessionState,
+  saveGlobalState,
+  saveSessionState,
+  sessionKeyFor,
 } from '@/lib/storage';
-import {
-  __setInstanceIdForTests,
-  INSTANCE_REGISTRY_KEY,
-  gcEmptyInstances,
-  quarantineCorruptState,
-  readInstanceRegistry,
-} from '@/lib/instance';
-import type { PwaPersistedState } from '@/lib/types';
+import { __setInstanceIdForTests, quarantineCorruptState } from '@/lib/instance';
+import { importLegacyProfilesOnce } from '@/lib/migrate-global';
+import type { PersistableProfile, PersistableSessionState } from '@/lib/persist-allowlist';
 
 function localStorageKeys(): string[] {
   const out: string[] = [];
@@ -23,6 +22,24 @@ function localStorageKeys(): string[] {
     if (key) out.push(key);
   }
   return out;
+}
+
+function prof(id: string, extra: Record<string, unknown> = {}): PersistableProfile {
+  return { id, ...extra } as unknown as PersistableProfile;
+}
+
+function ids(profiles?: PersistableProfile[] | null): string[] {
+  return (profiles ?? []).map((profile) => profile.id);
+}
+
+function sessionBlob(selectedProfileId = ''): PersistableSessionState {
+  return {
+    schemaVersion: 1,
+    selectedProfileId,
+    activeView: 'landing',
+    activeDashboardTab: 'signer',
+    drafts: {} as PersistableSessionState['drafts'],
+  };
 }
 
 beforeEach(() => {
@@ -34,122 +51,181 @@ afterEach(() => {
   __setInstanceIdForTests(null);
 });
 
-describe('per-tab partition load hardening', () => {
+describe('global store load hardening', () => {
   it('quarantines a corrupt (non-JSON) blob and boots clean', () => {
-    __setInstanceIdForTests('q');
-    window.localStorage.setItem(partitionKeyFor(), 'definitely-not-json{');
+    window.localStorage.setItem(GLOBAL_STORE_KEY, 'definitely-not-json{');
 
-    expect(loadPersistedState()).toBeNull();
-    // Live key dropped, bad blob copied aside for debugging.
-    expect(window.localStorage.getItem(partitionKeyFor())).toBeNull();
+    expect(loadGlobalState()).toBeNull();
+    expect(window.localStorage.getItem(GLOBAL_STORE_KEY)).toBeNull();
     expect(
-      localStorageKeys().some((key) => key.startsWith(`${partitionKeyFor()}.corrupt.`)),
+      localStorageKeys().some((key) => key.startsWith(`${GLOBAL_STORE_KEY}.corrupt.`)),
     ).toBe(true);
   });
 
+  it('quarantines a schema-version mismatch', () => {
+    window.localStorage.setItem(
+      GLOBAL_STORE_KEY,
+      JSON.stringify({ schemaVersion: 999, profiles: [] }),
+    );
+
+    expect(loadGlobalState()).toBeNull();
+    expect(window.localStorage.getItem(GLOBAL_STORE_KEY)).toBeNull();
+  });
+
+  it('accepts a current-schema blob', () => {
+    window.localStorage.setItem(
+      GLOBAL_STORE_KEY,
+      JSON.stringify({ schemaVersion: 1, profiles: [], settings: {} }),
+    );
+    expect(loadGlobalState()).not.toBeNull();
+  });
+
   it('caps quarantine copies at the newest few', () => {
-    __setInstanceIdForTests('cap');
-    const prefix = `${partitionKeyFor()}.corrupt.`;
-    // Seed four older copies with ascending timestamps.
+    const prefix = `${GLOBAL_STORE_KEY}.corrupt.`;
     for (const ts of [1, 2, 3, 4]) {
       window.localStorage.setItem(`${prefix}${ts}`, `old-${ts}`);
     }
 
-    // A fresh quarantine writes a new (now-stamped) copy and prunes the oldest.
-    quarantineCorruptState(partitionKeyFor(), 'newest');
+    quarantineCorruptState(GLOBAL_STORE_KEY, 'newest');
 
     const copies = localStorageKeys()
       .filter((key) => key.startsWith(prefix))
       .map((key) => Number(key.slice(prefix.length)))
       .sort((a, b) => a - b);
-    // Kept the newest three: the two newest seeds (3, 4) plus the now-stamped one.
     expect(copies).toHaveLength(3);
     expect(copies.slice(0, 2)).toEqual([3, 4]);
     expect(copies[2]).toBeGreaterThan(4);
-    // The two oldest were pruned.
     expect(window.localStorage.getItem(`${prefix}1`)).toBeNull();
     expect(window.localStorage.getItem(`${prefix}2`)).toBeNull();
   });
+});
 
-  it('quarantines a schema-version mismatch', () => {
-    __setInstanceIdForTests('v');
-    window.localStorage.setItem(
-      partitionKeyFor(),
-      JSON.stringify({ schemaVersion: 999, profiles: [] }),
-    );
-
-    expect(loadPersistedState()).toBeNull();
-    expect(window.localStorage.getItem(partitionKeyFor())).toBeNull();
-  });
-
-  it('accepts a current-schema blob', () => {
-    __setInstanceIdForTests('ok');
-    window.localStorage.setItem(
-      partitionKeyFor(),
-      JSON.stringify({ schemaVersion: 2, profiles: [], drafts: {} }),
-    );
-
-    expect(loadPersistedState()).not.toBeNull();
-  });
-
-  it('isolates partitions across instance ids', () => {
+describe('global profiles are shared across tabs', () => {
+  it('a profile saved under one instance id is visible under another', () => {
     __setInstanceIdForTests('A');
-    savePersistedState({ schemaVersion: 2, profiles: [{ id: 'a' }] } as unknown as PwaPersistedState);
-    expect(loadPersistedState()).not.toBeNull();
+    saveGlobalState({ profiles: [prof('a')] });
 
     __setInstanceIdForTests('B');
-    expect(loadPersistedState()).toBeNull();
+    // The global store is not partitioned: tab B sees tab A's device.
+    expect(ids(loadGlobalState()?.profiles)).toEqual(['a']);
+  });
+
+  it('merge-by-id preserves a concurrent tab\'s added profile', () => {
+    saveGlobalState({ profiles: [prof('a'), prof('b'), prof('c')] });
+    // A writer that only knew about a + b must not clobber the concurrently
+    // added c.
+    saveGlobalState({ profiles: [prof('a'), prof('b')] });
+    expect(ids(loadGlobalState()?.profiles)).toEqual(['a', 'b', 'c']);
+  });
+
+  it('deleteProfileGlobal removes a profile (and is not resurrected by a merge save)', () => {
+    saveGlobalState({ profiles: [prof('a'), prof('b')] });
+    deleteProfileGlobal('a');
+    expect(ids(loadGlobalState()?.profiles)).toEqual(['b']);
+    // A subsequent merge save of the remaining list keeps it deleted.
+    saveGlobalState({ profiles: [prof('b')] });
+    expect(ids(loadGlobalState()?.profiles)).toEqual(['b']);
+  });
+
+  it('clearGlobalState removes the shared store', () => {
+    saveGlobalState({ profiles: [prof('a')] });
+    clearGlobalState();
+    expect(loadGlobalState()).toBeNull();
   });
 });
 
-describe('legacy un-partitioned adoption', () => {
-  it('adopts a valid legacy blob into the current partition once', () => {
-    __setInstanceIdForTests('adopt');
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ profiles: [{ id: 'p1' }] }));
+describe('per-tab session isolation', () => {
+  it('session state is partitioned by instance id', () => {
+    __setInstanceIdForTests('A');
+    saveSessionState(sessionBlob('pa'));
+    expect(loadSessionState()?.selectedProfileId).toBe('pa');
 
-    const loaded = loadPersistedState();
-    expect(loaded?.profiles).toHaveLength(1);
-    // Migrated: the legacy key is gone and the partition now holds the blob.
-    expect(window.localStorage.getItem(STORAGE_KEY)).toBeNull();
-    expect(window.localStorage.getItem(partitionKeyFor())).not.toBeNull();
+    __setInstanceIdForTests('B');
+    expect(loadSessionState()).toBeNull();
   });
 
-  it('ignores a corrupt legacy blob and boots fresh', () => {
-    __setInstanceIdForTests('adopt2');
-    window.localStorage.setItem(STORAGE_KEY, 'nope{');
-    expect(loadPersistedState()).toBeNull();
+  it('clearSessionState removes only the current tab\'s session', () => {
+    __setInstanceIdForTests('A');
+    saveSessionState(sessionBlob('pa'));
+    __setInstanceIdForTests('B');
+    saveSessionState(sessionBlob('pb'));
+
+    clearSessionState();
+    expect(loadSessionState()).toBeNull();
+    __setInstanceIdForTests('A');
+    expect(loadSessionState()?.selectedProfileId).toBe('pa');
+  });
+
+  it('quarantines a corrupt session blob', () => {
+    __setInstanceIdForTests('q');
+    window.localStorage.setItem(sessionKeyFor(), 'nope{');
+    expect(loadSessionState()).toBeNull();
+    expect(window.localStorage.getItem(sessionKeyFor())).toBeNull();
   });
 });
 
-describe('instance registry GC', () => {
-  it('prunes only empty partitions, never ones holding profiles', () => {
-    __setInstanceIdForTests('cur');
+describe('legacy import (self-cleaning)', () => {
+  it('lifts orphaned partition profiles into the global store, deduped, and deletes legacy keys', () => {
+    // Two old per-tab partitions with an overlapping profile id, plus a corrupt
+    // one and the instance registry (for newest-wins).
     window.localStorage.setItem(
-      INSTANCE_REGISTRY_KEY,
+      'igloo-pwa.state.v2::x',
+      JSON.stringify({
+        schemaVersion: 2,
+        profiles: [prof('p1'), prof('shared', { label: 'old' })],
+        settings: { remember_browser_state: true },
+      }),
+    );
+    window.localStorage.setItem(
+      'igloo-pwa.state.v2::y',
+      JSON.stringify({ schemaVersion: 2, profiles: [prof('p2'), prof('shared', { label: 'new' })] }),
+    );
+    window.localStorage.setItem('igloo-pwa.state.v2::z', 'corrupt{');
+    window.localStorage.setItem(
+      'igloo-pwa.instances.v1',
       JSON.stringify([
-        { id: 'keep', label: null, createdAt: 0, updatedAt: 0, profileCount: 5 },
-        { id: 'empty', label: null, createdAt: 0, updatedAt: 0, profileCount: 0 },
+        { id: 'x', updatedAt: 10 },
+        { id: 'y', updatedAt: 20 },
       ]),
     );
-    window.localStorage.setItem(
-      partitionKeyFor('keep'),
-      JSON.stringify({ schemaVersion: 2, profiles: [{ id: 'k' }] }),
-    );
 
-    gcEmptyInstances({ keepId: 'cur' });
+    importLegacyProfilesOnce();
 
-    const ids = readInstanceRegistry().map((record) => record.id);
-    expect(ids).toContain('keep');
-    expect(ids).not.toContain('empty');
+    const global = loadGlobalState();
+    expect(ids(global?.profiles).sort()).toEqual(['p1', 'p2', 'shared']);
+    // newest-wins: y (updatedAt 20) supplies the 'shared' record.
+    const shared = global?.profiles.find((profile) => profile.id === 'shared') as
+      | (PersistableProfile & { label?: string })
+      | undefined;
+    expect(shared?.label).toBe('new');
+
+    // Every legacy key (partitions, corrupt copy, registry) is gone.
+    expect(window.localStorage.getItem('igloo-pwa.state.v2::x')).toBeNull();
+    expect(window.localStorage.getItem('igloo-pwa.state.v2::y')).toBeNull();
+    expect(window.localStorage.getItem('igloo-pwa.state.v2::z')).toBeNull();
+    expect(window.localStorage.getItem('igloo-pwa.instances.v1')).toBeNull();
   });
-});
 
-describe('clearPersistedState', () => {
-  it('removes only the current partition', () => {
-    __setInstanceIdForTests('clearme');
-    savePersistedState({ schemaVersion: 2, profiles: [{ id: 'x' }] } as unknown as PwaPersistedState);
-    expect(window.localStorage.getItem(partitionKeyFor())).not.toBeNull();
-    clearPersistedState();
-    expect(window.localStorage.getItem(partitionKeyFor())).toBeNull();
+  it('deletes the legacy secret-bearing v1 blob without importing it', () => {
+    window.localStorage.setItem('igloo-pwa.state.v1', JSON.stringify({ profiles: [prof('secret')] }));
+    importLegacyProfilesOnce();
+    expect(window.localStorage.getItem('igloo-pwa.state.v1')).toBeNull();
+    expect(loadGlobalState()).toBeNull();
+  });
+
+  it('is a no-op when there are no legacy keys', () => {
+    importLegacyProfilesOnce();
+    expect(loadGlobalState()).toBeNull();
+  });
+
+  it('is idempotent on a second run', () => {
+    window.localStorage.setItem(
+      'igloo-pwa.state.v2::x',
+      JSON.stringify({ schemaVersion: 2, profiles: [prof('p1')] }),
+    );
+    importLegacyProfilesOnce();
+    const first = ids(loadGlobalState()?.profiles);
+    importLegacyProfilesOnce();
+    expect(ids(loadGlobalState()?.profiles)).toEqual(first);
   });
 });

@@ -5,9 +5,15 @@ import type {
 } from './types';
 
 /**
- * Persistable shape sent to `igloo-pwa.state.v2`.
+ * Persistable shapes for the two localStorage stores:
  *
- * Hard rule: anything serialized through this allow-list is considered
+ *  - GLOBAL  (`igloo-pwa.profiles.v1`)  — the device list + app settings, shared
+ *    by every tab at this origin. {@link PersistableGlobalState}.
+ *  - SESSION (`igloo-pwa.session.v1::<instanceId>`) — the per-tab UI/session
+ *    state (which device this tab selected, its view, in-flight drafts).
+ *    {@link PersistableSessionState}.
+ *
+ * Hard rule: anything serialized through these allow-lists is considered
  * non-secret by design. Encrypted artifacts (password-sealed bech32m
  * strings like `encrypted_bfshare_artifact`) are OK; cleartext secrets
  * (share secrets, passwords, passphrases, runtime snapshots with
@@ -21,6 +27,12 @@ import type {
  * NOT public metadata. The runtime reconstructs it in memory at session
  * start from `encrypted_bfshare_artifact` and keeps it in the
  * non-persisted `sharePackageJsonByProfileId` map.
+ *
+ * NOTE: `peerPermissionStates` is also OMITTED from both shapes — it is
+ * runtime state of THIS tab's active signer (overwritten on every
+ * `startSession`/poll, reset on logout), not durable config. The durable
+ * per-profile policy travels inside each profile's
+ * `manual_peer_policy_overrides`.
  */
 
 const PROFILE_ALLOWED_KEYS = [
@@ -47,7 +59,7 @@ type PersistableProfileKey = (typeof PROFILE_ALLOWED_KEYS)[number];
 
 type PersistableProfile = Pick<PwaProfile, PersistableProfileKey>;
 
-function toPersistableProfile(profile: PwaProfile): PersistableProfile {
+export function toPersistableProfile(profile: PwaProfile): PersistableProfile {
   const out = {} as Record<PersistableProfileKey, unknown>;
   for (const key of PROFILE_ALLOWED_KEYS) {
     const value = profile[key];
@@ -59,40 +71,54 @@ function toPersistableProfile(profile: PwaProfile): PersistableProfile {
 }
 
 /**
- * Schema version stamped into every persisted blob. Bump when the persisted
- * shape changes incompatibly so `loadPersistedState` quarantines old blobs and
- * boots clean instead of risking a hydrate-time crash.
+ * Schema versions stamped into each store's blob. Bump when a shape changes
+ * incompatibly so the loader quarantines old blobs and boots clean instead of
+ * risking a hydrate-time crash.
  */
-export const SCHEMA_VERSION = 2;
+export const GLOBAL_SCHEMA_VERSION = 1;
+export const SESSION_SCHEMA_VERSION = 1;
 
-export type PersistableState = {
+/** Shared device list + app settings — `igloo-pwa.profiles.v1`. */
+export type PersistableGlobalState = {
   schemaVersion: number;
   profiles: PersistableProfile[];
-  peerPermissionStates: PwaPersistedState['peerPermissionStates'];
+  settings: PwaPersistedState['settings'];
+};
+
+/** Per-tab UI/session state — `igloo-pwa.session.v1::<instanceId>`. */
+export type PersistableSessionState = {
+  schemaVersion: number;
   selectedProfileId: PwaPersistedState['selectedProfileId'];
   activeView: PwaPersistedState['activeView'];
   activeDashboardTab: PwaPersistedState['activeDashboardTab'];
-  settings: PwaPersistedState['settings'];
   drafts: PwaDraftState;
 };
 
 /**
- * Sift the full app state down to the persistable allow-list. Anything
- * not explicitly surfaced here stays in-memory only (secrets, runtime
- * snapshots, pending confirmations, unlock passphrases, etc.).
+ * Sift the full app state down to the GLOBAL allow-list (profiles + settings).
+ * Anything not surfaced here stays in-memory only (secrets, runtime snapshots,
+ * unlock passphrases, etc.).
  */
-export function toPersistable(state: PwaPersistedState): PersistableState {
+export function toPersistableGlobal(state: PwaPersistedState): PersistableGlobalState {
   return {
-    schemaVersion: SCHEMA_VERSION,
+    schemaVersion: GLOBAL_SCHEMA_VERSION,
     profiles: state.profiles.map(toPersistableProfile),
-    peerPermissionStates: state.peerPermissionStates,
+    settings: state.settings,
+  };
+}
+
+/** Sift the full app state down to the PER-TAB SESSION allow-list. */
+export function toPersistableSession(state: PwaPersistedState): PersistableSessionState {
+  return {
+    schemaVersion: SESSION_SCHEMA_VERSION,
     selectedProfileId: state.selectedProfileId,
     activeView: state.activeView,
     activeDashboardTab: state.activeDashboardTab,
-    settings: state.settings,
     drafts: state.drafts,
   };
 }
+
+export type { PersistableProfile };
 
 export const PERSISTABLE_PROFILE_KEYS: readonly PersistableProfileKey[] =
   PROFILE_ALLOWED_KEYS;

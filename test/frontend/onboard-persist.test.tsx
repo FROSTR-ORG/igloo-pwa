@@ -2,7 +2,7 @@ import * as React from 'react';
 import { cleanup, render, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it } from 'vitest';
 
-import { loadPersistedState } from '@/lib/storage';
+import { loadGlobalState, loadSessionState } from '@/lib/storage';
 import { __setInstanceIdForTests } from '@/lib/instance';
 import { StoreProvider, useStore } from '@/lib/store';
 
@@ -64,12 +64,14 @@ describe('onboarded profile persistence (data-loss regression)', () => {
     await waitFor(() => expect(store!.runtimeSnapshot?.active).toBe(true));
 
     // No timer advance: the debounced persist effect has NOT fired, so the only
-    // path to localStorage is the synchronous flush. Read the partition blob
-    // exactly as a fresh page load would (`loadPersistedState`).
-    const persisted = loadPersistedState();
-    expect(persisted).not.toBeNull();
-    expect(persisted?.profiles.map((profile) => profile.id)).toContain('77'.repeat(32));
-    expect(persisted?.activeView).toBe('dashboard');
+    // path to localStorage is the synchronous flush. Read both stores exactly as
+    // a fresh page load would: the device lands in the shared global store, the
+    // dashboard view in this tab's session store.
+    const global = loadGlobalState();
+    const session = loadSessionState();
+    expect(global).not.toBeNull();
+    expect(global?.profiles.map((profile) => profile.id)).toContain('77'.repeat(32));
+    expect(session?.activeView).toBe('dashboard');
   });
 
   it('cancelOnboarding clears the pending connection and leaves the flow', async () => {

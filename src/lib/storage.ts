@@ -1,164 +1,209 @@
+import { getInstanceId, quarantineCorruptState } from './instance';
 import {
-  getInstanceId,
-  quarantineCorruptState,
-  touchInstanceRegistry,
-} from './instance';
-import { SCHEMA_VERSION } from './persist-allowlist';
-import type { PwaPersistedState } from './types';
+  GLOBAL_SCHEMA_VERSION,
+  SESSION_SCHEMA_VERSION,
+  type PersistableGlobalState,
+  type PersistableProfile,
+  type PersistableSessionState,
+} from './persist-allowlist';
+import type { PwaSettings } from './types';
 
-export const STORAGE_KEY = 'igloo-pwa.state.v2';
-export const LEGACY_STORAGE_KEY_V1 = 'igloo-pwa.state.v1';
+/** Shared device list + settings, visible to every tab at this origin. */
+export const GLOBAL_STORE_KEY = 'igloo-pwa.profiles.v1';
+/** Per-tab UI/session state, partitioned by instance id. */
+export const SESSION_STORE_KEY = 'igloo-pwa.session.v1';
 
-/**
- * Per-instance partition key, e.g. `igloo-pwa.state.v2::<instanceId>`. Each tab
- * reads/writes its own partition so tabs never clobber each other's state.
- */
-export function partitionKeyFor(id: string = getInstanceId()): string {
-  return `${STORAGE_KEY}::${id}`;
+/** Per-tab session key, e.g. `igloo-pwa.session.v1::<instanceId>`. */
+export function sessionKeyFor(id: string = getInstanceId()): string {
+  return `${SESSION_STORE_KEY}::${id}`;
 }
 
-/**
- * Structural + version guard. A blob is plausible if it is an object with a
- * `profiles` array, an object-or-absent `drafts`, and either no `schemaVersion`
- * (a pre-stamp blob) or the current one. Anything else is quarantined.
- */
-function isPlausiblePersistedState(value: unknown): boolean {
+// ---------------------------------------------------------------------------
+// Structural guards. A blob that fails its guard is quarantined (copied aside,
+// live key dropped) so the next load boots clean instead of crashing hydrate.
+// ---------------------------------------------------------------------------
+
+function isPlausibleGlobalState(value: unknown): boolean {
   if (value == null || typeof value !== 'object') return false;
-  const candidate = value as { profiles?: unknown; drafts?: unknown; schemaVersion?: unknown };
+  const candidate = value as { profiles?: unknown; settings?: unknown; schemaVersion?: unknown };
   if (!Array.isArray(candidate.profiles)) return false;
+  if (
+    candidate.settings !== undefined &&
+    (typeof candidate.settings !== 'object' || candidate.settings === null)
+  ) {
+    return false;
+  }
+  if (candidate.schemaVersion !== undefined && candidate.schemaVersion !== GLOBAL_SCHEMA_VERSION) {
+    return false;
+  }
+  return true;
+}
+
+function isPlausibleSessionState(value: unknown): boolean {
+  if (value == null || typeof value !== 'object') return false;
+  const candidate = value as { drafts?: unknown; schemaVersion?: unknown };
   if (
     candidate.drafts !== undefined &&
     (typeof candidate.drafts !== 'object' || candidate.drafts === null)
   ) {
     return false;
   }
-  if (candidate.schemaVersion !== undefined && candidate.schemaVersion !== SCHEMA_VERSION) {
+  if (candidate.schemaVersion !== undefined && candidate.schemaVersion !== SESSION_SCHEMA_VERSION) {
     return false;
   }
   return true;
 }
 
-function derivePartitionLabel(state: PwaPersistedState): string | null {
-  const profiles = state.profiles;
-  if (!Array.isArray(profiles) || profiles.length === 0) return null;
-  const selected = profiles.find((profile) => profile.id === state.selectedProfileId);
-  return (selected ?? profiles[0])?.label ?? null;
-}
+// ---------------------------------------------------------------------------
+// Global store: profiles + settings (shared across tabs).
+// ---------------------------------------------------------------------------
 
-let legacyCleanupDone = false;
-
-/**
- * Drop any surviving v1 localStorage blob. v1 carried secrets
- * (`stored_password`, `runtime_snapshot_json`, `unlockPhrase`,
- * `generatedKeyset`, pending onboarding state). The v2 schema is a
- * hard-cut: v1 data is NOT migrated — it is deleted on first boot of
- * v2 so secrets can no longer linger on disk.
- */
-export function cleanupLegacyPersistedState() {
-  if (typeof window === 'undefined') return;
-  if (legacyCleanupDone) return;
-  legacyCleanupDone = true;
-  try {
-    window.localStorage.removeItem(LEGACY_STORAGE_KEY_V1);
-  } catch {
-    // ignore storage access failures
-  }
-}
-
-/**
- * Test-only: reset the once-per-load sentinel so a test can exercise
- * the cleanup path again. Do not call this from production code.
- */
-export function __resetLegacyCleanupSentinelForTests() {
-  legacyCleanupDone = false;
-}
-
-export function loadPersistedState(): PwaPersistedState | null {
+export function loadGlobalState(): PersistableGlobalState | null {
   if (typeof window === 'undefined') return null;
-  cleanupLegacyPersistedState();
-  const partitionKey = partitionKeyFor();
-
   let raw: string | null = null;
   try {
-    raw = window.localStorage.getItem(partitionKey);
+    raw = window.localStorage.getItem(GLOBAL_STORE_KEY);
   } catch {
     return null;
   }
-
-  // One-time migration: pre-partition single-tab users have their blob under
-  // the un-namespaced STORAGE_KEY. Adopt it into this tab's partition so their
-  // profiles survive the move to per-tab isolation.
-  if (raw == null) {
-    raw = adoptLegacyUnpartitionedState(partitionKey);
-    if (raw == null) return null;
-  }
+  if (raw == null) return null;
 
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
   } catch {
-    quarantineCorruptState(partitionKey, raw);
+    quarantineCorruptState(GLOBAL_STORE_KEY, raw);
     return null;
   }
-  if (!isPlausiblePersistedState(parsed)) {
-    quarantineCorruptState(partitionKey, raw);
+  if (!isPlausibleGlobalState(parsed)) {
+    quarantineCorruptState(GLOBAL_STORE_KEY, raw);
     return null;
   }
-  return parsed as PwaPersistedState;
+  return parsed as PersistableGlobalState;
 }
 
 /**
- * Adopt a legacy un-namespaced `igloo-pwa.state.v2` blob into the current
- * partition (one-time, on the first load after the per-tab-isolation upgrade).
- * Returns the adopted raw string, or null if there was nothing valid to adopt.
+ * Keep the writer's profile list and order, then append any profiles present on
+ * disk that the writer didn't know about — so a concurrent tab's just-added
+ * profile is not clobbered by this tab's debounced save. Removals must go
+ * through {@link deleteProfileGlobal} (a writer omitting an id is treated as
+ * "didn't know about it", not "delete it").
  */
-function adoptLegacyUnpartitionedState(partitionKey: string): string | null {
-  if (partitionKey === STORAGE_KEY) return null; // never self-adopt
-  let legacyRaw: string | null = null;
+function mergeProfilesById(
+  disk: PersistableProfile[],
+  writer: PersistableProfile[],
+): PersistableProfile[] {
+  const writerIds = new Set(writer.map((profile) => profile.id));
+  const diskOnly = disk.filter((profile) => !writerIds.has(profile.id));
+  return [...writer, ...diskOnly];
+}
+
+export function saveGlobalState(next: {
+  profiles: PersistableProfile[];
+  settings?: PwaSettings;
+}): void {
+  if (typeof window === 'undefined') return;
+  // Read-merge-write: localStorage writes are synchronous and same-origin
+  // serialized, so re-reading immediately before writing makes the per-profile
+  // merge effectively atomic against other tabs. `settings` falls back to the
+  // on-disk value when the caller doesn't supply one (the legacy importer).
+  const current = loadGlobalState();
+  const merged = {
+    schemaVersion: GLOBAL_SCHEMA_VERSION,
+    profiles: mergeProfilesById(current?.profiles ?? [], next.profiles),
+    settings: next.settings ?? current?.settings,
+  };
+  window.localStorage.setItem(GLOBAL_STORE_KEY, JSON.stringify(merged));
+}
+
+/**
+ * Explicit profile deletion (read-filter-write). Separate from
+ * {@link saveGlobalState}'s merge so a debounced background save can never
+ * resurrect a just-deleted profile.
+ */
+export function deleteProfileGlobal(profileId: string): void {
+  if (typeof window === 'undefined') return;
+  const current = loadGlobalState();
+  if (!current) return;
+  const profiles = current.profiles.filter((profile) => profile.id !== profileId);
+  window.localStorage.setItem(
+    GLOBAL_STORE_KEY,
+    JSON.stringify({ ...current, schemaVersion: GLOBAL_SCHEMA_VERSION, profiles }),
+  );
+}
+
+export function clearGlobalState(): void {
+  if (typeof window === 'undefined') return;
   try {
-    legacyRaw = window.localStorage.getItem(STORAGE_KEY);
+    window.localStorage.removeItem(GLOBAL_STORE_KEY);
+  } catch {
+    // best effort
+  }
+}
+
+/**
+ * Subscribe to cross-tab changes of the global store. The `storage` event fires
+ * only in OTHER tabs, so this never reflects our own writes — exactly what we
+ * want for live profile-list sync. Returns an unsubscribe fn.
+ */
+export function subscribeGlobalState(
+  callback: (next: PersistableGlobalState | null) => void,
+): () => void {
+  if (typeof window === 'undefined') return () => {};
+  const handler = (event: StorageEvent) => {
+    if (event.key !== null && event.key !== GLOBAL_STORE_KEY) return;
+    callback(loadGlobalState());
+  };
+  window.addEventListener('storage', handler);
+  return () => window.removeEventListener('storage', handler);
+}
+
+// ---------------------------------------------------------------------------
+// Session store: per-tab UI state (selected profile, view, drafts).
+// ---------------------------------------------------------------------------
+
+export function loadSessionState(): PersistableSessionState | null {
+  if (typeof window === 'undefined') return null;
+  const key = sessionKeyFor();
+  let raw: string | null = null;
+  try {
+    raw = window.localStorage.getItem(key);
   } catch {
     return null;
   }
-  if (!legacyRaw) return null;
+  if (raw == null) return null;
 
   let parsed: unknown;
   try {
-    parsed = JSON.parse(legacyRaw);
+    parsed = JSON.parse(raw);
   } catch {
-    return null; // leave a corrupt legacy blob alone; this tab boots fresh
+    quarantineCorruptState(key, raw);
+    return null;
   }
-  if (!isPlausiblePersistedState(parsed)) return null;
+  if (!isPlausibleSessionState(parsed)) {
+    quarantineCorruptState(key, raw);
+    return null;
+  }
+  return parsed as PersistableSessionState;
+}
 
+export function saveSessionState(state: PersistableSessionState): void {
+  if (typeof window === 'undefined') return;
+  window.localStorage.setItem(sessionKeyFor(), JSON.stringify(state));
+}
+
+export function clearSessionState(): void {
+  if (typeof window === 'undefined') return;
   try {
-    window.localStorage.setItem(partitionKey, legacyRaw);
-    window.localStorage.removeItem(STORAGE_KEY);
-    const profiles = (parsed as { profiles?: unknown[] }).profiles;
-    touchInstanceRegistry(getInstanceId(), {
-      profileCount: Array.isArray(profiles) ? profiles.length : 0,
-    });
+    window.localStorage.removeItem(sessionKeyFor());
   } catch {
-    // If the adoption write fails, still return the raw so this session works.
+    // best effort
   }
-  return legacyRaw;
 }
 
-export function savePersistedState(state: PwaPersistedState) {
-  if (typeof window === 'undefined') return;
-  const partitionKey = partitionKeyFor();
-  window.localStorage.setItem(partitionKey, JSON.stringify(state));
-  touchInstanceRegistry(getInstanceId(), {
-    profileCount: Array.isArray(state.profiles) ? state.profiles.length : 0,
-    label: derivePartitionLabel(state),
-  });
-}
-
-export function clearPersistedState() {
-  if (typeof window === 'undefined') return;
-  const partitionKey = partitionKeyFor();
-  window.localStorage.removeItem(partitionKey);
-  touchInstanceRegistry(getInstanceId(), { profileCount: 0 });
-}
+// ---------------------------------------------------------------------------
+// Debounced persistor (shared by both stores).
+// ---------------------------------------------------------------------------
 
 export type DebouncedSaveOptions = {
   /** Trailing-edge debounce delay (ms). */
@@ -167,25 +212,24 @@ export type DebouncedSaveOptions = {
   maxWait: number;
 };
 
-export type DebouncedStatePersistor = {
-  schedule: (state: PwaPersistedState) => void;
+export type DebouncedPersistor<T> = {
+  schedule: (state: T) => void;
   flush: () => void;
   cancel: () => void;
 };
 
 /**
  * Create a debounced localStorage persistor. leading=false, trailing=true,
- * with a maxWait so that a typing-heavy draft flow cannot starve persistence
- * indefinitely. The old per-tick savePersistedState loop is deleted; this
- * persistor is the ONLY write path for `igloo-pwa.state.v2`.
+ * with a maxWait so a typing-heavy draft flow cannot starve persistence
+ * indefinitely. This is the ONLY reactive write path for each store.
  */
-export function createDebouncedPersistor(
-  save: (state: PwaPersistedState) => void = savePersistedState,
+export function createDebouncedPersistor<T>(
+  save: (state: T) => void,
   options: DebouncedSaveOptions = { wait: 250, maxWait: 500 },
-): DebouncedStatePersistor {
+): DebouncedPersistor<T> {
   let trailingHandle: ReturnType<typeof setTimeout> | null = null;
   let maxHandle: ReturnType<typeof setTimeout> | null = null;
-  let pending: PwaPersistedState | null = null;
+  let pending: { value: T } | null = null;
 
   const clearTimers = () => {
     if (trailingHandle !== null) {
@@ -200,7 +244,7 @@ export function createDebouncedPersistor(
 
   const runSave = () => {
     if (pending === null) return;
-    const toWrite = pending;
+    const toWrite = pending.value;
     pending = null;
     clearTimers();
     try {
@@ -211,8 +255,8 @@ export function createDebouncedPersistor(
   };
 
   return {
-    schedule(state: PwaPersistedState) {
-      pending = state;
+    schedule(state: T) {
+      pending = { value: state };
       if (trailingHandle !== null) clearTimeout(trailingHandle);
       trailingHandle = setTimeout(runSave, options.wait);
       if (maxHandle === null) {

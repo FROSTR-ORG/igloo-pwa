@@ -7,19 +7,45 @@ import { sharePackageToWireJson } from 'igloo-shared';
 import App, { RecoverPrivateKeyView } from '@/App';
 import * as adapter from '@/lib/local-adapter';
 import {
-  LEGACY_STORAGE_KEY_V1,
-  STORAGE_KEY,
-  __resetLegacyCleanupSentinelForTests,
-  cleanupLegacyPersistedState,
+  GLOBAL_STORE_KEY,
   createDebouncedPersistor,
-  loadPersistedState,
-  partitionKeyFor,
+  sessionKeyFor,
 } from '@/lib/storage';
-import { INSTANCE_REGISTRY_KEY, __setInstanceIdForTests } from '@/lib/instance';
+import { __setInstanceIdForTests } from '@/lib/instance';
 import { CRITICAL_E2E_TEST_IDS } from 'igloo-ui';
-import { toPersistable } from '@/lib/persist-allowlist';
+import { toPersistableGlobal, toPersistableSession } from '@/lib/persist-allowlist';
 import type { PwaPersistedState, PwaProfile } from '@/lib/types';
 import { StoreProvider, useStore } from '@/lib/store';
+
+/**
+ * Seed the two-store model from a legacy combined blob: profiles + settings go
+ * to the shared GLOBAL store, the selection/view/drafts to this tab's SESSION
+ * store. Lets the existing fixtures drive the split-storage hydration.
+ */
+function seedPartition(blob: Record<string, unknown>) {
+  const {
+    profiles = [],
+    settings,
+    selectedProfileId = '',
+    activeView = 'landing',
+    activeDashboardTab = 'signer',
+    drafts,
+  } = blob as Record<string, unknown>;
+  window.localStorage.setItem(
+    GLOBAL_STORE_KEY,
+    JSON.stringify({ schemaVersion: 1, profiles, settings }),
+  );
+  window.localStorage.setItem(
+    sessionKeyFor(),
+    JSON.stringify({
+      schemaVersion: 1,
+      selectedProfileId,
+      activeView,
+      activeDashboardTab,
+      ...(drafts ? { drafts } : {}),
+    }),
+  );
+}
 
 function renderApp() {
   cleanup();
@@ -38,10 +64,10 @@ function StoreHarness({ onReady }: { onReady: (store: ReturnType<typeof useStore
 beforeEach(() => {
   window.localStorage.clear();
   window.sessionStorage.clear();
-  // Pin a fixed instance id so seeded blobs land in (and are read from) a
-  // deterministic partition (`igloo-pwa.state.v2::test`).
+  // Pin a fixed instance id so seeded SESSION blobs land in (and are read from)
+  // a deterministic partition (`igloo-pwa.session.v1::test`). Profiles live in
+  // the shared global store, which is not partitioned.
   __setInstanceIdForTests('test');
-  __resetLegacyCleanupSentinelForTests();
 });
 
 describe('igloo-pwa app shell', () => {
@@ -55,38 +81,143 @@ describe('igloo-pwa app shell', () => {
     expect(screen.getByRole('button', { name: 'Onboard New Device' })).toBeInTheDocument();
   });
 
-  it('surfaces a resumable device from another partition as a Paper device card', () => {
+  it('shows the returning hero for a globally-stored device on a brand-new tab', () => {
     cleanup();
     window.localStorage.clear();
-    // A device saved under a different (e.g. pre-restart) instance id. The
-    // current tab ('test') has no profiles, so this should render inside the
-    // centered welcome hero as a Paper device card with a Resume action —
-    // not as an orphaned block below the fold.
-    const now = 1700000000000;
+    // The device lives in the SHARED global store with no session seeded — i.e.
+    // a fresh tab / post-restart. It must land directly on the returning hero
+    // (Unlock + overflow menu), NOT the base entry hero or a resume card.
     window.localStorage.setItem(
-      INSTANCE_REGISTRY_KEY,
-      JSON.stringify([
-        { id: 'laptop-instance', label: 'Laptop Signer', createdAt: now, updatedAt: now, profileCount: 2 },
-      ]),
+      GLOBAL_STORE_KEY,
+      JSON.stringify({
+        schemaVersion: 1,
+        profiles: [
+          {
+            id: '88'.repeat(32),
+            label: 'Laptop Signer',
+            share_public_key: '44'.repeat(32),
+            group_public_key: '55'.repeat(32),
+            relays: ['wss://relay.primal.net'],
+            group_package_json:
+              '{"group_name":"Laptop Signer","group_pk":"55","threshold":2,"members":[{"idx":0},{"idx":1},{"idx":2}]}',
+            member_idx: 0,
+            source: 'generated',
+            relay_profile: 'browser',
+            group_ref: 'group-ref',
+            encrypted_profile_ref: 'encrypted-profile-ref',
+            encrypted_bfshare_artifact: 'bfshare1demo',
+            state_path: '/tmp/igloo-pwa/laptop',
+            created_at: 1700000000000,
+            profile_string: 'bfprofile1demo',
+            share_string: 'bfshare1demo',
+            onboarding_package: null,
+          },
+        ],
+      }),
     );
+    // A different instance id than any prior session: profiles are global, so it
+    // is still visible.
+    __setInstanceIdForTests('a-fresh-tab');
 
     render(<App />);
 
-    // Rendered in the entry hero (no profiles in this partition), as a device
-    // card carrying the shared Paper test-id.
-    expect(screen.getByRole('heading', { name: 'Generate New Keyset' })).toBeInTheDocument();
-    const card = screen.getByTestId(CRITICAL_E2E_TEST_IDS.welcomeResumeDevice);
-    expect(card).toHaveAttribute('data-device-id', 'laptop-instance');
     expect(screen.getByText('Laptop Signer')).toBeInTheDocument();
-    expect(screen.getByText('2 profiles')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Resume' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Unlock' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'More actions' })).toBeInTheDocument();
+    // NOT the base entry hero.
+    expect(screen.queryByRole('heading', { name: 'Generate New Keyset' })).not.toBeInTheDocument();
+  });
+
+  it('unlock surfaces the real error instead of always blaming the password', async () => {
+    cleanup();
+    seedPartition({
+      profiles: [
+        {
+          id: '88'.repeat(32),
+          label: 'Legacy Key',
+          share_public_key: '44'.repeat(32),
+          group_public_key: '55'.repeat(32),
+          relays: ['wss://relay.primal.net'],
+          group_package_json:
+            '{"group_name":"Legacy Key","group_pk":"55","threshold":2,"members":[{"idx":0},{"idx":1},{"idx":2}]}',
+          member_idx: 0,
+          source: 'generated',
+          relay_profile: 'browser',
+          group_ref: 'group-ref',
+          encrypted_profile_ref: 'encrypted-profile-ref',
+          state_path: '/tmp/igloo-pwa/legacy',
+          created_at: 1700000000000,
+          profile_string: 'bfprofile1demo',
+          share_string: 'bfshare1demo',
+          onboarding_package: null,
+        },
+      ],
+    });
+
+    const legacyMessage =
+      'This profile was persisted under the legacy v1 schema and no longer has an encrypted share artifact. Re-onboard or re-import the profile to continue.';
+    const startSpy = vi.spyOn(adapter, 'startSession').mockRejectedValue(new Error(legacyMessage));
+
+    render(<App />);
+    fireEvent.click(screen.getByTestId(CRITICAL_E2E_TEST_IDS.welcomeProfileUnlock));
+    fireEvent.change(screen.getByTestId(CRITICAL_E2E_TEST_IDS.welcomeUnlockPassword), {
+      target: { value: 'whatever' },
+    });
+    fireEvent.click(screen.getByTestId(CRITICAL_E2E_TEST_IDS.welcomeUnlockSubmit));
+
+    await waitFor(() => {
+      expect(screen.getByText(legacyMessage)).toBeInTheDocument();
+    });
+    startSpy.mockRestore();
+  });
+
+  it('unlock reports a wrong password as "Incorrect password"', async () => {
+    cleanup();
+    seedPartition({
+      profiles: [
+        {
+          id: '88'.repeat(32),
+          label: 'Locked Key',
+          share_public_key: '44'.repeat(32),
+          group_public_key: '55'.repeat(32),
+          relays: ['wss://relay.primal.net'],
+          group_package_json:
+            '{"group_name":"Locked Key","group_pk":"55","threshold":2,"members":[{"idx":0},{"idx":1},{"idx":2}]}',
+          member_idx: 0,
+          source: 'generated',
+          relay_profile: 'browser',
+          group_ref: 'group-ref',
+          encrypted_profile_ref: 'encrypted-profile-ref',
+          encrypted_bfshare_artifact: 'bfshare1demo',
+          state_path: '/tmp/igloo-pwa/locked',
+          created_at: 1700000000000,
+          profile_string: 'bfprofile1demo',
+          share_string: 'bfshare1demo',
+          onboarding_package: null,
+        },
+      ],
+    });
+
+    const startSpy = vi
+      .spyOn(adapter, 'startSession')
+      .mockRejectedValue(new Error('Incorrect passphrase.'));
+
+    render(<App />);
+    fireEvent.click(screen.getByTestId(CRITICAL_E2E_TEST_IDS.welcomeProfileUnlock));
+    fireEvent.change(screen.getByTestId(CRITICAL_E2E_TEST_IDS.welcomeUnlockPassword), {
+      target: { value: 'wrong' },
+    });
+    fireEvent.click(screen.getByTestId(CRITICAL_E2E_TEST_IDS.welcomeUnlockSubmit));
+
+    await waitFor(() => {
+      expect(screen.getByText('Incorrect password. Please try again.')).toBeInTheDocument();
+    });
+    startSpy.mockRestore();
   });
 
   it('deletes a returning profile via the card menu after confirmation', async () => {
     cleanup();
-    window.localStorage.setItem(
-      partitionKeyFor(),
-      JSON.stringify({
+    seedPartition({
         profiles: [
           {
             id: '88'.repeat(32),
@@ -120,8 +251,7 @@ describe('igloo-pwa app shell', () => {
         activeView: 'landing',
         activeDashboardTab: 'signer',
         peerPermissionStates: [],
-      }),
-    );
+    });
 
     render(<App />);
 
@@ -141,9 +271,7 @@ describe('igloo-pwa app shell', () => {
 
   it('opens the recover-key Collect Shares flow from the returning card menu', () => {
     cleanup();
-    window.localStorage.setItem(
-      partitionKeyFor(),
-      JSON.stringify({
+    seedPartition({
         profiles: [
           {
             id: '99'.repeat(32),
@@ -177,8 +305,7 @@ describe('igloo-pwa app shell', () => {
         activeView: 'landing',
         activeDashboardTab: 'signer',
         peerPermissionStates: [],
-      }),
-    );
+    });
 
     render(<App />);
 
@@ -193,9 +320,7 @@ describe('igloo-pwa app shell', () => {
   it('recovers via the lost-device path without the device share', async () => {
     cleanup();
     const profileId = '99'.repeat(32);
-    window.localStorage.setItem(
-      partitionKeyFor(),
-      JSON.stringify({
+    seedPartition({
         profiles: [
           {
             id: profileId,
@@ -223,8 +348,7 @@ describe('igloo-pwa app shell', () => {
         activeView: 'landing',
         activeDashboardTab: 'signer',
         peerPermissionStates: [],
-      }),
-    );
+    });
 
     const recoverSpy = vi
       .spyOn(adapter, 'recoverNsecFromShares')
@@ -267,9 +391,7 @@ describe('igloo-pwa app shell', () => {
   it('gates the device-share validated flag on a successful unlock and resets it on passphrase change', async () => {
     cleanup();
     const profileId = '99'.repeat(32);
-    window.localStorage.setItem(
-      partitionKeyFor(),
-      JSON.stringify({
+    seedPartition({
         profiles: [
           {
             id: profileId,
@@ -297,8 +419,7 @@ describe('igloo-pwa app shell', () => {
         activeView: 'landing',
         activeDashboardTab: 'signer',
         peerPermissionStates: [],
-      }),
-    );
+    });
 
     const verifySpy = vi.spyOn(adapter, 'verifyDeviceShareUnlock').mockResolvedValue(true);
 
@@ -331,9 +452,7 @@ describe('igloo-pwa app shell', () => {
   it('captures a signer-start failure as dashboardLoadError and routes to the dashboard', async () => {
     cleanup();
     const profileId = 'aa'.repeat(32);
-    window.localStorage.setItem(
-      partitionKeyFor(),
-      JSON.stringify({
+    seedPartition({
         selectedProfileId: profileId,
         profiles: [
           {
@@ -358,8 +477,7 @@ describe('igloo-pwa app shell', () => {
             onboarding_package: null,
           },
         ],
-      }),
-    );
+    });
 
     const startSpy = vi
       .spyOn(adapter, 'startSession')
@@ -393,9 +511,7 @@ describe('igloo-pwa app shell', () => {
   it('auto-includes the device share when rotating the keyset', async () => {
     cleanup();
     const profileId = '99'.repeat(32);
-    window.localStorage.setItem(
-      partitionKeyFor(),
-      JSON.stringify({
+    seedPartition({
         profiles: [
           {
             id: profileId,
@@ -424,8 +540,7 @@ describe('igloo-pwa app shell', () => {
         activeView: 'landing',
         activeDashboardTab: 'signer',
         peerPermissionStates: [],
-      }),
-    );
+    });
 
     const rotateSpy = vi.spyOn(adapter, 'createRotatedKeyset').mockResolvedValue({
       group_name: 'Rotatable Key',
@@ -481,9 +596,7 @@ describe('igloo-pwa app shell', () => {
   it('clears all stored credentials and resets to landing', async () => {
     cleanup();
     const profileId = '99'.repeat(32);
-    window.localStorage.setItem(
-      partitionKeyFor(),
-      JSON.stringify({
+    seedPartition({
         profiles: [
           {
             id: profileId,
@@ -509,8 +622,7 @@ describe('igloo-pwa app shell', () => {
         activeView: 'dashboard',
         activeDashboardTab: 'settings',
         peerPermissionStates: [],
-      }),
-    );
+    });
 
     let latestStore: ReturnType<typeof useStore> | undefined;
     render(
@@ -525,11 +637,8 @@ describe('igloo-pwa app shell', () => {
     await waitFor(() => expect(latestStore?.profiles).toHaveLength(0));
     expect(latestStore?.selectedProfileId).toBe('');
     expect(latestStore?.activeView).toBe('landing');
-    // The seeded profile no longer survives in the persisted partition.
-    const persisted = window.localStorage.getItem(partitionKeyFor());
-    if (persisted) {
-      expect(JSON.parse(persisted).profiles ?? []).toHaveLength(0);
-    }
+    // The shared global store is wiped, so the seeded profile no longer survives.
+    expect(window.localStorage.getItem(GLOBAL_STORE_KEY)).toBeNull();
   });
 
   it('reveals, masks, and clears the recovered private key', () => {
@@ -635,9 +744,7 @@ describe('igloo-pwa app shell', () => {
 
   it('rejects onboarding when the derived profile id already exists locally', async () => {
     cleanup();
-    window.localStorage.setItem(
-      partitionKeyFor(),
-      JSON.stringify({
+    seedPartition({
         profiles: [
           {
             id: '77'.repeat(32),
@@ -687,8 +794,7 @@ describe('igloo-pwa app shell', () => {
           rotateConnectForm: { packageText: '' },
         },
         peerPermissionStates: [],
-      }),
-    );
+    });
     let latestStore: ReturnType<typeof useStore> | undefined;
     render(
       <StoreProvider>
@@ -712,9 +818,7 @@ describe('igloo-pwa app shell', () => {
 
   it('normalizes legacy onboard-confirm state back to package entry (pending connection does not survive reload)', async () => {
     cleanup();
-    window.localStorage.setItem(
-      partitionKeyFor(),
-      JSON.stringify({
+    seedPartition({
         profiles: [],
         selectedProfileId: '',
         activeView: 'onboard-confirm',
@@ -763,8 +867,7 @@ describe('igloo-pwa app shell', () => {
           onboardConnectForm: { packageText: '', password: '' },
           onboardSaveForm: { label: 'Onboarded Device', password: '', confirmPassword: '' },
         },
-      }),
-    );
+    });
 
     render(<App />);
 
@@ -780,9 +883,7 @@ describe('igloo-pwa app shell', () => {
 
   it('normalizes transient onboarding states back to package entry', async () => {
     cleanup();
-    window.localStorage.setItem(
-      partitionKeyFor(),
-      JSON.stringify({
+    seedPartition({
         profiles: [],
         selectedProfileId: '',
         activeView: 'onboard-handshake',
@@ -817,8 +918,7 @@ describe('igloo-pwa app shell', () => {
           onboardConnectForm: { packageText: 'bfonboard1demo', password: 'package-pass' },
           onboardSaveForm: { label: '', password: '', confirmPassword: '' },
         },
-      }),
-    );
+    });
 
     render(<App />);
 
@@ -829,9 +929,7 @@ describe('igloo-pwa app shell', () => {
   });
 
   it('persists browser settings across reloads', async () => {
-    window.localStorage.setItem(
-      partitionKeyFor(),
-      JSON.stringify({
+    seedPartition({
         profiles: [
           {
             id: '77'.repeat(32),
@@ -880,15 +978,15 @@ describe('igloo-pwa app shell', () => {
           onboardSaveForm: { label: '' },
           rotateConnectForm: { packageText: '' },
         },
-      }),
-    );
+    });
     render(<App />);
     const toggle = screen.getByLabelText(/Open signer after import/i) as HTMLInputElement;
     expect(toggle.checked).toBe(true);
     fireEvent.click(toggle);
     await waitFor(
       () => {
-        const stored = window.localStorage.getItem(partitionKeyFor());
+        // Settings persist to the shared global store.
+        const stored = window.localStorage.getItem(GLOBAL_STORE_KEY);
         expect(stored).toContain('"auto_open_signer":false');
       },
       { timeout: 2000 },
@@ -897,9 +995,7 @@ describe('igloo-pwa app shell', () => {
 
   it('shows the unified settings actions and no reset control', () => {
     cleanup();
-    window.localStorage.setItem(
-      partitionKeyFor(),
-      JSON.stringify({
+    seedPartition({
         profiles: [
           {
             id: '77'.repeat(32),
@@ -948,8 +1044,7 @@ describe('igloo-pwa app shell', () => {
           onboardSaveForm: { label: '' },
           rotateConnectForm: { packageText: '' },
         },
-      }),
-    );
+    });
 
     render(<App />);
 
@@ -962,54 +1057,7 @@ describe('igloo-pwa app shell', () => {
   });
 });
 
-describe('v1 → v2 localStorage migration (D.1)', () => {
-  it('drops the legacy v1 blob on first load and does not migrate secrets', () => {
-    const legacyBlob = JSON.stringify({
-      profiles: [
-        {
-          id: '77'.repeat(32),
-          label: 'Legacy Device',
-          stored_password: 'SECRET-PW-LEAKED',
-          runtime_snapshot_json: JSON.stringify({
-            bootstrap: { share: { seckey: 'LEAK-SECKEY' } },
-          }),
-          share_string: 'bfshare1legacy',
-          profile_string: 'bfprofile1legacy',
-        },
-      ],
-      unlockPhrase: 'SECRET-PW-LEAKED',
-      generatedKeyset: {
-        shares: [{ name: 'Legacy Member 1', member_idx: 1, share_package_json: '{"idx":1,"seckey":"LEAK"}', share_public_key: '33'.repeat(32) }],
-        group_name: 'Legacy Group',
-        threshold: 2,
-        count: 3,
-        group_public_key: '22'.repeat(32),
-        group_package_json: '{}',
-      },
-    });
-    window.localStorage.setItem(LEGACY_STORAGE_KEY_V1, legacyBlob);
-
-    // First load boots through `loadPersistedState`, which deletes the
-    // v1 key.
-    const loaded = loadPersistedState();
-    expect(loaded).toBeNull();
-
-    expect(window.localStorage.getItem(LEGACY_STORAGE_KEY_V1)).toBeNull();
-
-    // A subsequent boot of the app also leaves the v1 key gone.
-    window.localStorage.setItem(LEGACY_STORAGE_KEY_V1, legacyBlob);
-    __resetLegacyCleanupSentinelForTests();
-    cleanupLegacyPersistedState();
-    expect(window.localStorage.getItem(LEGACY_STORAGE_KEY_V1)).toBeNull();
-  });
-
-  it('uses the v2 storage key for writes', () => {
-    expect(STORAGE_KEY).toBe('igloo-pwa.state.v2');
-    expect(LEGACY_STORAGE_KEY_V1).toBe('igloo-pwa.state.v1');
-  });
-});
-
-describe('toPersistable allow-list (D.1)', () => {
+describe('persist allow-list (D.1)', () => {
   const secretMarker = 'SECRET-MARKER-DO-NOT-PERSIST';
   // PR16b: the `share_package_json` wire shape is `{idx, seckey}` and
   // the seckey hex is the raw FROST share secret. Seed a distinctive
@@ -1117,8 +1165,8 @@ describe('toPersistable allow-list (D.1)', () => {
 
   it('omits forbidden secret fields from the persisted shape', () => {
     const state = buildStateWithSecrets();
-    const persistable = toPersistable(state);
-    const serialized = JSON.stringify(persistable);
+    const serialized =
+      JSON.stringify(toPersistableGlobal(state)) + JSON.stringify(toPersistableSession(state));
 
     expect(serialized).not.toContain('stored_password');
     expect(serialized).not.toContain('runtime_snapshot_json');
@@ -1136,7 +1184,7 @@ describe('toPersistable allow-list (D.1)', () => {
 
   it('persists every allow-listed profile field', () => {
     const state = buildStateWithSecrets();
-    const [persistedProfile] = toPersistable(state).profiles;
+    const [persistedProfile] = toPersistableGlobal(state).profiles;
     expect(persistedProfile.id).toBe(state.profiles[0].id);
     expect(persistedProfile.encrypted_bfshare_artifact).toBe('bfshare1valid');
     expect(persistedProfile.member_idx).toBe(1);
@@ -1149,8 +1197,8 @@ describe('toPersistable allow-list (D.1)', () => {
 
   it('red-team: the persisted blob never contains the share seckey fixture (PR16b)', () => {
     const state = buildStateWithSecrets();
-    const persistable = toPersistable(state);
-    const serialized = JSON.stringify(persistable);
+    const serialized =
+      JSON.stringify(toPersistableGlobal(state)) + JSON.stringify(toPersistableSession(state));
 
     // The seckey hex must not leak through either the profile record or
     // the in-memory runtime cache (`sharePackageJsonByProfileId`).
@@ -1325,8 +1373,8 @@ describe('share_package_json runtime-only reconstruction (PR16b)', () => {
       },
     };
 
-    const persistable = toPersistable(state);
-    const serialized = JSON.stringify(persistable);
+    const serialized =
+      JSON.stringify(toPersistableGlobal(state)) + JSON.stringify(toPersistableSession(state));
 
     // Red-team: the raw seckey fixture must not appear anywhere in the
     // blob that would be written to localStorage.

@@ -11,14 +11,19 @@ import {
 
 import * as adapter from './local-adapter';
 import { saveTextToFile } from './file-save';
-import { gcEmptyInstances, getInstanceId } from './instance';
-import { toPersistable } from './persist-allowlist';
+import { importLegacyProfilesOnce } from './migrate-global';
+import { toPersistableGlobal, toPersistableSession } from './persist-allowlist';
 import { SessionController } from './session-controller';
 import {
-  clearPersistedState,
+  clearGlobalState,
+  clearSessionState,
   createDebouncedPersistor,
-  loadPersistedState,
-  savePersistedState,
+  deleteProfileGlobal,
+  loadGlobalState,
+  loadSessionState,
+  saveGlobalState,
+  saveSessionState,
+  subscribeGlobalState,
 } from './storage';
 import type {
   PwaDashboardTab,
@@ -309,37 +314,53 @@ function normalizeLoadedState(): PwaPersistedState {
   } catch {
     // Defense in depth: a structurally-plausible blob that still trips
     // normalization (a wrong-typed nested field that slipped past the storage
-    // guard) must never crash hydrate. Reset this partition to a clean slate.
-    clearPersistedState();
+    // guard) must never crash hydrate. Reset this tab's session to a clean
+    // slate (the shared profile list is left intact).
+    clearSessionState();
     return createDefaultState();
   }
 }
 
 function normalizeLoadedStateFromStorage(): PwaPersistedState {
-  const loaded = loadPersistedState();
-  if (!loaded) return createDefaultState();
-  const loadedActiveView = (loaded as { activeView?: string }).activeView;
+  // Lift any pre-split partitioned profiles into the shared global store first
+  // (self-cleaning, no-op once done), then hydrate from the two stores: profiles
+  // + settings are GLOBAL (shared across tabs); the selection/view/drafts are
+  // this tab's SESSION state.
+  importLegacyProfilesOnce();
+  const global = loadGlobalState();
+  const session = loadSessionState();
+  if (!global && !session) return createDefaultState();
 
-  // All runtime-only / secret-bearing fields are intentionally reset on
-  // every load — they are never persisted under the v2 schema.
+  const base = createDefaultState();
+  const loaded = {
+    // Persisted profiles carry only the non-secret allow-list keys; the
+    // transient `profile_string`/`share_string` are intentionally absent after a
+    // reload (they are never persisted), so this is the same shape the app has
+    // always hydrated.
+    profiles: (global?.profiles ?? base.profiles) as PwaProfile[],
+    settings: { ...base.settings, ...global?.settings },
+    selectedProfileId: session?.selectedProfileId ?? base.selectedProfileId,
+    activeView: session?.activeView ?? base.activeView,
+    activeDashboardTab: session?.activeDashboardTab ?? base.activeDashboardTab,
+    drafts: session?.drafts,
+  };
+  // Typed as a loose string: a persisted blob may carry a legacy/intermediate
+  // view name (e.g. 'onboard-confirm') that is no longer in the `PwaView` union
+  // but still needs the sanitization rules below.
+  const loadedActiveView = session?.activeView as string | undefined;
+
+  // All runtime-only / secret-bearing fields come straight from
+  // `createDefaultState()` — they are never persisted. `peerPermissionStates`
+  // is runtime state of this tab's signer, so it always starts at the default
+  // and is repopulated on `startSession`.
   const normalized: PwaPersistedState = {
-    ...createDefaultState(),
-    ...loaded,
-    unlockPassphrase: '',
-    pendingKeyset: null,
-    selectedGeneratedShareIdx: null,
-    pendingLoadConfirmation: null,
-    pendingOnboardConnection: null,
-    pendingRotationConnection: null,
-    distributionSession: null,
-    runtimeSnapshot: null,
-    // In-memory only; repopulated on each `startSession` call.
-    sharePackageJsonByProfileId: {},
-    draftSecrets: createDefaultDraftSecrets(),
-    peerPermissionStates:
-      Array.isArray(loaded.peerPermissionStates) && loaded.peerPermissionStates.length
-        ? loaded.peerPermissionStates
-        : adapter.defaultPeerPermissionStates(),
+    ...base,
+    profiles: loaded.profiles,
+    settings: loaded.settings,
+    selectedProfileId: loaded.selectedProfileId,
+    activeView: loaded.activeView,
+    activeDashboardTab: loaded.activeDashboardTab,
+    peerPermissionStates: adapter.defaultPeerPermissionStates(),
     drafts: {
       ...defaultDrafts,
       ...loaded.drafts,
@@ -386,7 +407,19 @@ function normalizeLoadedStateFromStorage(): PwaPersistedState {
     },
   };
 
-  if (!normalized.profiles.length && normalized.activeView === 'dashboard') {
+  // The selected profile is per-tab session state but the profile list is
+  // global: another tab may have deleted the device this tab had selected.
+  // Drop a dangling selection and bounce off the dashboard.
+  if (
+    normalized.selectedProfileId &&
+    !normalized.profiles.some((profile) => profile.id === normalized.selectedProfileId)
+  ) {
+    normalized.selectedProfileId = '';
+  }
+  if (
+    normalized.activeView === 'dashboard' &&
+    (!normalized.profiles.length || !normalized.selectedProfileId)
+  ) {
     normalized.activeView = 'landing';
   }
 
@@ -444,39 +477,65 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     [controller],
   );
 
-  // Reclaim empty storage partitions left by closed tabs (never touches a
-  // partition that holds profiles, nor this tab's own instance). Ref-gated so
-  // StrictMode's double mount doesn't run the sweep twice.
-  const gcRanRef = React.useRef(false);
-  React.useEffect(() => {
-    if (gcRanRef.current) return;
-    gcRanRef.current = true;
-    gcEmptyInstances({ keepId: getInstanceId() });
-  }, []);
-
-  // D.1: the v1 per-tick `savePersistedState(state)` effect is replaced
-  // with a debounced persistor that writes ONLY the allow-list fields
-  // produced by `toPersistable(state)`. Secrets, runtime snapshots, and
-  // draft passwords never reach localStorage.
-  const persistorRef = React.useRef(
-    createDebouncedPersistor((snapshot) => savePersistedState(snapshot as PwaPersistedState)),
-  );
+  // Two debounced persistors that write ONLY the allow-list fields produced by
+  // `toPersistableGlobal`/`toPersistableSession`: the GLOBAL store (profiles +
+  // settings, shared across tabs) and this tab's SESSION store (selection, view,
+  // drafts). Secrets, runtime snapshots, and draft passwords never reach disk.
+  const globalPersistorRef = React.useRef(createDebouncedPersistor(saveGlobalState));
+  const sessionPersistorRef = React.useRef(createDebouncedPersistor(saveSessionState));
   React.useEffect(
     () => () => {
-      persistorRef.current.flush();
+      globalPersistorRef.current.flush();
+      sessionPersistorRef.current.flush();
     },
     [],
   );
 
   React.useEffect(() => {
     if (!state.settings.remember_browser_state) {
-      persistorRef.current.cancel();
-      clearPersistedState();
+      globalPersistorRef.current.cancel();
+      sessionPersistorRef.current.cancel();
+      // "Forget this browser" is a deliberate wipe: drop both the shared device
+      // list and this tab's session.
+      clearGlobalState();
+      clearSessionState();
       return;
     }
-    const persistable = toPersistable(state);
-    persistorRef.current.schedule(persistable as unknown as PwaPersistedState);
+    globalPersistorRef.current.schedule(toPersistableGlobal(state));
+    sessionPersistorRef.current.schedule(toPersistableSession(state));
   }, [state]);
+
+  // Live cross-tab sync of the shared device list: when another tab adds, edits,
+  // or removes a profile, reflect it here — without disturbing the profile this
+  // tab's signer is actively running (its in-memory copy stays authoritative).
+  React.useEffect(
+    () =>
+      subscribeGlobalState((next) => {
+        setState((current) => {
+          const incoming = (next?.profiles ?? []) as PwaProfile[];
+          const activeId = current.runtimeSnapshot?.active
+            ? current.runtimeSnapshot.profile?.id ?? null
+            : null;
+          const merged = incoming.map((profile) =>
+            profile.id === activeId
+              ? current.profiles.find((entry) => entry.id === activeId) ?? profile
+              : profile,
+          );
+          // Keep the running profile listed even if another tab deleted it, so
+          // the active signer isn't yanked out from under this tab.
+          if (activeId && !merged.some((profile) => profile.id === activeId)) {
+            const local = current.profiles.find((entry) => entry.id === activeId);
+            if (local) merged.push(local);
+          }
+          return {
+            ...current,
+            profiles: merged,
+            settings: { ...current.settings, ...next?.settings },
+          };
+        });
+      }),
+    [],
+  );
 
   // Force the given dashboard state to localStorage synchronously, bypassing the
   // debounce. The reactive effect above only *schedules* a write (250/500ms), and
@@ -486,8 +545,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   // remember-browser-state toggle, matching the reactive effect.
   const persistImmediately = React.useCallback((snapshot: PwaPersistedState) => {
     if (!snapshot.settings.remember_browser_state) return;
-    persistorRef.current.schedule(toPersistable(snapshot) as unknown as PwaPersistedState);
-    persistorRef.current.flush();
+    globalPersistorRef.current.schedule(toPersistableGlobal(snapshot));
+    globalPersistorRef.current.flush();
+    sessionPersistorRef.current.schedule(toPersistableSession(snapshot));
+    sessionPersistorRef.current.flush();
   }, []);
 
   const selectedProfile = React.useMemo(
@@ -1856,6 +1917,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       },
       deleteProfile(profileId) {
         void adapter.disposeRuntimeSessionForProfile(profileId, controller);
+        // Remove from the shared store explicitly (read-filter-write): the
+        // debounced global persistor merges by id and would otherwise resurrect
+        // a profile that is still on disk but absent from the new state.
+        deleteProfileGlobal(profileId);
         setState((current) => ({
           ...current,
           profiles: current.profiles.filter((entry) => entry.id !== profileId),
@@ -2054,9 +2119,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         for (const profile of state.profiles) {
           void adapter.disposeRuntimeSessionForProfile(profile.id, controller);
         }
-        // Erase the persisted partition and reset to a clean default in-memory
-        // state so a reload also starts fresh.
-        clearPersistedState();
+        // Erase the shared device list and this tab's session, then reset to a
+        // clean default in-memory state so a reload also starts fresh.
+        clearGlobalState();
+        clearSessionState();
         setState(() => createDefaultState());
       },
       updateSettings(field, checked) {
