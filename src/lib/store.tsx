@@ -10,6 +10,7 @@ import {
 } from 'igloo-shared';
 
 import * as adapter from './local-adapter';
+import { resolveDevScenario } from './dev-scenario';
 import { saveTextToFile } from './file-save';
 import { importLegacyProfilesOnce } from './migrate-global';
 import { toPersistableGlobal, toPersistableSession } from './persist-allowlist';
@@ -309,16 +310,22 @@ function ensureDistributionPasswordSlot(
 }
 
 function normalizeLoadedState(): PwaPersistedState {
+  let base: PwaPersistedState;
   try {
-    return normalizeLoadedStateFromStorage();
+    base = normalizeLoadedStateFromStorage();
   } catch {
     // Defense in depth: a structurally-plausible blob that still trips
     // normalization (a wrong-typed nested field that slipped past the storage
     // guard) must never crash hydrate. Reset this tab's session to a clean
     // slate (the shared profile list is left intact).
     clearSessionState();
-    return createDefaultState();
+    base = createDefaultState();
   }
+  // Dev/test only: `?__frostr_dev=<scenario>` overrides the hydrated state with a
+  // fixed in-memory scenario (incl. a running runtimeSnapshot, which is never
+  // persisted). Inert without the query param. See lib/dev-scenario.ts.
+  const dev = resolveDevScenario();
+  return dev ? { ...base, ...dev } : base;
 }
 
 function normalizeLoadedStateFromStorage(): PwaPersistedState {
