@@ -112,6 +112,10 @@ const runningSnapshot = {
  * top of the hydrated state. Returns null in production (no param).
  */
 export function resolveDevScenario(): Partial<PwaPersistedState> | null {
+  // Dev/test builds only — `make screenshot` runs the vite dev server (DEV true).
+  // A production build sets DEV false, so the seam (and its fixtures) tree-shakes
+  // out of the shipped bundle.
+  if (!import.meta.env.DEV) return null;
   if (typeof window === 'undefined') return null;
   let name: string | null = null;
   try {
