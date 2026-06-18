@@ -1,3 +1,8 @@
+import {
+  PERSISTABLE_PROFILE_KEYS,
+  type PersistableStoredProfile,
+} from 'igloo-shared';
+
 import type {
   PwaDraftState,
   PwaPersistedState,
@@ -35,29 +40,27 @@ import type {
  * `manual_peer_policy_overrides`.
  */
 
-const PROFILE_ALLOWED_KEYS = [
-  'id',
-  'label',
-  'created_at',
-  'relay_profile',
-  'state_path',
-  'group_ref',
-  'encrypted_profile_ref',
-  'relays',
-  'group_public_key',
-  'share_public_key',
-  'group_package_json',
-  'member_idx',
-  'signer_settings',
-  'peer_pubkey',
-  'manual_peer_policy_overrides',
-  'source',
-  'encrypted_bfshare_artifact',
-] as const satisfies readonly (keyof PwaProfile)[];
+// The persistable key list is owned by the shared contract (igloo-shared
+// `persist-contract`) so the allow-list lives in exactly one place. Bind it to
+// PwaProfile here: `satisfies (keyof PwaProfile)[]` proves every persisted key
+// exists on the profile, and the assertion below proves the projected shape
+// matches the shared `PersistableStoredProfile` exactly — either drift is a
+// compile error.
+const PROFILE_ALLOWED_KEYS =
+  PERSISTABLE_PROFILE_KEYS satisfies readonly (keyof PwaProfile)[];
 
 type PersistableProfileKey = (typeof PROFILE_ALLOWED_KEYS)[number];
 
 type PersistableProfile = Pick<PwaProfile, PersistableProfileKey>;
+
+// Compile-time drift guard: PwaProfile's persistable projection and the shared
+// contract must be mutually assignable (identical shape). If PwaProfile changes a
+// persisted field's type, or the contract adds/drops one, this stops compiling.
+type Exact<A, B> = A extends B ? (B extends A ? true : never) : never;
+type _AssertPersistableProfileMatchesContract = Exact<
+  PersistableProfile,
+  PersistableStoredProfile
+>;
 
 export function toPersistableProfile(profile: PwaProfile): PersistableProfile {
   const out = {} as Record<PersistableProfileKey, unknown>;
@@ -120,5 +123,7 @@ export function toPersistableSession(state: PwaPersistedState): PersistableSessi
 
 export type { PersistableProfile };
 
-export const PERSISTABLE_PROFILE_KEYS: readonly PersistableProfileKey[] =
-  PROFILE_ALLOWED_KEYS;
+// Re-export the shared key list under this module's long-standing public name so
+// in-repo consumers keep importing it from here, while the single source of truth
+// stays in igloo-shared `persist-contract`.
+export { PERSISTABLE_PROFILE_KEYS };
