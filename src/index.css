@@ -1,3 +1,5 @@
+@import "../../igloo-ui/src/styles.css";
+
 /* Dashboard header navigation (Dashboard · Permissions · Settings).
    Mirrors the Paper design: muted Inter 500 links with a blue pill on the
    active page. Rendered into the AppHeader actions slot from App.tsx. */
