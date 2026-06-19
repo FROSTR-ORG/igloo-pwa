@@ -65,7 +65,6 @@ make igloo-pwa-test-e2e
 
 Low-level maintenance/debug commands still exist:
 - `npm run build:browser-wasm`
-- `npm run build:ui`
 
 ## Deployment
 

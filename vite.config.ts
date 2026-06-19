@@ -63,7 +63,7 @@ export default defineConfig(() => ({
       // submodule gitdir *file*, so it pins the allow list to repos/igloo-pwa and
       // blocks those sibling sources ("outside of Vite serving allow list").
       // Allow the monorepo root so the shared submodule sources — including the
-      // igloo-ui dist assets and its vendored fonts — are served.
+      // igloo-ui source styles and its vendored fonts — are served.
       allow: [path.resolve(__dirname, '../..')]
     },
     headers: {
