@@ -5,6 +5,7 @@ import {
   AppHeader,
   Button,
   Card,
+  Checkbox,
   CardContent,
   CardDescription,
   CardHeader,
@@ -1540,40 +1541,25 @@ function AppShell() {
                     description="PWA-specific preferences for persistence, routing, and install prompting."
                   >
                     <div className="igloo-settings-grid">
-                      <label className="igloo-toggle-row">
-                        <input
-                          type="checkbox"
-                          checked={store.settings.remember_browser_state}
-                          onChange={(event) => store.updateSettings('remember_browser_state', event.target.checked)}
-                        />
-                        <span>
-                          <strong>Remember browser state</strong>
-                          <small>Persist profiles, drafts, and the last active workspace in this browser.</small>
-                        </span>
-                      </label>
-                      <label className="igloo-toggle-row">
-                        <input
-                          type="checkbox"
-                          data-testid={CRITICAL_E2E_TEST_IDS.settingsAutoOpenToggle}
-                          checked={store.settings.auto_open_signer}
-                          onChange={(event) => store.updateSettings('auto_open_signer', event.target.checked)}
-                        />
-                        <span>
-                          <strong>Open signer after import</strong>
-                          <small>Jump straight into the signer workspace after a successful setup action.</small>
-                        </span>
-                      </label>
-                      <label className="igloo-toggle-row">
-                        <input
-                          type="checkbox"
-                          checked={store.settings.prefer_install_prompt}
-                          onChange={(event) => store.updateSettings('prefer_install_prompt', event.target.checked)}
-                        />
-                        <span>
-                          <strong>Prefer install prompt</strong>
-                          <small>Keep the PWA install affordance visible when the browser makes it available.</small>
-                        </span>
-                      </label>
+                      <Checkbox
+                        checked={store.settings.remember_browser_state}
+                        onCheckedChange={(checked) => store.updateSettings('remember_browser_state', checked)}
+                        label="Remember browser state"
+                        description="Persist profiles, drafts, and the last active workspace in this browser."
+                      />
+                      <Checkbox
+                        checked={store.settings.auto_open_signer}
+                        onCheckedChange={(checked) => store.updateSettings('auto_open_signer', checked)}
+                        label="Open signer after import"
+                        description="Jump straight into the signer workspace after a successful setup action."
+                        data-testid={CRITICAL_E2E_TEST_IDS.settingsAutoOpenToggle}
+                      />
+                      <Checkbox
+                        checked={store.settings.prefer_install_prompt}
+                        onCheckedChange={(checked) => store.updateSettings('prefer_install_prompt', checked)}
+                        label="Prefer install prompt"
+                        description="Keep the PWA install affordance visible when the browser makes it available."
+                      />
                     </div>
                   </ContentCard>
                 }
