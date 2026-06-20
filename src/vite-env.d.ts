@@ -12,6 +12,12 @@ declare global {
      * replace-share states that intentionally cannot survive reload.
      */
     __IGLOO_TEST_REPLACE_SHARE_STATE__?: unknown;
+    /**
+     * DEV-only seam used by the visual test harness to render active signer
+     * permission state, which is in-memory only and intentionally not restored
+     * from persisted app state.
+     */
+    __IGLOO_TEST_PERMISSION_STATE__?: unknown;
   }
 }
 

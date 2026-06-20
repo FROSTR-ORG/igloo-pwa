@@ -69,7 +69,13 @@ import { adoptInstanceId, getInstanceId, readInstanceRegistry } from './lib/inst
 import { createSettingsOnboardingPackageFromBfshare } from './lib/local-adapter';
 
 import { StoreProvider, useStore } from './lib/store';
-import type { PwaDistributionActionResult, PwaGeneratedShare, PwaOnboardConnection } from './lib/types';
+import type {
+  PwaDistributionActionResult,
+  PwaGeneratedShare,
+  PwaOnboardConnection,
+  PwaPeerPermissionState,
+  PwaRuntimeSnapshot,
+} from './lib/types';
 
 function hexToBytes(hex: string): Uint8Array {
   const normalized = hex.length % 2 === 0 ? hex : `0${hex}`;
@@ -139,6 +145,11 @@ type OperatorSettingsDraft = {
     state_save_interval_secs: number;
     peer_selection_strategy: 'deterministic_sorted' | 'random';
   };
+};
+
+type PermissionsVisualState = {
+  runtimeSnapshot?: PwaRuntimeSnapshot | null;
+  peerPermissionStates?: PwaPeerPermissionState[];
 };
 
 function buildOperatorSettingsDraft(
@@ -657,7 +668,10 @@ function AppShell() {
   const [replaceShareResult, setReplaceShareResult] = React.useState<ReplaceShareResult | null>(null);
   const [visualReplaceShareConnection, setVisualReplaceShareConnection] =
     React.useState<PwaOnboardConnection | null>(null);
+  const [visualPermissionsState, setVisualPermissionsState] =
+    React.useState<PermissionsVisualState | null>(null);
   const visualReplaceShareAppliedRef = React.useRef(false);
+  const visualPermissionsAppliedRef = React.useRef(false);
   const autoApplyReplaceShareKeyRef = React.useRef<string | null>(null);
 
   const copyDashboardKey = React.useCallback(
@@ -732,6 +746,22 @@ function AppShell() {
     }
     store.setActiveView('rotate-save');
   }, [store]);
+
+  // DEV-only seam: lets the visual harness render the live permissions surface.
+  // Runtime snapshots are in-memory only and are intentionally cleared on reload,
+  // so screenshots that need an active signer must inject that projection.
+  React.useEffect(() => {
+    if (!import.meta.env.DEV || visualPermissionsAppliedRef.current) return;
+    const injected = window.__IGLOO_TEST_PERMISSION_STATE__ as PermissionsVisualState | undefined;
+    if (!injected) return;
+    visualPermissionsAppliedRef.current = true;
+    setVisualPermissionsState({
+      runtimeSnapshot: injected.runtimeSnapshot ?? null,
+      peerPermissionStates: Array.isArray(injected.peerPermissionStates)
+        ? injected.peerPermissionStates
+        : undefined,
+    });
+  }, []);
 
   const selectedProfile = store.profiles.find((profile) => profile.id === store.selectedProfileId) ?? null;
   const runExport = React.useCallback(
@@ -1829,10 +1859,20 @@ function AppShell() {
   }
 
   function renderDashboard() {
-    const runtimeState = store.runtimeSnapshot?.active ? 'running' : 'stopped';
+    const dashboardRuntimeSnapshot = visualPermissionsState?.runtimeSnapshot ?? store.runtimeSnapshot;
+    const dashboardPeerPermissionStates =
+      visualPermissionsState?.peerPermissionStates ?? store.peerPermissionStates;
+    const runtimeState = dashboardRuntimeSnapshot?.active ? 'running' : 'stopped';
     const runtimeControlLabel = runtimeState === 'running' ? 'Stop Signer' : 'Start Signer';
-    const signerView = deriveSignerDashboardView(selectedProfile, store.runtimeSnapshot, store.peerPermissionStates);
-    const policyView = derivePolicyDashboardView(Boolean(store.runtimeSnapshot?.active), store.peerPermissionStates);
+    const signerView = deriveSignerDashboardView(
+      selectedProfile,
+      dashboardRuntimeSnapshot,
+      dashboardPeerPermissionStates,
+    );
+    const policyView = derivePolicyDashboardView(
+      Boolean(dashboardRuntimeSnapshot?.active),
+      dashboardPeerPermissionStates,
+    );
     const groupSummary = selectedProfile
       ? deriveGroupSummary(selectedProfile.group_package_json)
       : {};
@@ -1860,7 +1900,7 @@ function AppShell() {
               peerClearAllLabel="Remove Overrides"
               peerDescription="Live outbound and inbound peer policy state for the active browser signer."
               peerEmptyText={
-                store.runtimeSnapshot?.active
+                dashboardRuntimeSnapshot?.active
                   ? 'No peer policy state is currently available from the active runtime.'
                   : 'Start the signer to inspect and edit live peer policy state.'
               }
