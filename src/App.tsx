@@ -20,6 +20,7 @@ import {
   OnboardHandshakePanel,
   OnboardingClientCard,
   OnboardPackageEntry,
+  OperatorDashboardTabs,
   RecoverCollectSharesPanel,
   RotateKeysetPanel,
   WarningCard,
@@ -1310,35 +1311,6 @@ function AppShell() {
     return <RecoverPrivateKeyView recovered={recoveredKey} onClear={goToLanding} />;
   }
 
-  function renderDashboardNav() {
-    if (store.activeView !== 'dashboard') return undefined;
-    const items: Array<{ key: 'signer' | 'permissions' | 'settings'; label: string; testId: string }> = [
-      { key: 'signer', label: 'Dashboard', testId: CRITICAL_E2E_TEST_IDS.dashboardTabSigner },
-      { key: 'permissions', label: 'Permissions', testId: CRITICAL_E2E_TEST_IDS.dashboardTabPermissions },
-      { key: 'settings', label: 'Settings', testId: CRITICAL_E2E_TEST_IDS.dashboardTabSettings },
-    ];
-    return (
-      <nav className="igloo-dashboard-nav" aria-label="Dashboard sections">
-        {items.map((item) => {
-          const active = store.activeDashboardTab === item.key;
-          return (
-            <button
-              key={item.key}
-              type="button"
-              role="tab"
-              aria-selected={active}
-              data-testid={item.testId}
-              className={active ? 'igloo-dashboard-nav-link is-active' : 'igloo-dashboard-nav-link'}
-              onClick={() => requestDashboardTab(item.key)}
-            >
-              {item.label}
-            </button>
-          );
-        })}
-      </nav>
-    );
-  }
-
   function renderDashboard() {
     const runtimeState = store.runtimeSnapshot?.active ? 'running' : 'stopped';
     const runtimeControlLabel = runtimeState === 'running' ? 'Stop Signer' : 'Start Signer';
@@ -1356,6 +1328,15 @@ function AppShell() {
 
     return (
       <div data-testid={CRITICAL_E2E_TEST_IDS.dashboardRoot} className="space-y-6">
+          <OperatorDashboardTabs
+            tabs={[
+              { key: 'signer', label: 'Signer', description: 'runtime console' },
+              { key: 'permissions', label: 'Permissions', description: 'peer policies' },
+              { key: 'settings', label: 'Settings', description: 'operator controls' },
+            ]}
+            activeTab={store.activeDashboardTab}
+            onChangeTab={requestDashboardTab}
+          />
           {store.activeDashboardTab === 'signer' ? (
             <div role="tabpanel" id="operator-panel-signer" aria-labelledby="operator-tab-signer">
               {dashboardState.kind === 'loading' ? (
@@ -1613,7 +1594,6 @@ function AppShell() {
           logoSrc="/igloo-paper-mark.png"
           taskLabel={deriveHeaderTaskLabel(store.activeView)}
           profileName={selectedProfile?.label}
-          actions={renderDashboardNav()}
         />
       }
     >
