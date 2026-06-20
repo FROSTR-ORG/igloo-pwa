@@ -8,27 +8,29 @@
 // and it never writes to storage. Mirrors igloo-home's resolveVisualScenario.
 
 import type { PwaPersistedState, PwaProfile, PwaRuntimeSnapshot } from './types';
+import {
+  FIXTURE_PROFILE_ID, FIXTURE_PROFILE_LABEL, FIXTURE_GROUP_PK, FIXTURE_SHARE_PK,
+  FIXTURE_RELAY, FIXTURE_MEMBER_IDX, FIXTURE_SIGNER_SETTINGS,
+  createFixtureRuntimeStatusSummary,
+} from 'igloo-shared/testing/dev-fixtures';
 
 const DEV_SCENARIO_PARAM = '__frostr_dev';
 
-const GROUP_PK = '02'.repeat(32);
-const SHARE_PK = '11'.repeat(32);
-
 const GROUP_PACKAGE_JSON = JSON.stringify({
-  group_name: 'Dev Signing Key',
-  group_pk: GROUP_PK,
+  group_name: FIXTURE_PROFILE_LABEL,
+  group_pk: FIXTURE_GROUP_PK,
   threshold: 2,
   members: [{ idx: 0 }, { idx: 1 }, { idx: 2 }],
 });
 
 const fixtureProfile: PwaProfile = {
-  id: 'dev-scenario-device',
-  label: 'Dev Signing Key',
-  share_public_key: SHARE_PK,
-  group_public_key: GROUP_PK,
-  relays: ['ws://127.0.0.1:8194'],
+  id: FIXTURE_PROFILE_ID,
+  label: FIXTURE_PROFILE_LABEL,
+  share_public_key: FIXTURE_SHARE_PK,
+  group_public_key: FIXTURE_GROUP_PK,
+  relays: [FIXTURE_RELAY],
   group_package_json: GROUP_PACKAGE_JSON,
-  member_idx: 1,
+  member_idx: FIXTURE_MEMBER_IDX,
   source: 'generated',
   relay_profile: 'browser',
   group_ref: 'group-ref',
@@ -38,64 +40,21 @@ const fixtureProfile: PwaProfile = {
   encrypted_bfshare_artifact: 'bfshare1devscenario',
   profile_string: '',
   share_string: '',
-  signer_settings: {
-    sign_timeout_secs: 30,
-    ping_timeout_secs: 15,
-    request_ttl_secs: 300,
-    state_save_interval_secs: 30,
-    peer_selection_strategy: 'deterministic_sorted',
-  },
+  signer_settings: { ...FIXTURE_SIGNER_SETTINGS },
   manual_peer_policy_overrides: [],
   peer_pubkey: null,
   onboarding_package: null,
 };
 
-function fixturePeer(idx: number, pubkey: string, online: boolean): unknown {
-  return {
-    idx,
-    pubkey,
-    known: true,
-    last_seen: online ? 1_700_000_000 : null,
-    online,
-    incoming_available: online ? 92 : 0,
-    outgoing_available: online ? 78 : 0,
-    outgoing_spent: online ? 14 : 0,
-    can_sign: online,
-    can_ecdh: online,
-    can_ping: online,
-    should_send_nonces: online,
-    last_response_latency_ms: online ? 24 : null,
-    avg_latency_ms: online ? 31 : null,
-    nonce_history: [],
-  };
-}
-
-const PEER_A = '03a3f8c2d1'.padEnd(64, '0');
-const PEER_B = '02d7e1b93b'.padEnd(64, '0');
-
 // A representative running runtime snapshot: signer online with two peers (one
 // online, one offline) so the dashboard renders the Peers card with content.
-const runningSnapshot = {
+const _fixtureRuntimeStatus = createFixtureRuntimeStatusSummary();
+const runningSnapshot: PwaRuntimeSnapshot = {
   active: true,
   profile: fixtureProfile,
-  runtime_status: {
-    status: { device_id: fixtureProfile.id, pending_ops: 0, last_active: 1_700_000_000, known_peers: 2, request_seq: 7 },
-    metadata: {
-      device_id: fixtureProfile.id,
-      member_idx: 1,
-      share_public_key: SHARE_PK,
-      group_public_key: GROUP_PK,
-      peers: [PEER_A, PEER_B],
-    },
-    readiness: { runtime_ready: true, restore_complete: true, sign_ready: true, ecdh_ready: true, threshold: 2 },
-    peers: [fixturePeer(0, PEER_A, true), fixturePeer(2, PEER_B, false)],
-    peer_permission_states: [],
-    pending_operations: [],
-    pending_approvals: [],
-    connected_relays: ['ws://127.0.0.1:8194'],
-    configured_relays: ['ws://127.0.0.1:8194'],
-  },
-  readiness: { runtime_ready: true, restore_complete: true, sign_ready: true, ecdh_ready: true, threshold: 2 },
+  runtime_status: _fixtureRuntimeStatus,
+  readiness: _fixtureRuntimeStatus.readiness,
+  peer_permission_states: [],
   events: [],
   runtime_log_lines: ['[info] signer online', '[info] 2 peers known'],
   runtime_host: {
@@ -103,9 +62,9 @@ const runningSnapshot = {
     mode: 'browser',
     log_source: 'dev-scenario',
     started_at: 1_700_000_000,
-    signer_pubkey: SHARE_PK,
+    signer_pubkey: FIXTURE_SHARE_PK,
   },
-} as unknown as PwaRuntimeSnapshot;
+};
 
 /**
  * If `?__frostr_dev=<name>` is present, return a partial state override applied on
