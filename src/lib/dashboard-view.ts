@@ -37,12 +37,14 @@ export function deriveMemberLabel(sharePackageJson: string): string | undefined 
 // fields for malformed json so callers never throw on a bad blob.
 export function deriveGroupSummary(groupPackageJson: string): {
   keysetName?: string;
+  threshold?: number;
   memberCount?: number;
 } {
   try {
-    const group = JSON.parse(groupPackageJson) as { group_name?: unknown; members?: unknown };
+    const group = JSON.parse(groupPackageJson) as { group_name?: unknown; threshold?: unknown; members?: unknown };
     return {
       keysetName: typeof group.group_name === 'string' ? group.group_name : undefined,
+      threshold: typeof group.threshold === 'number' ? group.threshold : undefined,
       memberCount: Array.isArray(group.members) ? group.members.length : undefined,
     };
   } catch {

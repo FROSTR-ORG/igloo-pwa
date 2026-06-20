@@ -4,14 +4,8 @@ import {
   Alert,
   AppHeader,
   Button,
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-  ContentCard,
+  ClearCredentialsDialog,
   CreateFlowDistributionSection,
-  ConfirmDialog,
   CreateFlowGenerateCard,
   CreateFlowProfileSetup,
   CreateFlowShareSelection,
@@ -21,32 +15,39 @@ import {
   OnboardingClientCard,
   OnboardPackageEntry,
   RecoverCollectSharesPanel,
+  ReplaceShareFailedPanel,
+  ReplaceSharePackageEntry,
+  ReplaceShareProgressPanel,
+  ReplaceShareSuccessPanel,
   RotateKeysetPanel,
   WarningCard,
   HostFlowShell,
+  Modal,
+  OnboardDeviceSponsorDialog,
   OperatorPermissionsPanel,
-  OperatorSettingsPanel,
+  OperatorSettingsSidebar,
   OperatorSignerPanel,
   PageLayout,
   PageBackLink,
   PasswordField,
-  ProfileConfirmationCard,
+  ProfilePasswordChangeDialog,
   ExportPackageModal,
   PublicFocusFooter,
   PublicTaskShell,
   PublicTaskTitle,
   QrPayloadModal,
+  SettingsUnsavedChangesDialog,
   StepProgress,
-  Textarea,
   WelcomeEntryHero,
   WelcomeReturningHero,
   WelcomeDeleteModal,
   WelcomeUnlockModal,
   CRITICAL_E2E_TEST_IDS,
   observabilityEventsToEventRows,
-  passwordManagerOptOutProps,
   type DashboardKeyModel,
   type EventLogRowModel,
+  type OnboardDeviceSponsorDraft,
+  type OnboardDeviceSponsorResult,
   type PeerPolicy,
   type SharedDistributionResult,
   type PolicyDashboardViewModel,
@@ -55,18 +56,20 @@ import {
   type WelcomeResumableDeviceModel,
 } from 'igloo-ui';
 import {
+  buildProfileDownloadFilename,
   pingRelay,
   shortProfileId,
   type RuntimeReadiness,
   type RuntimeStatusSummary,
 } from 'igloo-shared';
 import * as nip49 from 'nostr-tools/nip49';
-import { deriveExportSummary, toDashboardKey } from './lib/dashboard-view';
+import { deriveExportSummary, deriveGroupSummary, toDashboardKey } from './lib/dashboard-view';
 import { saveTextToFile } from './lib/file-save';
 import { adoptInstanceId, getInstanceId, readInstanceRegistry } from './lib/instance';
+import { createSettingsOnboardingPackageFromBfshare } from './lib/local-adapter';
 
 import { StoreProvider, useStore } from './lib/store';
-import type { PwaDistributionActionResult, PwaGeneratedShare } from './lib/types';
+import type { PwaDistributionActionResult, PwaGeneratedShare, PwaOnboardConnection } from './lib/types';
 
 function hexToBytes(hex: string): Uint8Array {
   const normalized = hex.length % 2 === 0 ? hex : `0${hex}`;
@@ -90,6 +93,23 @@ function toPwaEventRows(lines: string[] = []): EventLogRowModel[] {
     message: line.replace(/^\[[^\]]+\]\s*/, ''),
     timestampLabel: 'live',
   }));
+}
+
+function formatDateLabel(timestamp: number | undefined): string | undefined {
+  if (!timestamp) return undefined;
+  const milliseconds = timestamp > 10_000_000_000 ? timestamp : timestamp * 1000;
+  return new Intl.DateTimeFormat(undefined, {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  }).format(new Date(milliseconds));
+}
+
+function formatGroupThresholdLabel(summary: ReturnType<typeof deriveGroupSummary>): string | undefined {
+  if (typeof summary.threshold !== 'number' || typeof summary.memberCount !== 'number') {
+    return undefined;
+  }
+  return `${summary.threshold} of ${summary.memberCount}`;
 }
 
 function formatUiError(error: unknown) {
@@ -135,6 +155,19 @@ function buildOperatorSettingsDraft(
       state_save_interval_secs: 30,
       peer_selection_strategy: 'deterministic_sorted',
     },
+  };
+}
+
+function buildSettingsOnboardDraft(
+  profile: ReturnType<typeof useStore>['profiles'][number] | null,
+): OnboardDeviceSponsorDraft {
+  const baseLabel = profile?.label?.trim() || 'Igloo';
+  return {
+    label: `${baseLabel} Remote Device`,
+    sourcePackageText: '',
+    sourcePackagePassword: '',
+    packagePassword: '',
+    confirmPackagePassword: '',
   };
 }
 
@@ -357,7 +390,7 @@ function isPaperWelcomeSurface(store: ReturnType<typeof useStore>) {
 
 function deriveHeaderTaskLabel(activeView: ReturnType<typeof useStore>['activeView']) {
   if (activeView.startsWith('create')) return 'Create';
-  if (activeView.startsWith('rotate')) return 'Rotate';
+  if (activeView.startsWith('rotate')) return 'Replace';
   if (activeView.startsWith('onboard')) return 'Onboard';
   if (activeView.startsWith('load')) return 'Import';
   return 'Installable browser workspace';
@@ -403,11 +436,42 @@ function formatWelcomeKey(value: string) {
   return `${value.slice(0, 8)}...${value.slice(-4)}`;
 }
 
+function compactReplacePackageLabel(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) return 'bfonboard1...';
+  if (trimmed.length <= 24) return trimmed;
+  return `${trimmed.slice(0, 24)}...`;
+}
+
+function formatReplacementKeyLabel(value: string) {
+  return toDashboardKey(value)?.display ?? formatWelcomeKey(value);
+}
+
+function deriveShareMemberLabel(sharePackageJson: string | undefined) {
+  try {
+    const parsed = sharePackageJson ? (JSON.parse(sharePackageJson) as { idx?: unknown }) : null;
+    return typeof parsed?.idx === 'number' ? `Share #${parsed.idx}` : 'Share #1';
+  } catch {
+    return 'Share #1';
+  }
+}
+
 function deriveWelcomeReturningLayout(profileCount: number) {
   if (profileCount === 1) return 'single';
   if (profileCount <= 3) return 'multi';
   return 'many';
 }
+
+type ReplaceShareResult = {
+  groupKeyLabel: string;
+  oldShareKeyLabel: string;
+  newShareKeyLabel: string;
+};
+
+type ReplaceShareVisualState =
+  | { state: 'applying'; connection: PwaOnboardConnection; applying?: boolean; unlockPassphrase?: string }
+  | { state: 'failed'; connection: PwaOnboardConnection; message: string; unlockPassphrase?: string }
+  | { state: 'success'; result: ReplaceShareResult };
 
 export function RecoverPrivateKeyView({
   recovered,
@@ -571,6 +635,30 @@ function AppShell() {
   const [welcomeDeleteProfileId, setWelcomeDeleteProfileId] = React.useState<string | null>(null);
   const [recoveredKey, setRecoveredKey] = React.useState<{ nsec: string; signingKeyHex: string } | null>(null);
   const [dashboardCopiedField, setDashboardCopiedField] = React.useState<'group' | 'share' | null>(null);
+  const [settingsSidebarOpen, setSettingsSidebarOpen] = React.useState(false);
+  const [settingsClearCredentialsOpen, setSettingsClearCredentialsOpen] = React.useState(false);
+  const [settingsOnboardOpen, setSettingsOnboardOpen] = React.useState(false);
+  const [settingsOnboardDraft, setSettingsOnboardDraft] =
+    React.useState<OnboardDeviceSponsorDraft>(() => buildSettingsOnboardDraft(null));
+  const [settingsOnboardResult, setSettingsOnboardResult] =
+    React.useState<OnboardDeviceSponsorResult | null>(null);
+  const [settingsOnboardError, setSettingsOnboardError] = React.useState<string | null>(null);
+  const [settingsOnboardBusy, setSettingsOnboardBusy] = React.useState(false);
+  const [settingsOnboardQrOpen, setSettingsOnboardQrOpen] = React.useState(false);
+  const [settingsPasswordOpen, setSettingsPasswordOpen] = React.useState(false);
+  const [settingsPasswordCurrent, setSettingsPasswordCurrent] = React.useState('');
+  const [settingsPasswordNext, setSettingsPasswordNext] = React.useState('');
+  const [settingsPasswordConfirm, setSettingsPasswordConfirm] = React.useState('');
+  const [settingsPasswordError, setSettingsPasswordError] = React.useState<string | null>(null);
+  const [settingsPasswordBusy, setSettingsPasswordBusy] = React.useState(false);
+  const [replaceShareQrOpen, setReplaceShareQrOpen] = React.useState(false);
+  const [replaceShareApplying, setReplaceShareApplying] = React.useState(false);
+  const [replaceShareError, setReplaceShareError] = React.useState<string | null>(null);
+  const [replaceShareResult, setReplaceShareResult] = React.useState<ReplaceShareResult | null>(null);
+  const [visualReplaceShareConnection, setVisualReplaceShareConnection] =
+    React.useState<PwaOnboardConnection | null>(null);
+  const visualReplaceShareAppliedRef = React.useRef(false);
+  const autoApplyReplaceShareKeyRef = React.useRef<string | null>(null);
 
   const copyDashboardKey = React.useCallback(
     (field: 'group' | 'share', keyModel: DashboardKeyModel | undefined, format?: 'npub' | 'hex') => {
@@ -603,9 +691,9 @@ function AppShell() {
     setExportError(null);
   }, []);
 
-  // Unsaved-changes guard for the Settings tab: tracks the pending nav target while
-  // the confirm modal is open.
-  const [pendingSettingsNav, setPendingSettingsNav] = React.useState<'signer' | 'permissions' | 'settings' | null>(null);
+  // Unsaved-changes guard for the Settings sidebar: closing the sidebar with
+  // edited profile/relay/runtime fields asks before discarding the draft.
+  const [pendingSettingsExit, setPendingSettingsExit] = React.useState<'signer' | 'permissions' | 'close' | null>(null);
 
   // DEV-only seam: lets the visual harness render the recover-success screen with a
   // FAKE nsec injected on the window. Stripped from production builds (guarded on
@@ -617,6 +705,33 @@ function AppShell() {
       setRecoveredKey(injected);
     }
   }, [recoveredKey]);
+
+  // DEV-only seam: lets the visual harness render replace-share transient states
+  // that intentionally cannot survive reload because they carry passphrases.
+  React.useEffect(() => {
+    if (!import.meta.env.DEV || visualReplaceShareAppliedRef.current) return;
+    const injected = window.__IGLOO_TEST_REPLACE_SHARE_STATE__ as ReplaceShareVisualState | undefined;
+    if (!injected) return;
+    visualReplaceShareAppliedRef.current = true;
+
+    if (injected.state === 'success') {
+      setVisualReplaceShareConnection(null);
+      setReplaceShareError(null);
+      setReplaceShareApplying(false);
+      setReplaceShareResult(injected.result);
+      store.setActiveView('rotate-complete');
+      return;
+    }
+
+    setVisualReplaceShareConnection(injected.connection);
+    setReplaceShareResult(null);
+    setReplaceShareApplying(Boolean(injected.state === 'applying' && injected.applying));
+    setReplaceShareError(injected.state === 'failed' ? injected.message : null);
+    if (injected.unlockPassphrase) {
+      store.setUnlockPassphrase(injected.unlockPassphrase);
+    }
+    store.setActiveView('rotate-save');
+  }, [store]);
 
   const selectedProfile = store.profiles.find((profile) => profile.id === store.selectedProfileId) ?? null;
   const runExport = React.useCallback(
@@ -634,6 +749,101 @@ function AppShell() {
     },
     [selectedProfile, exportModalFormat, store],
   );
+
+  const settingsOnboardSignerPubkey =
+    store.runtimeSnapshot?.active && store.runtimeSnapshot.runtime_host?.signer_pubkey
+      ? store.runtimeSnapshot.runtime_host.signer_pubkey
+      : null;
+
+  const openSettingsOnboardDialog = React.useCallback(() => {
+    setSettingsOnboardDraft(buildSettingsOnboardDraft(selectedProfile));
+    setSettingsOnboardResult(null);
+    setSettingsOnboardError(null);
+    setSettingsOnboardQrOpen(false);
+    setSettingsOnboardOpen(true);
+  }, [selectedProfile]);
+
+  const closeSettingsOnboardDialog = React.useCallback(() => {
+    setSettingsOnboardOpen(false);
+    setSettingsOnboardDraft(buildSettingsOnboardDraft(null));
+    setSettingsOnboardResult(null);
+    setSettingsOnboardError(null);
+    setSettingsOnboardBusy(false);
+    setSettingsOnboardQrOpen(false);
+  }, []);
+
+  const createAnotherSettingsOnboardPackage = React.useCallback(() => {
+    setSettingsOnboardDraft(buildSettingsOnboardDraft(selectedProfile));
+    setSettingsOnboardResult(null);
+    setSettingsOnboardError(null);
+    setSettingsOnboardQrOpen(false);
+  }, [selectedProfile]);
+
+  const submitSettingsOnboardPackage = React.useCallback(
+    async (event: React.FormEvent<HTMLFormElement>) => {
+      event.preventDefault();
+      if (!selectedProfile) {
+        setSettingsOnboardError('Select a profile before creating an onboarding package.');
+        return;
+      }
+      if (!settingsOnboardSignerPubkey) {
+        setSettingsOnboardError('Start the signer before creating an onboarding package.');
+        return;
+      }
+      if (settingsOnboardDraft.packagePassword !== settingsOnboardDraft.confirmPackagePassword) {
+        setSettingsOnboardError('Package passwords do not match.');
+        return;
+      }
+
+      setSettingsOnboardBusy(true);
+      setSettingsOnboardError(null);
+      try {
+        const result = await createSettingsOnboardingPackageFromBfshare({
+          profile: selectedProfile,
+          label: settingsOnboardDraft.label,
+          sourcePackageText: settingsOnboardDraft.sourcePackageText,
+          sourcePackagePassword: settingsOnboardDraft.sourcePackagePassword,
+          password: settingsOnboardDraft.packagePassword,
+          signerPubkey: settingsOnboardSignerPubkey,
+        });
+        setSettingsOnboardResult({
+          label: result.preview.label,
+          memberLabel: `Share #${result.preview.member_idx}`,
+          packageText: result.package_text,
+          sharePublicKey: result.preview.share_public_key,
+        });
+        setSettingsOnboardDraft((current) => ({
+          ...current,
+          sourcePackageText: '',
+          sourcePackagePassword: '',
+          packagePassword: '',
+          confirmPackagePassword: '',
+        }));
+      } catch (error) {
+        setSettingsOnboardError(formatUiError(error));
+      } finally {
+        setSettingsOnboardBusy(false);
+      }
+    },
+    [selectedProfile, settingsOnboardDraft, settingsOnboardSignerPubkey],
+  );
+
+  const copySettingsOnboardPackage = React.useCallback(() => {
+    if (!settingsOnboardResult?.packageText) return;
+    if (navigator.clipboard?.writeText) {
+      void navigator.clipboard.writeText(settingsOnboardResult.packageText);
+    }
+  }, [settingsOnboardResult]);
+
+  const saveSettingsOnboardPackage = React.useCallback(() => {
+    if (!settingsOnboardResult?.packageText) return;
+    const filename = buildProfileDownloadFilename(
+      settingsOnboardResult.label,
+      settingsOnboardResult.sharePublicKey ?? selectedProfile?.id ?? 'bfonboard',
+      'bfonboard.txt',
+    );
+    void saveTextToFile(filename, settingsOnboardResult.packageText);
+  }, [selectedProfile?.id, settingsOnboardResult]);
 
   const welcomeUnlockProfile = React.useMemo<WelcomeReturningProfileModel | null>(() => {
     const profile = store.profiles.find((entry) => entry.id === welcomeUnlockProfileId);
@@ -687,18 +897,122 @@ function AppShell() {
       JSON.stringify(operatorSettingsDraft.signerSettings) !== JSON.stringify(saved.signerSettings)
     );
   }, [operatorSettingsDraft, selectedProfile]);
+  const clearCredentialsSummary = React.useMemo(() => {
+    if (!selectedProfile) return 'No profile selected';
+    const groupSummary = deriveGroupSummary(selectedProfile.group_package_json);
+    return [
+      groupSummary.keysetName ?? selectedProfile.label,
+      Number.isFinite(selectedProfile.member_idx) ? `Share #${selectedProfile.member_idx}` : null,
+      selectedProfile.label,
+    ]
+      .filter(Boolean)
+      .join(' · ');
+  }, [selectedProfile]);
 
-  // Guarded dashboard-tab nav: leaving the Settings tab with unsaved edits opens
-  // the Unsaved-Changes confirm modal instead of navigating immediately.
+  React.useEffect(() => {
+    if (store.activeView !== 'dashboard') {
+      setSettingsSidebarOpen(false);
+      return;
+    }
+    if (store.activeDashboardTab === 'settings') {
+      setSettingsSidebarOpen(true);
+    }
+  }, [store.activeDashboardTab, store.activeView]);
+
+  // Dashboard navigation is now Paper-aligned: Dashboard and Permissions remain
+  // routed panels, while Settings opens as a right-side sidebar.
   const requestDashboardTab = React.useCallback(
     (tab: 'signer' | 'permissions' | 'settings') => {
-      if (store.activeDashboardTab === 'settings' && tab !== 'settings' && settingsDirty) {
-        setPendingSettingsNav(tab);
+      if (tab === 'settings') {
+        setSettingsSidebarOpen(true);
+        store.setDashboardTab('settings');
         return;
       }
+      if (settingsSidebarOpen && settingsDirty) {
+        setPendingSettingsExit(tab);
+        return;
+      }
+      setSettingsSidebarOpen(false);
       store.setDashboardTab(tab);
     },
-    [store, settingsDirty],
+    [store, settingsDirty, settingsSidebarOpen],
+  );
+
+  const requestSettingsSidebarClose = React.useCallback(() => {
+    if (settingsDirty) {
+      setPendingSettingsExit('close');
+      return;
+    }
+    setSettingsSidebarOpen(false);
+    if (store.activeDashboardTab === 'settings') {
+      store.setDashboardTab('signer');
+    }
+  }, [settingsDirty, store]);
+
+  const discardSettingsSidebarChanges = React.useCallback(() => {
+    setOperatorSettingsDraft(buildOperatorSettingsDraft(selectedProfile));
+    setSettingsSidebarOpen(false);
+    const target = pendingSettingsExit;
+    setPendingSettingsExit(null);
+    store.setDashboardTab(target && target !== 'close' ? target : 'signer');
+  }, [pendingSettingsExit, selectedProfile, store]);
+
+  const closeSettingsDiscardDialog = React.useCallback(
+    () => setPendingSettingsExit(null),
+    [],
+  );
+
+  const closeSettingsPasswordDialog = React.useCallback(() => {
+    if (settingsPasswordBusy) return;
+    setSettingsPasswordOpen(false);
+    setSettingsPasswordCurrent('');
+    setSettingsPasswordNext('');
+    setSettingsPasswordConfirm('');
+    setSettingsPasswordError(null);
+  }, [settingsPasswordBusy]);
+
+  const submitSettingsPasswordChange = React.useCallback(
+    async (event: React.FormEvent<HTMLFormElement>) => {
+      event.preventDefault();
+      if (!selectedProfile) return;
+      if (!settingsPasswordCurrent.trim()) {
+        setSettingsPasswordError('Current password is required.');
+        return;
+      }
+      if (!settingsPasswordNext.trim()) {
+        setSettingsPasswordError('New password is required.');
+        return;
+      }
+      if (settingsPasswordNext !== settingsPasswordConfirm) {
+        setSettingsPasswordError('New password confirmation does not match.');
+        return;
+      }
+
+      try {
+        setSettingsPasswordBusy(true);
+        setSettingsPasswordError(null);
+        await store.changeProfilePassword(
+          selectedProfile.id,
+          settingsPasswordCurrent,
+          settingsPasswordNext,
+        );
+        setSettingsPasswordOpen(false);
+        setSettingsPasswordCurrent('');
+        setSettingsPasswordNext('');
+        setSettingsPasswordConfirm('');
+      } catch {
+        setSettingsPasswordError('Current password is incorrect.');
+      } finally {
+        setSettingsPasswordBusy(false);
+      }
+    },
+    [
+      selectedProfile,
+      settingsPasswordConfirm,
+      settingsPasswordCurrent,
+      settingsPasswordNext,
+      store,
+    ],
   );
 
   const run = React.useCallback(async (action: () => Promise<void> | void) => {
@@ -709,6 +1023,68 @@ function AppShell() {
       setUiError(formatUiError(error));
     }
   }, []);
+
+  const applyReplaceShareConnection = React.useCallback(async () => {
+    if (!selectedProfile) return;
+    setReplaceShareApplying(true);
+    setReplaceShareError(null);
+    try {
+      const previousProfile = selectedProfile;
+      const updatedProfile = await store.finalizeRotationUpdate();
+      setReplaceShareResult({
+        groupKeyLabel: formatReplacementKeyLabel(updatedProfile.group_public_key),
+        oldShareKeyLabel: formatReplacementKeyLabel(previousProfile.share_public_key),
+        newShareKeyLabel: formatReplacementKeyLabel(updatedProfile.share_public_key),
+      });
+      store.setActiveView('rotate-complete');
+    } catch (error) {
+      setReplaceShareError(formatUiError(error));
+    } finally {
+      setReplaceShareApplying(false);
+    }
+  }, [selectedProfile, store]);
+
+  React.useEffect(() => {
+    const connection = store.pendingRotationConnection;
+    if (
+      store.activeView !== 'rotate-save' ||
+      !connection ||
+      visualReplaceShareConnection ||
+      replaceShareError ||
+      replaceShareResult
+    ) {
+      return;
+    }
+
+    const autoApplyKey = `${store.selectedProfileId}:${connection.package_text}`;
+    if (autoApplyReplaceShareKeyRef.current === autoApplyKey) return;
+    autoApplyReplaceShareKeyRef.current = autoApplyKey;
+    void applyReplaceShareConnection();
+  }, [
+    applyReplaceShareConnection,
+    replaceShareError,
+    replaceShareResult,
+    store.activeView,
+    store.pendingRotationConnection,
+    store.selectedProfileId,
+    visualReplaceShareConnection,
+  ]);
+
+  const openReplaceShareFlow = React.useCallback(() => {
+    autoApplyReplaceShareKeyRef.current = null;
+    setVisualReplaceShareConnection(null);
+    setReplaceShareApplying(false);
+    setReplaceShareError(null);
+    setReplaceShareResult(null);
+    setSettingsOnboardOpen(false);
+    setSettingsOnboardResult(null);
+    setSettingsOnboardError(null);
+    setSettingsOnboardQrOpen(false);
+    setSettingsSidebarOpen(false);
+    void run(() => {
+      store.startRotateKey();
+    });
+  }, [run, store]);
 
   const goToLanding = React.useCallback(() => {
     setUiError(null);
@@ -1256,103 +1632,112 @@ function AppShell() {
     if (!selectedProfile) return null;
     return (
       <HostFlowShell
-        title="Rotate Key"
-        description="Connect with a rotated onboarding package and prepare to replace the active device share."
+        title="Enter Onboarding Package"
+        description="Import a valid onboarding package to replace this device's local share while keeping the same group public key and Group Profile."
         onBack={goToDashboard}
-        backTooltip="Back to dashboard"
+        backTooltip="Back to Settings"
+        variant="bare"
       >
-        <section className="igloo-flow-root igloo-stack">
-          <ProfileConfirmationCard
-            title="Current Device"
-            profileName={selectedProfile.label}
-            sharePublicKey={selectedProfile.share_public_key}
-            groupPublicKey={selectedProfile.group_public_key}
-            relays={selectedProfile.relays}
-          />
-          <Card>
-            <CardHeader>
-              <CardTitle>Connect Rotated bfonboard</CardTitle>
-              <CardDescription>Use a rotated onboarding package to replace this device while keeping the same keyset identity.</CardDescription>
-            </CardHeader>
-            <CardContent className="igloo-stack">
-              <label>
-                bfonboard
-                <Textarea
-                  className="min-h-[112px]"
-                  data-testid={CRITICAL_E2E_TEST_IDS.rotationPackageInput}
-                  value={store.drafts.rotateConnectForm.packageText}
-                  onChange={(event) => store.updateRotateConnectForm('packageText', event.target.value)}
-                  placeholder="Paste bfonboard1..."
-                />
-              </label>
-              <label>
-                Package Password
-                <input
-                  type="password"
-                  {...passwordManagerOptOutProps}
-                  data-testid={CRITICAL_E2E_TEST_IDS.rotationPasswordInput}
-                  value={store.draftSecrets.rotateConnectFormPassword}
-                  onChange={(event) => store.updateRotateConnectPassword(event.target.value)}
-                />
-              </label>
-              <div className="igloo-button-row">
-                <Button
-                  type="button"
-                  size="sm"
-                  data-testid={CRITICAL_E2E_TEST_IDS.rotationConnectSubmit}
-                  onClick={() => void run(() => store.connectRotationPackage())}
-                >
-                  Connect Rotation Package
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        </section>
+        <ReplaceSharePackageEntry
+          packageText={store.drafts.rotateConnectForm.packageText}
+          packagePassword={store.draftSecrets.rotateConnectFormPassword}
+          onPackageTextChange={(value) => store.updateRotateConnectForm('packageText', value)}
+          onPackagePasswordChange={(value) => store.updateRotateConnectPassword(value)}
+          onScanQr={() => setReplaceShareQrOpen(true)}
+          onSubmit={() => {
+            setReplaceShareError(null);
+            setReplaceShareResult(null);
+            void run(async () => {
+              setReplaceShareApplying(true);
+              try {
+                await store.connectRotationPackage();
+              } catch (error) {
+                setReplaceShareApplying(false);
+                throw error;
+              }
+            });
+          }}
+        />
       </HostFlowShell>
     );
   }
 
   function renderRotateSave() {
-    if (!store.pendingRotationConnection || !selectedProfile) return null;
+    const pendingRotationConnection = store.pendingRotationConnection ?? visualReplaceShareConnection;
+    if (!pendingRotationConnection || !selectedProfile) return null;
+    const memberLabel = deriveShareMemberLabel(pendingRotationConnection.preview.share_package_json);
+    const packageLabel = compactReplacePackageLabel(pendingRotationConnection.package_text);
+
+    if (replaceShareError) {
+      return (
+        <HostFlowShell
+          title="Replacement Failed"
+          description="The onboarding package could not be applied. Your current local share, group public key, and Group Profile were not changed."
+          onBack={() => {
+            setReplaceShareError(null);
+            store.setActiveView('rotate-connect');
+          }}
+          backTooltip="Back to Replace Share"
+          variant="bare"
+        >
+          <ReplaceShareFailedPanel
+            message={replaceShareError}
+            showHeader={false}
+            onRetry={() => void applyReplaceShareConnection()}
+            onBack={() => {
+              setReplaceShareError(null);
+              store.setActiveView('rotate-connect');
+            }}
+          />
+        </HostFlowShell>
+      );
+    }
+
     return (
       <HostFlowShell
-        title="Confirm Rotated Device"
-        description="Review the replacement device details before replacing the active local profile."
+        title="Applying Replacement"
+        description="Validating the onboarding package and replacing this device's local share. The group public key and Group Profile stay the same."
         onBack={() => store.setActiveView('rotate-connect')}
-        backTooltip="Back to connect"
+        backTooltip="Back to Replace Share"
+        variant="bare"
       >
-        <section className="igloo-flow-root igloo-stack">
-          <ProfileConfirmationCard
-            title="Replacement Preview"
-            profileName={selectedProfile.label}
-            sharePublicKey={store.pendingRotationConnection.preview.share_public_key}
-            groupPublicKey={store.pendingRotationConnection.preview.group_public_key}
-            relays={store.pendingRotationConnection.preview.relays}
-          />
-          <section className="igloo-task-banner">
-            <span className="igloo-task-kicker">Same keyset, fresh device share</span>
-            <p>This replacement keeps the same group public key and replaces this device with a new share and profile id.</p>
-          </section>
-          <label>
-            Current Device Passphrase
-            <input
-              type="password"
-              value={store.unlockPassphrase}
-              onChange={(event) => store.setUnlockPassphrase(event.target.value)}
-              placeholder="Enter the passphrase for the active device"
-            />
-          </label>
-          <div className="igloo-button-row">
-            <Button
-              type="button"
-              size="sm"
-              data-testid={CRITICAL_E2E_TEST_IDS.rotationConfirmSubmit}
-              onClick={() => void run(() => store.finalizeRotationUpdate())}
-            >
-              Replace Active Device
-            </Button>
-          </div>
-        </section>
+        <ReplaceShareProgressPanel
+          keysetName={selectedProfile.label}
+          memberLabel={memberLabel}
+          packageLabel={packageLabel}
+          applying
+          showHeader={false}
+          confirmTestId={CRITICAL_E2E_TEST_IDS.rotationConfirmSubmit}
+          onConfirm={() => void applyReplaceShareConnection()}
+          onCancel={() => store.setActiveView('rotate-connect')}
+        />
+      </HostFlowShell>
+    );
+  }
+
+  function renderRotateComplete() {
+    if (!replaceShareResult) return null;
+    return (
+      <HostFlowShell
+        title="Share Replaced"
+        description="Your local share has been replaced. The group public key and Group Profile are unchanged."
+        onBack={() => {
+          setReplaceShareResult(null);
+          store.setActiveView('dashboard');
+          store.setDashboardTab('signer');
+        }}
+        backTooltip="Return to Signer"
+        variant="bare"
+      >
+        <ReplaceShareSuccessPanel
+          {...replaceShareResult}
+          showHeader={false}
+          onReturn={() => {
+            setReplaceShareResult(null);
+            store.setActiveView('dashboard');
+            store.setDashboardTab('signer');
+          }}
+        />
       </HostFlowShell>
     );
   }
@@ -1419,15 +1804,18 @@ function AppShell() {
       { key: 'settings', label: 'Settings', testId: CRITICAL_E2E_TEST_IDS.dashboardTabSettings },
     ];
     return (
-      <nav className="igloo-dashboard-nav" aria-label="Dashboard sections">
+      <nav className="igloo-dashboard-nav" aria-label="Dashboard actions">
         {items.map((item) => {
-          const active = store.activeDashboardTab === item.key;
+          const active =
+            item.key === 'settings'
+              ? settingsSidebarOpen
+              : !settingsSidebarOpen && store.activeDashboardTab === item.key;
           return (
             <button
               key={item.key}
+              id={`operator-tab-${item.key}`}
               type="button"
-              role="tab"
-              aria-selected={active}
+              aria-pressed={active}
               data-testid={item.testId}
               className={active ? 'igloo-dashboard-nav-link is-active' : 'igloo-dashboard-nav-link'}
               onClick={() => requestDashboardTab(item.key)}
@@ -1445,205 +1833,247 @@ function AppShell() {
     const runtimeControlLabel = runtimeState === 'running' ? 'Stop Signer' : 'Start Signer';
     const signerView = deriveSignerDashboardView(selectedProfile, store.runtimeSnapshot, store.peerPermissionStates);
     const policyView = derivePolicyDashboardView(Boolean(store.runtimeSnapshot?.active), store.peerPermissionStates);
+    const groupSummary = selectedProfile
+      ? deriveGroupSummary(selectedProfile.group_package_json)
+      : {};
+    const groupProfile = selectedProfile
+      ? {
+          keysetName: groupSummary.keysetName ?? selectedProfile.label,
+          keyNpub: signerView?.groupKey?.display ?? signerView?.publicKeyLabel,
+          thresholdLabel: formatGroupThresholdLabel(groupSummary) ?? signerView?.thresholdLabel,
+          createdLabel: formatDateLabel(selectedProfile.created_at),
+          updatedLabel: formatDateLabel(selectedProfile.updated_at ?? selectedProfile.created_at),
+        }
+      : undefined;
 
     return (
       <div data-testid={CRITICAL_E2E_TEST_IDS.dashboardRoot} className="space-y-6">
-          {store.activeDashboardTab === 'signer' ? (
-            <div role="tabpanel" id="operator-panel-signer" aria-labelledby="operator-tab-signer">
-              <OperatorSignerPanel
-                view={signerView}
-                introMessage="The browser signer runs locally inside the PWA workbench. This dashboard mirrors the operator workflow used by igloo-chrome."
-                emptyDescription="Load or onboard a device profile before opening the signer dashboard."
-                runtimeControlLabel={runtimeControlLabel}
-                copiedField={dashboardCopiedField}
-                onCopyGroupKey={(format) => copyDashboardKey('group', signerView?.groupKey, format)}
-                onCopyShareKey={(format) => copyDashboardKey('share', signerView?.shareKey, format)}
-                onPrimaryAction={() =>
-                  void run(() => (store.runtimeSnapshot?.active ? store.stopSigner() : store.startSigner()))
-                }
-                primaryActionVariant={store.runtimeSnapshot?.active ? 'destructive' : 'success'}
-                onRefreshPeers={() => void run(() => store.refreshSigner())}
-                refreshPeersDisabled={!store.runtimeSnapshot?.active}
-                // Clearing the host-side log buffer requires an active session, so
-                // only expose the control while the signer is running.
-                onClearLogs={
-                  store.runtimeSnapshot?.active ? () => void run(() => store.clearLogs()) : undefined
-                }
-              />
-            </div>
-          ) : null}
+        {store.activeDashboardTab === 'permissions' && !settingsSidebarOpen ? (
+          <div role="tabpanel" id="operator-panel-permissions" aria-labelledby="operator-tab-permissions">
+            <OperatorPermissionsPanel
+              view={policyView}
+              onRefresh={() => void run(() => store.refreshSigner())}
+              onClearAllPeerPermissions={() => void run(() => store.clearPeerPolicies())}
+              onPeerPolicyOverrideChange={(pubkey, direction, method, value) =>
+                void run(() => store.updatePeerPolicy(pubkey, direction, method, value === 'allow'))
+              }
+              peerClearAllLabel="Remove Overrides"
+              peerDescription="Live outbound and inbound peer policy state for the active browser signer."
+              peerEmptyText={
+                store.runtimeSnapshot?.active
+                  ? 'No peer policy state is currently available from the active runtime.'
+                  : 'Start the signer to inspect and edit live peer policy state.'
+              }
+            />
+          </div>
+        ) : (
+          <OperatorSignerPanel
+            view={signerView}
+            introMessage="The browser signer runs locally inside the PWA workbench. This dashboard mirrors the operator workflow used by igloo-chrome."
+            emptyDescription="Load or onboard a device profile before opening the signer dashboard."
+            runtimeControlLabel={runtimeControlLabel}
+            copiedField={dashboardCopiedField}
+            onCopyGroupKey={(format) => copyDashboardKey('group', signerView?.groupKey, format)}
+            onCopyShareKey={(format) => copyDashboardKey('share', signerView?.shareKey, format)}
+            onPrimaryAction={() =>
+              void run(() => (store.runtimeSnapshot?.active ? store.stopSigner() : store.startSigner()))
+            }
+            primaryActionVariant={store.runtimeSnapshot?.active ? 'destructive' : 'success'}
+            onRefreshPeers={() => void run(() => store.refreshSigner())}
+            refreshPeersDisabled={!store.runtimeSnapshot?.active}
+            // Clearing the host-side log buffer requires an active session, so
+            // only expose the control while the signer is running.
+            onClearLogs={
+              store.runtimeSnapshot?.active ? () => void run(() => store.clearLogs()) : undefined
+            }
+          />
+        )}
 
-          {store.activeDashboardTab === 'permissions' ? (
-            <div role="tabpanel" id="operator-panel-permissions" aria-labelledby="operator-tab-permissions">
-              <OperatorPermissionsPanel
-                view={policyView}
-                showPeerSummary={false}
-                onRefresh={() => void run(() => store.refreshSigner())}
-                onClearAllPeerPermissions={() => void run(() => store.clearPeerPolicies())}
-                onPeerPolicyOverrideChange={(pubkey, direction, method, value) =>
-                  void run(() => store.updatePeerPolicy(pubkey, direction, method, value === 'allow'))
-                }
-                peerClearAllLabel="Remove Overrides"
-                peerDescription="Live outbound and inbound peer policy state for the active browser signer."
-                peerEmptyText={
-                  store.runtimeSnapshot?.active
-                    ? 'No peer policy state is currently available from the active runtime.'
-                    : 'Start the signer to inspect and edit live peer policy state.'
-                }
-              />
+        <OperatorSettingsSidebar
+          open={settingsSidebarOpen}
+          onClose={requestSettingsSidebarClose}
+          hasProfile={Boolean(selectedProfile)}
+          signerName={operatorSettingsDraft.signerName}
+          onSignerNameChange={(value) =>
+            setOperatorSettingsDraft((current) => ({ ...current, signerName: value }))
+          }
+          memberLabel={signerView?.memberLabel}
+          relays={operatorSettingsDraft.relays}
+          newRelayUrl={operatorSettingsDraft.newRelayUrl}
+          onNewRelayUrlChange={(value) =>
+            setOperatorSettingsDraft((current) => ({ ...current, newRelayUrl: value }))
+          }
+          onAddRelay={() =>
+            setOperatorSettingsDraft((current) => {
+              const normalized = current.newRelayUrl.trim();
+              if (!normalized || current.relays.includes(normalized)) return current;
+              return {
+                ...current,
+                relays: [...current.relays, normalized],
+                newRelayUrl: '',
+              };
+            })
+          }
+          onRemoveRelay={(relay) =>
+            setOperatorSettingsDraft((current) => ({
+              ...current,
+              relays: current.relays.filter((item) => item !== relay),
+            }))
+          }
+          profilePasswordAction={{
+            title: 'Profile Password',
+            description: 'Change the local password used to unlock this profile.',
+            actionLabel: 'Change',
+            testId: CRITICAL_E2E_TEST_IDS.settingsProfilePassword,
+            disabled: !selectedProfile,
+            onAction: () => {
+              setSettingsPasswordError(null);
+              setSettingsPasswordOpen(true);
+            },
+          }}
+          groupProfile={groupProfile}
+          signerSettings={operatorSettingsDraft.signerSettings}
+          onSignerSettingNumberChange={(field, value) =>
+            setOperatorSettingsDraft((current) => ({
+              ...current,
+              signerSettings: {
+                ...current.signerSettings,
+                [field]: Number.parseInt(value, 10) || current.signerSettings[field],
+              },
+            }))
+          }
+          onPeerSelectionStrategyChange={(value) =>
+            setOperatorSettingsDraft((current) => ({
+              ...current,
+              signerSettings: {
+                ...current.signerSettings,
+                peer_selection_strategy: value,
+              },
+            }))
+          }
+          onSave={() =>
+            void run(async () => {
+              await store.saveOperatorSettings({
+                label: operatorSettingsDraft.signerName,
+                relays: operatorSettingsDraft.relays,
+                signerSettings: operatorSettingsDraft.signerSettings,
+              });
+              setSettingsSidebarOpen(false);
+              store.setDashboardTab('signer');
+            })
+          }
+          showSaveControls={settingsDirty}
+          showAdvancedSettings={false}
+          saveDisabled={!selectedProfile || !store.runtimeSnapshot?.active || !settingsDirty}
+          message={
+            settingsDirty && !store.runtimeSnapshot?.active
+              ? 'Start the signer to apply settings live.'
+              : null
+          }
+          browserPreferences={
+            <div className="igloo-settings-grid">
+              <label className="igloo-toggle-row">
+                <input
+                  type="checkbox"
+                  checked={store.settings.remember_browser_state}
+                  onChange={(event) => store.updateSettings('remember_browser_state', event.target.checked)}
+                />
+                <span>
+                  <strong>Remember browser state</strong>
+                  <small>Persist profiles, drafts, and the last active workspace in this browser.</small>
+                </span>
+              </label>
+              <label className="igloo-toggle-row">
+                <input
+                  type="checkbox"
+                  data-testid={CRITICAL_E2E_TEST_IDS.settingsAutoOpenToggle}
+                  checked={store.settings.auto_open_signer}
+                  onChange={(event) => store.updateSettings('auto_open_signer', event.target.checked)}
+                />
+                <span>
+                  <strong>Open signer after import</strong>
+                  <small>Jump straight into the signer workspace after a successful setup action.</small>
+                </span>
+              </label>
+              <label className="igloo-toggle-row">
+                <input
+                  type="checkbox"
+                  checked={store.settings.prefer_install_prompt}
+                  onChange={(event) => store.updateSettings('prefer_install_prompt', event.target.checked)}
+                />
+                <span>
+                  <strong>Prefer install prompt</strong>
+                  <small>Keep the PWA install affordance visible when the browser makes it available.</small>
+                </span>
+              </label>
             </div>
-          ) : null}
-
-          {store.activeDashboardTab === 'settings' ? (
-            <div role="tabpanel" id="operator-panel-settings" aria-labelledby="operator-tab-settings">
-              <OperatorSettingsPanel
-                hasProfile={Boolean(selectedProfile)}
-                signerName={operatorSettingsDraft.signerName}
-                onSignerNameChange={(value) =>
-                  setOperatorSettingsDraft((current) => ({ ...current, signerName: value }))
-                }
-                relays={operatorSettingsDraft.relays}
-                newRelayUrl={operatorSettingsDraft.newRelayUrl}
-                onNewRelayUrlChange={(value) =>
-                  setOperatorSettingsDraft((current) => ({ ...current, newRelayUrl: value }))
-                }
-                onAddRelay={() =>
-                  setOperatorSettingsDraft((current) => {
-                    const normalized = current.newRelayUrl.trim();
-                    if (!normalized || current.relays.includes(normalized)) return current;
-                    return {
-                      ...current,
-                      relays: [...current.relays, normalized],
-                      newRelayUrl: '',
-                    };
-                  })
-                }
-                onRemoveRelay={(relay) =>
-                  setOperatorSettingsDraft((current) => ({
-                    ...current,
-                    relays: current.relays.filter((item) => item !== relay),
-                  }))
-                }
-                signerSettings={operatorSettingsDraft.signerSettings}
-                onSignerSettingNumberChange={(field, value) =>
-                  setOperatorSettingsDraft((current) => ({
-                    ...current,
-                    signerSettings: {
-                      ...current.signerSettings,
-                      [field]: Number.parseInt(value, 10) || current.signerSettings[field],
-                    },
-                  }))
-                }
-                onPeerSelectionStrategyChange={(value) =>
-                  setOperatorSettingsDraft((current) => ({
-                    ...current,
-                    signerSettings: {
-                      ...current.signerSettings,
-                      peer_selection_strategy: value,
-                    },
-                  }))
-                }
-                onSave={() =>
-                  void run(() =>
-                    store.saveOperatorSettings({
-                      label: operatorSettingsDraft.signerName,
-                      relays: operatorSettingsDraft.relays,
-                      signerSettings: operatorSettingsDraft.signerSettings,
-                    }),
-                  )
-                }
-                saveDisabled={!selectedProfile || !store.runtimeSnapshot?.active}
-                message={
-                  store.runtimeSnapshot?.active ? null : 'Start the signer to apply settings live.'
-                }
-                sections={[
-                  {
-                    title: 'Replace Share',
-                    description:
-                      "Import a bfonboard package to replace only this device's local share while keeping the same group public key and profile.",
-                    actionLabel: 'Replace Share',
-                    testId: CRITICAL_E2E_TEST_IDS.maintenanceRotateShare,
-                    variant: 'secondary',
-                    disabled: !selectedProfile,
-                    onAction: () =>
-                      void run(() => {
-                        store.startRotateKey();
-                      }),
-                  },
-                  {
-                    title: 'Export Profile',
-                    description: 'Encrypted backup of your share and configuration.',
-                    actionLabel: 'Export Profile',
-                    testId: CRITICAL_E2E_TEST_IDS.settingsCopyProfile,
-                    variant: 'secondary',
-                    disabled: !selectedProfile,
-                    onAction: () => openExportModal('bfprofile'),
-                  },
-                  {
-                    title: 'Export Share',
-                    description: 'Password-protected bfshare package.',
-                    actionLabel: 'Export Share',
-                    testId: CRITICAL_E2E_TEST_IDS.settingsCopyShare,
-                    variant: 'secondary',
-                    disabled: !selectedProfile,
-                    onAction: () => openExportModal('bfshare'),
-                  },
-                  {
-                    title: 'Logout',
-                    description: 'Return to the profile list to open another profile.',
-                    actionLabel: 'Logout',
-                    testId: CRITICAL_E2E_TEST_IDS.settingsLogout,
-                    variant: 'outline',
-                    disabled: !selectedProfile,
-                    onAction: () => void run(() => store.logout()),
-                  },
-                ]}
-                extraSections={
-                  <ContentCard
-                    title="Browser Settings"
-                    description="PWA-specific preferences for persistence, routing, and install prompting."
-                  >
-                    <div className="igloo-settings-grid">
-                      <label className="igloo-toggle-row">
-                        <input
-                          type="checkbox"
-                          checked={store.settings.remember_browser_state}
-                          onChange={(event) => store.updateSettings('remember_browser_state', event.target.checked)}
-                        />
-                        <span>
-                          <strong>Remember browser state</strong>
-                          <small>Persist profiles, drafts, and the last active workspace in this browser.</small>
-                        </span>
-                      </label>
-                      <label className="igloo-toggle-row">
-                        <input
-                          type="checkbox"
-                          data-testid={CRITICAL_E2E_TEST_IDS.settingsAutoOpenToggle}
-                          checked={store.settings.auto_open_signer}
-                          onChange={(event) => store.updateSettings('auto_open_signer', event.target.checked)}
-                        />
-                        <span>
-                          <strong>Open signer after import</strong>
-                          <small>Jump straight into the signer workspace after a successful setup action.</small>
-                        </span>
-                      </label>
-                      <label className="igloo-toggle-row">
-                        <input
-                          type="checkbox"
-                          checked={store.settings.prefer_install_prompt}
-                          onChange={(event) => store.updateSettings('prefer_install_prompt', event.target.checked)}
-                        />
-                        <span>
-                          <strong>Prefer install prompt</strong>
-                          <small>Keep the PWA install affordance visible when the browser makes it available.</small>
-                        </span>
-                      </label>
-                    </div>
-                  </ContentCard>
-                }
-              />
-            </div>
-          ) : null}
+          }
+          onboardAction={{
+            title: 'Onboard a Device',
+            description:
+              'Sponsor a new device to join this keyset with an encrypted bfonboard package.',
+            actionLabel: 'Onboard a Device',
+            testId: CRITICAL_E2E_TEST_IDS.settingsOnboardDevice,
+            disabled: !selectedProfile,
+            onAction: openSettingsOnboardDialog,
+          }}
+          replaceShareAction={{
+            title: 'Replace Share',
+            description:
+              "Import a bfonboard package to replace only this device's local share while keeping the same group public key and profile.",
+            actionLabel: 'Replace Share',
+            testId: CRITICAL_E2E_TEST_IDS.maintenanceRotateShare,
+            variant: 'secondary',
+            disabled: !selectedProfile,
+            onAction: openReplaceShareFlow,
+          }}
+          exportProfileAction={{
+            title: 'Export Profile',
+            description: 'Encrypted backup of your share and configuration',
+            actionLabel: 'Export',
+            testId: CRITICAL_E2E_TEST_IDS.settingsCopyProfile,
+            variant: 'secondary',
+            disabled: !selectedProfile,
+            onAction: () => {
+              setSettingsSidebarOpen(false);
+              openExportModal('bfprofile');
+            },
+          }}
+          exportShareAction={{
+            title: 'Export Share',
+            description: 'Password-protected bfshare package',
+            actionLabel: 'Export',
+            testId: CRITICAL_E2E_TEST_IDS.settingsCopyShare,
+            variant: 'secondary',
+            disabled: !selectedProfile,
+            onAction: () => {
+              setSettingsSidebarOpen(false);
+              openExportModal('bfshare');
+            },
+          }}
+          lockProfileAction={{
+            title: 'Logout',
+            description: 'Return to profile list to open another profile',
+            actionLabel: 'Logout',
+            testId: CRITICAL_E2E_TEST_IDS.settingsLogout,
+            variant: 'destructive',
+            disabled: !selectedProfile,
+            onAction: () => {
+              setSettingsSidebarOpen(false);
+              void run(() => store.logout());
+            },
+          }}
+          clearCredentialsAction={{
+            title: 'Clear Credentials',
+            description:
+              "Delete this device's saved profile, share, password, and relay configuration",
+            actionLabel: 'Clear',
+            testId: CRITICAL_E2E_TEST_IDS.settingsClearCredentials,
+            variant: 'destructive',
+            disabled: !selectedProfile,
+            onAction: () => setSettingsClearCredentialsOpen(true),
+          }}
+        />
       </div>
     );
   }
@@ -1707,19 +2137,100 @@ function AppShell() {
           void saveTextToFile(filename, value);
         }}
       />
-      <ConfirmDialog
-        open={Boolean(pendingSettingsNav)}
-        variant="warning"
-        title="Discard unsaved changes?"
-        message="You have unsaved changes in Settings. Close without saving?"
-        confirmLabel="Discard"
-        cancelLabel="Keep editing"
-        onConfirm={() => {
-          setOperatorSettingsDraft(buildOperatorSettingsDraft(selectedProfile));
-          if (pendingSettingsNav) store.setDashboardTab(pendingSettingsNav);
-          setPendingSettingsNav(null);
+      <ProfilePasswordChangeDialog
+        open={settingsPasswordOpen}
+        currentPassword={settingsPasswordCurrent}
+        nextPassword={settingsPasswordNext}
+        confirmPassword={settingsPasswordConfirm}
+        error={settingsPasswordError}
+        busy={settingsPasswordBusy}
+        onCurrentPasswordChange={(value) => {
+          setSettingsPasswordCurrent(value);
+          setSettingsPasswordError(null);
         }}
-        onCancel={() => setPendingSettingsNav(null)}
+        onNextPasswordChange={(value) => {
+          setSettingsPasswordNext(value);
+          setSettingsPasswordError(null);
+        }}
+        onConfirmPasswordChange={(value) => {
+          setSettingsPasswordConfirm(value);
+          setSettingsPasswordError(null);
+        }}
+        onSubmit={(event) => void submitSettingsPasswordChange(event)}
+        onCancel={closeSettingsPasswordDialog}
+        testIds={{
+          current: CRITICAL_E2E_TEST_IDS.settingsPasswordCurrent,
+          next: CRITICAL_E2E_TEST_IDS.settingsPasswordNext,
+          confirm: CRITICAL_E2E_TEST_IDS.settingsPasswordConfirm,
+          submit: CRITICAL_E2E_TEST_IDS.settingsPasswordSubmit,
+        }}
+      />
+      <OnboardDeviceSponsorDialog
+        open={settingsOnboardOpen}
+        draft={settingsOnboardDraft}
+        result={settingsOnboardResult}
+        error={settingsOnboardError}
+        busy={settingsOnboardBusy}
+        signerActive={Boolean(settingsOnboardSignerPubkey)}
+        onDraftChange={(field, value) => {
+          setSettingsOnboardDraft((current) => ({ ...current, [field]: value }));
+          setSettingsOnboardError(null);
+        }}
+        onCreatePackage={(event) => void submitSettingsOnboardPackage(event)}
+        onCopyPackage={settingsOnboardResult ? copySettingsOnboardPackage : undefined}
+        onSavePackage={settingsOnboardResult ? saveSettingsOnboardPackage : undefined}
+        onShowQrPackage={
+          settingsOnboardResult ? () => setSettingsOnboardQrOpen(true) : undefined
+        }
+        onCreateAnother={createAnotherSettingsOnboardPackage}
+        onClose={closeSettingsOnboardDialog}
+      />
+      <QrPayloadModal
+        open={Boolean(settingsOnboardResult && settingsOnboardQrOpen)}
+        onClose={() => setSettingsOnboardQrOpen(false)}
+        title="Onboarding Package"
+        payload={settingsOnboardResult?.packageText ?? ''}
+        label="Scan to import this bfonboard package on the new device"
+      />
+      <Modal
+        open={replaceShareQrOpen}
+        onClose={() => setReplaceShareQrOpen(false)}
+        title="Scan QR"
+        className="max-w-md"
+      >
+        <div className="igloo-stack">
+          <p className="text-sm text-igloo-muted">
+            QR scanning for replacement packages needs the camera scanner bridge. Paste the
+            bfonboard1 package directly for now.
+          </p>
+          <div className="igloo-button-row">
+            <Button type="button" onClick={() => setReplaceShareQrOpen(false)}>
+              Close
+            </Button>
+          </div>
+        </div>
+      </Modal>
+      <SettingsUnsavedChangesDialog
+        open={Boolean(pendingSettingsExit)}
+        onDiscard={discardSettingsSidebarChanges}
+        onKeepEditing={closeSettingsDiscardDialog}
+      />
+      <ClearCredentialsDialog
+        open={settingsClearCredentialsOpen}
+        profileSummary={clearCredentialsSummary}
+        onConfirm={() => {
+          const profileId = selectedProfile?.id;
+          setSettingsClearCredentialsOpen(false);
+          setSettingsSidebarOpen(false);
+          if (!profileId) return;
+          void run(async () => {
+            await store.logout();
+            store.deleteProfile(profileId);
+            store.setUnlockPassphrase('');
+            store.setActiveView('landing');
+          });
+        }}
+        onCancel={() => setSettingsClearCredentialsOpen(false)}
       />
       {store.activeView === 'landing' ? renderLanding() : null}
       {store.activeView === 'create-generate' ? renderCreateGenerate() : null}
@@ -1735,6 +2246,7 @@ function AppShell() {
       {store.activeView === 'onboard-save' ? renderOnboardSave() : null}
       {store.activeView === 'rotate-connect' ? renderRotateConnect() : null}
       {store.activeView === 'rotate-save' ? renderRotateSave() : null}
+      {store.activeView === 'rotate-complete' ? renderRotateComplete() : null}
       {store.activeView === 'recover-collect' ? renderRecoverCollect() : null}
       {store.activeView === 'recover-key' ? renderRecoverKey() : null}
       {store.activeView === 'dashboard' ? renderDashboard() : null}

@@ -95,7 +95,7 @@ type AppState = PwaPersistedState & {
   updateRotateConnectForm: (field: 'packageText', value: string) => void;
   updateRotateConnectPassword: (value: string) => void;
   connectRotationPackage: () => Promise<void>;
-  finalizeRotationUpdate: () => Promise<void>;
+  finalizeRotationUpdate: () => Promise<PwaProfile>;
   startRecoverKey: (profileId: string) => void;
   updateRecoverSource: (
     index: number,
@@ -111,6 +111,11 @@ type AppState = PwaPersistedState & {
     format: 'bfprofile' | 'bfshare',
     exportPassword: string,
   ) => Promise<string>;
+  changeProfilePassword: (
+    profileId: string,
+    currentPassword: string,
+    nextPassword: string,
+  ) => Promise<void>;
   deleteProfile: (profileId: string) => void;
   updatePeerPolicy: (
     pubkey: string,
@@ -374,6 +379,13 @@ function normalizeLoadedStateFromStorage(): PwaPersistedState {
   }
   if (loadedActiveView === 'load-error' && !normalized.pendingLoadError) {
     normalized.activeView = 'load-import';
+  }
+  if (loadedActiveView === 'rotate-save') {
+    normalized.activeView = 'rotate-connect';
+  }
+  if (loadedActiveView === 'rotate-complete') {
+    normalized.activeView = 'dashboard';
+    normalized.activeDashboardTab = 'signer';
   }
   if (
     (loadedActiveView === 'create-generate' ||
@@ -1581,10 +1593,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           connection.profile_payload &&
           groupPublicKeyFromPackage(connection.profile_payload.groupPackage) !== selectedProfile.group_public_key
         ) {
-          throw new Error('Rotation package does not match the selected profile group public key.');
+          throw new Error('Onboarding package does not match the selected profile group public key.');
         }
         if (connection.profile_payload?.profileId === selectedProfile.id) {
-          throw new Error('Rotation package did not produce a new device profile id.');
+          throw new Error('Onboarding package did not produce a replacement device profile id.');
         }
         setState((current) => ({
           ...current,
@@ -1600,7 +1612,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         // passphrase is the current in-memory unlock passphrase.
         const targetPassphrase = state.unlockPassphrase;
         if (!targetPassphrase.trim()) {
-          throw new Error('Target profile passphrase is required to rotate.');
+          throw new Error('Current device passphrase is required to replace this share.');
         }
         if (state.runtimeSnapshot?.active) {
           await adapter.stopSession(state.runtimeSnapshot, controller);
@@ -1638,6 +1650,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
             rotateConnectFormPassword: '',
           },
         }));
+        return profile;
       },
       async copyProfilePackage(profileId, format) {
         const profile = state.profiles.find((entry) => entry.id === profileId);
@@ -1665,6 +1678,28 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           exportPassword,
           format,
         });
+      },
+      async changeProfilePassword(profileId, currentPassword, nextPassword) {
+        const profile = state.profiles.find((entry) => entry.id === profileId);
+        if (!profile) {
+          throw new Error('Select a profile first.');
+        }
+        const updatedProfile = await adapter.changeProfilePassword({
+          profile,
+          currentPassword,
+          nextPassword,
+        });
+        setState((current) => ({
+          ...current,
+          profiles: current.profiles.map((entry) =>
+            entry.id === profileId ? updatedProfile : entry,
+          ),
+          runtimeSnapshot:
+            current.runtimeSnapshot?.profile?.id === profileId
+              ? { ...current.runtimeSnapshot, profile: updatedProfile }
+              : current.runtimeSnapshot,
+          unlockPassphrase: nextPassword,
+        }));
       },
       deleteProfile(profileId) {
         void adapter.disposeRuntimeSessionForProfile(profileId, controller);

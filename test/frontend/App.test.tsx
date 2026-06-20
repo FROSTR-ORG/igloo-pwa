@@ -1,8 +1,8 @@
 import * as React from 'react';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { sharePackageToWireJson } from 'igloo-shared';
+import { publicKeyFromSecret, sharePackageToWireJson } from 'igloo-shared';
 
 import App, { RecoverPrivateKeyView } from '@/App';
 import * as adapter from '@/lib/local-adapter';
@@ -36,6 +36,7 @@ function StoreHarness({ onReady }: { onReady: (store: ReturnType<typeof useStore
 }
 
 beforeEach(() => {
+  vi.restoreAllMocks();
   window.localStorage.clear();
   window.sessionStorage.clear();
   // Pin a fixed instance id so seeded blobs land in (and are read from) a
@@ -304,7 +305,7 @@ describe('igloo-pwa app shell', () => {
             group_public_key: '22'.repeat(32),
             relays: ['wss://relay.primal.net'],
             group_package_json:
-              '{"group_name":"Test Group","group_pk":"group-pub-1","threshold":2,"members":[]}',
+              '{"group_name":"Test Group","group_pk":"group-pub-1","threshold":2,"members":[{"idx":1},{"idx":2},{"idx":3}]}',
             member_idx: 1,
             source: 'bfprofile',
             relay_profile: 'browser',
@@ -498,7 +499,7 @@ describe('igloo-pwa app shell', () => {
             group_public_key: 'group-pub-1',
             relays: ['wss://relay.primal.net'],
             group_package_json:
-              '{"group_name":"Test Group","group_pk":"group-pub-1","threshold":2,"members":[]}',
+              '{"group_name":"Test Group","group_pk":"group-pub-1","threshold":2,"members":[{"idx":1},{"idx":2},{"idx":3}]}',
             member_idx: 1,
             source: 'bfprofile',
             relay_profile: 'browser',
@@ -506,6 +507,7 @@ describe('igloo-pwa app shell', () => {
             encrypted_profile_ref: 'encrypted-profile-ref',
             state_path: '/tmp/igloo-pwa/profile-77',
             created_at: 1700000000000,
+            updated_at: 1700086400000,
             encrypted_bfshare_artifact: 'bfshare1demo',
             profile_string: 'bfprofile1demo',
             share_string: 'bfshare1demo',
@@ -540,10 +542,18 @@ describe('igloo-pwa app shell', () => {
         },
       }),
     );
-    render(<App />);
-    const toggle = screen.getByLabelText(/Open signer after import/i) as HTMLInputElement;
-    expect(toggle.checked).toBe(true);
-    fireEvent.click(toggle);
+    let latestStore: ReturnType<typeof useStore> | undefined;
+    render(
+      <StoreProvider>
+        <StoreHarness onReady={(store) => (latestStore = store)} />
+      </StoreProvider>,
+    );
+
+    await waitFor(() => {
+      expect(latestStore?.settings.auto_open_signer).toBe(true);
+    });
+
+    latestStore?.updateSettings('auto_open_signer', false);
     await waitFor(
       () => {
         const stored = window.localStorage.getItem(partitionKeyFor());
@@ -553,7 +563,283 @@ describe('igloo-pwa app shell', () => {
     );
   });
 
-  it('shows the unified settings actions and no reset control', () => {
+  it('shows the unified settings actions and no reset control', async () => {
+    cleanup();
+    window.localStorage.setItem(
+      partitionKeyFor(),
+      JSON.stringify({
+        profiles: [
+          {
+            id: '77'.repeat(32),
+            label: 'Primary Browser Device',
+            share_public_key: 'share-pub-1',
+            group_public_key: 'group-pub-1',
+            relays: ['wss://relay.primal.net'],
+            group_package_json:
+              '{"group_name":"Test Group","group_pk":"group-pub-1","threshold":2,"members":[{"idx":1},{"idx":2},{"idx":3}]}',
+            member_idx: 1,
+            source: 'bfprofile',
+            relay_profile: 'browser',
+            group_ref: 'group-ref',
+            encrypted_profile_ref: 'encrypted-profile-ref',
+            state_path: '/tmp/igloo-pwa/profile-77',
+            created_at: 1700000000000,
+            updated_at: 1700086400000,
+            encrypted_bfshare_artifact: 'bfshare1demo',
+            profile_string: 'bfprofile1demo',
+            share_string: 'bfshare1demo',
+            signer_settings: {
+              sign_timeout_secs: 30,
+              ping_timeout_secs: 15,
+              request_ttl_secs: 300,
+              state_save_interval_secs: 30,
+              peer_selection_strategy: 'deterministic_sorted',
+            },
+            onboarding_package: null,
+          },
+        ],
+        selectedProfileId: '77'.repeat(32),
+        activeView: 'dashboard',
+        activeDashboardTab: 'settings',
+        settings: {
+          remember_browser_state: true,
+          auto_open_signer: true,
+          prefer_install_prompt: true,
+        },
+        drafts: {
+          createForm: { mode: 'new', groupName: '', threshold: '2', count: '3' },
+          rotationForm: { sourceProfileId: '', sources: [{ packageText: '' }] },
+          profileForm: { label: '', relayUrls: 'wss://relay.primal.net' },
+          distributionForms: {},
+          importProfileForm: { profileString: '' },
+          recoverProfileForm: { shareString: '' },
+          onboardConnectForm: { packageText: '' },
+          onboardSaveForm: { label: '' },
+          rotateConnectForm: { packageText: '' },
+        },
+      }),
+    );
+
+    render(<App />);
+
+    fireEvent.click(screen.getByTestId(CRITICAL_E2E_TEST_IDS.dashboardTabSettings));
+
+    expect(screen.getByTestId(CRITICAL_E2E_TEST_IDS.dashboardSettingsSidebar)).toBeInTheDocument();
+    expect(screen.getByTestId(CRITICAL_E2E_TEST_IDS.settingsProfilePassword)).toBeVisible();
+    expect(screen.getByTestId(CRITICAL_E2E_TEST_IDS.settingsOnboardDevice)).toBeVisible();
+    expect(screen.getByText('2 of 3')).toBeVisible();
+    expect(screen.getByText('Updated')).toBeVisible();
+    expect(screen.getByText('Nov 15, 2023')).toBeVisible();
+    expect(screen.getByTestId(CRITICAL_E2E_TEST_IDS.settingsCopyProfile)).toBeVisible();
+    expect(screen.getByText('Encrypted backup of your share and configuration')).toBeVisible();
+    expect(screen.getByTestId(CRITICAL_E2E_TEST_IDS.settingsCopyShare)).toBeVisible();
+    expect(screen.getByText('Password-protected bfshare package')).toBeVisible();
+    expect(screen.getByTestId(CRITICAL_E2E_TEST_IDS.maintenanceRotateShare)).toBeVisible();
+    expect(screen.getByTestId(CRITICAL_E2E_TEST_IDS.settingsLogout)).toBeVisible();
+    expect(screen.getByRole('heading', { name: 'Logout' })).toBeVisible();
+    expect(screen.getByText('Return to profile list to open another profile')).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Logout' })).toBeVisible();
+    expect(screen.getByTestId(CRITICAL_E2E_TEST_IDS.settingsClearCredentials)).toBeVisible();
+    expect(
+      screen.getByText("Delete this device's saved profile, share, password, and relay configuration"),
+    ).toBeVisible();
+    expect(screen.getByTestId(CRITICAL_E2E_TEST_IDS.settingsOnboardDevice)).toBeEnabled();
+    expect(screen.queryByRole('button', { name: 'Save Changes' })).not.toBeInTheDocument();
+    expect(screen.queryByText('Start the signer to apply settings live.')).not.toBeInTheDocument();
+    expect(screen.queryByText('Advanced')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /reset browser workspace/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /wipe/i })).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText('Profile Name'), { target: { value: 'Renamed Browser Device' } });
+    expect(screen.getByText('Start the signer to apply settings live.')).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Save Changes' })).toBeDisabled();
+
+    fireEvent.click(screen.getByTestId(CRITICAL_E2E_TEST_IDS.dashboardTabSigner));
+    const unsavedDialog = screen.getByRole('dialog', { name: 'Discard unsaved changes?' });
+    expect(unsavedDialog).toBeInTheDocument();
+    expect(within(unsavedDialog).getByText('You have unsaved changes in Settings. Close without saving?')).toBeVisible();
+    fireEvent.click(within(unsavedDialog).getByRole('button', { name: 'Keep editing' }));
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: 'Discard unsaved changes?' })).not.toBeInTheDocument(),
+    );
+
+    fireEvent.click(screen.getByTestId(CRITICAL_E2E_TEST_IDS.settingsOnboardDevice));
+    const onboardDialog = screen.getByRole('dialog', { name: 'Onboard a Device' });
+    expect(onboardDialog).toBeInTheDocument();
+    expect(within(onboardDialog).getByRole('heading', { name: 'Configure Device' })).toBeVisible();
+    expect(within(onboardDialog).getByText(/remote-member bfshare/i)).toBeVisible();
+    expect(within(onboardDialog).queryByText(/Start the signer before creating the package/i)).not.toBeInTheDocument();
+    expect(within(onboardDialog).getByTestId(CRITICAL_E2E_TEST_IDS.settingsOnboardSourcePackage)).toBeVisible();
+    expect(within(onboardDialog).getByTestId(CRITICAL_E2E_TEST_IDS.settingsOnboardCreate)).toBeDisabled();
+    expect(within(onboardDialog).queryByRole('heading', { name: 'Package Producer Required' })).not.toBeInTheDocument();
+    fireEvent.click(within(onboardDialog).getByRole('button', { name: 'Cancel' }));
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: 'Onboard a Device' })).not.toBeInTheDocument(),
+    );
+
+    fireEvent.click(screen.getByTestId(CRITICAL_E2E_TEST_IDS.settingsProfilePassword));
+    expect(screen.getByRole('dialog', { name: 'Change Profile Password' })).toBeInTheDocument();
+    const changePasswordSpy = vi
+      .spyOn(adapter, 'changeProfilePassword')
+      .mockImplementationOnce(async ({ profile }) => ({
+        ...profile,
+        profile_string: 'bfprofile1changed',
+        share_string: 'bfshare1changed',
+        encrypted_bfshare_artifact: 'bfshare1changed',
+      }));
+    fireEvent.change(screen.getByTestId(CRITICAL_E2E_TEST_IDS.settingsPasswordCurrent), {
+      target: { value: 'current-pass' },
+    });
+    fireEvent.change(screen.getByTestId(CRITICAL_E2E_TEST_IDS.settingsPasswordNext), {
+      target: { value: 'next-pass' },
+    });
+    fireEvent.change(screen.getByTestId(CRITICAL_E2E_TEST_IDS.settingsPasswordConfirm), {
+      target: { value: 'next-pass' },
+    });
+    fireEvent.click(screen.getByTestId(CRITICAL_E2E_TEST_IDS.settingsPasswordSubmit));
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: 'Change Profile Password' })).not.toBeInTheDocument(),
+    );
+    expect(changePasswordSpy).toHaveBeenCalledWith({
+      profile: expect.objectContaining({ id: '77'.repeat(32), profile_string: 'bfprofile1demo' }),
+      currentPassword: 'current-pass',
+      nextPassword: 'next-pass',
+    });
+    changePasswordSpy.mockRestore();
+
+    fireEvent.click(screen.getByTestId(CRITICAL_E2E_TEST_IDS.settingsClearCredentials));
+    const clearDialog = screen.getByRole('dialog', { name: 'Clear Credentials' });
+    expect(clearDialog).toBeInTheDocument();
+    expect(within(clearDialog).getByText(/This action cannot be undone/i)).toBeVisible();
+    expect(within(clearDialog).getByText('Test Group · Share #1 · Primary Browser Device')).toBeVisible();
+    expect(within(clearDialog).getByRole('button', { name: 'Clear Credentials' })).toBeVisible();
+  });
+
+  it('creates a Settings onboarding package from an explicit bfshare while signer is running', async () => {
+    cleanup();
+    const sourceSharePublicKey = publicKeyFromSecret('11'.repeat(32));
+    const localSharePublicKey = publicKeyFromSecret('22'.repeat(32));
+    const profile: PwaProfile = {
+      id: '77'.repeat(32),
+      label: 'Primary Browser Device',
+      share_public_key: localSharePublicKey,
+      group_public_key: '22'.repeat(32),
+      relays: ['wss://relay.primal.net'],
+      group_package_json: JSON.stringify({
+        group_name: 'Test Group',
+        group_pk: '22'.repeat(32),
+        threshold: 2,
+        members: [
+          { idx: 1, pubkey: `02${localSharePublicKey}` },
+          { idx: 2, pubkey: `02${sourceSharePublicKey}` },
+        ],
+      }),
+      member_idx: 1,
+      source: 'bfprofile',
+      relay_profile: 'browser',
+      group_ref: 'group-ref',
+      encrypted_profile_ref: 'encrypted-profile-ref',
+      state_path: '/tmp/igloo-pwa/profile-77',
+      created_at: 1700000000000,
+      updated_at: 1700086400000,
+      encrypted_bfshare_artifact: 'bfshare1demo',
+      profile_string: 'bfprofile1demo',
+      share_string: 'bfshare1demo',
+      signer_settings: {
+        sign_timeout_secs: 30,
+        ping_timeout_secs: 15,
+        request_ttl_secs: 300,
+        state_save_interval_secs: 30,
+        peer_selection_strategy: 'deterministic_sorted',
+      },
+      onboarding_package: null,
+    };
+    window.localStorage.setItem(
+      partitionKeyFor(),
+      JSON.stringify({
+        profiles: [profile],
+        selectedProfileId: profile.id,
+        activeView: 'landing',
+        activeDashboardTab: 'signer',
+        peerPermissionStates: [],
+        settings: {
+          remember_browser_state: true,
+          auto_open_signer: true,
+          prefer_install_prompt: true,
+        },
+        drafts: {
+          createForm: { mode: 'new', groupName: '', threshold: '2', count: '3' },
+          rotationForm: { sourceProfileId: '', sources: [{ packageText: '' }] },
+          profileForm: { label: '', relayUrls: 'wss://relay.primal.net' },
+          distributionForms: {},
+          importProfileForm: { profileString: '' },
+          recoverProfileForm: { shareString: '' },
+          onboardConnectForm: { packageText: '' },
+          onboardSaveForm: { label: '' },
+          rotateConnectForm: { packageText: '' },
+        },
+      }),
+    );
+    const startSessionSpy = vi.spyOn(adapter, 'startSession').mockResolvedValueOnce({
+      active: true,
+      profile,
+      runtime_status: null,
+      readiness: null,
+      peer_permission_states: [],
+      events: [],
+      runtime_log_lines: ['[info] attached live browser signer session'],
+      runtime_host: {
+        profile_id: profile.id,
+        mode: 'browser',
+        log_source: 'In-memory session logs',
+        started_at: 1700000000,
+        signer_pubkey: 'aa'.repeat(32),
+      },
+    });
+
+    render(<App />);
+
+    fireEvent.click(screen.getByTestId(CRITICAL_E2E_TEST_IDS.welcomeProfileUnlock));
+    fireEvent.change(screen.getByTestId(CRITICAL_E2E_TEST_IDS.welcomeUnlockPassword), {
+      target: { value: 'current-device-pass' },
+    });
+    fireEvent.click(screen.getByTestId(CRITICAL_E2E_TEST_IDS.welcomeUnlockSubmit));
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Stop Signer' })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId(CRITICAL_E2E_TEST_IDS.dashboardTabSettings));
+    fireEvent.click(screen.getByTestId(CRITICAL_E2E_TEST_IDS.settingsOnboardDevice));
+
+    const onboardDialog = screen.getByRole('dialog', { name: 'Onboard a Device' });
+    fireEvent.change(within(onboardDialog).getByTestId(CRITICAL_E2E_TEST_IDS.settingsOnboardDeviceLabel), {
+      target: { value: 'Remote Device' },
+    });
+    fireEvent.change(within(onboardDialog).getByTestId(CRITICAL_E2E_TEST_IDS.settingsOnboardSourcePackage), {
+      target: { value: 'bfshare1remote' },
+    });
+    fireEvent.change(within(onboardDialog).getByTestId(CRITICAL_E2E_TEST_IDS.settingsOnboardSourcePassword), {
+      target: { value: 'source-pass' },
+    });
+    fireEvent.change(within(onboardDialog).getByTestId(CRITICAL_E2E_TEST_IDS.settingsOnboardPackagePassword), {
+      target: { value: 'package-pass' },
+    });
+    fireEvent.change(within(onboardDialog).getByTestId(CRITICAL_E2E_TEST_IDS.settingsOnboardPackageConfirm), {
+      target: { value: 'package-pass' },
+    });
+    fireEvent.click(within(onboardDialog).getByTestId(CRITICAL_E2E_TEST_IDS.settingsOnboardCreate));
+
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: 'Package Handoff' })).toBeInTheDocument();
+    });
+    expect(screen.getByDisplayValue('bfonboard1test')).toBeInTheDocument();
+    expect(screen.getByText('Share #2')).toBeInTheDocument();
+    expect(screen.getByText(sourceSharePublicKey)).toBeInTheDocument();
+
+    startSessionSpy.mockRestore();
+  });
+
+  it('launches the Settings Replace Share flow with Paper terminology', () => {
     cleanup();
     window.localStorage.setItem(
       partitionKeyFor(),
@@ -611,12 +897,233 @@ describe('igloo-pwa app shell', () => {
 
     render(<App />);
 
-    expect(screen.getAllByRole('button', { name: 'Export Profile' }).length).toBeGreaterThan(0);
-    expect(screen.getAllByRole('button', { name: 'Export Share' }).length).toBeGreaterThan(0);
-    expect(screen.getAllByRole('button', { name: 'Replace Share' }).length).toBeGreaterThan(0);
-    expect(screen.getAllByRole('button', { name: 'Logout' }).length).toBeGreaterThan(0);
-    expect(screen.queryByRole('button', { name: /reset browser workspace/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /wipe/i })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId(CRITICAL_E2E_TEST_IDS.dashboardTabSettings));
+    fireEvent.click(screen.getByTestId(CRITICAL_E2E_TEST_IDS.maintenanceRotateShare));
+
+    expect(screen.getByRole('heading', { name: 'Enter Onboarding Package' })).toBeInTheDocument();
+    expect(screen.getByText(/replace this device's local share/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Scan QR' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Replace Share' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Rotate Key' })).not.toBeInTheDocument();
+    expect(screen.queryByText(/Connect Rotated bfonboard/i)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Scan QR' }));
+    expect(screen.getByRole('dialog', { name: 'Scan QR' })).toBeInTheDocument();
+  });
+
+  it('shows the Paper applying replacement state after a replacement package connects', async () => {
+    cleanup();
+    window.localStorage.setItem(
+      partitionKeyFor(),
+      JSON.stringify({
+        profiles: [
+          {
+            id: '77'.repeat(32),
+            label: 'Primary Browser Device',
+            share_public_key: 'share-pub-1',
+            group_public_key: 'group-pub-1',
+            relays: ['wss://relay.primal.net'],
+            group_package_json:
+              '{"group_name":"Test Group","group_pk":"group-pub-1","threshold":2,"members":[]}',
+            member_idx: 1,
+            source: 'bfprofile',
+            relay_profile: 'browser',
+            group_ref: 'group-ref',
+            encrypted_profile_ref: 'encrypted-profile-ref',
+            state_path: '/tmp/igloo-pwa/profile-77',
+            created_at: 1700000000000,
+            encrypted_bfshare_artifact: 'bfshare1demo',
+            profile_string: 'bfprofile1demo',
+            share_string: 'bfshare1demo',
+            signer_settings: {
+              sign_timeout_secs: 30,
+              ping_timeout_secs: 15,
+              request_ttl_secs: 300,
+              state_save_interval_secs: 30,
+              peer_selection_strategy: 'deterministic_sorted',
+            },
+            onboarding_package: null,
+          },
+        ],
+        selectedProfileId: '77'.repeat(32),
+        activeView: 'landing',
+        activeDashboardTab: 'signer',
+        settings: {
+          remember_browser_state: true,
+          auto_open_signer: true,
+          prefer_install_prompt: true,
+        },
+        drafts: {
+          createForm: { mode: 'new', groupName: '', threshold: '2', count: '3' },
+          rotationForm: { sourceProfileId: '', sources: [{ packageText: '' }] },
+          profileForm: { label: '', relayUrls: 'wss://relay.primal.net' },
+          distributionForms: {},
+          importProfileForm: { profileString: '' },
+          recoverProfileForm: { shareString: '' },
+          onboardConnectForm: { packageText: '' },
+          onboardSaveForm: { label: '' },
+          rotateConnectForm: { packageText: '' },
+        },
+      }),
+    );
+    type FinalizedRotationProfile = Awaited<ReturnType<typeof adapter.finalizeRotationUpdateFromConnection>>;
+    const updatedProfile: FinalizedRotationProfile = {
+      id: '88'.repeat(32),
+      label: 'Replacement Device',
+      share_public_key: 'replacement-share-pub',
+      group_public_key: 'group-pub-1',
+      relays: ['wss://relay.primal.net'],
+      group_package_json:
+        '{"group_name":"Test Group","group_pk":"group-pub-1","threshold":2,"members":[]}',
+      member_idx: 1,
+      source: 'bfonboard',
+      relay_profile: 'browser',
+      group_ref: 'group-ref',
+      encrypted_profile_ref: 'encrypted-profile-ref',
+      state_path: '/tmp/igloo-pwa/profile-88',
+      created_at: 1700000000000,
+      updated_at: 1700000001,
+      encrypted_bfshare_artifact: 'bfshare1replacement',
+      profile_string: 'bfprofile1replacement',
+      share_string: 'bfshare1replacement',
+      signer_settings: {
+        sign_timeout_secs: 30,
+        ping_timeout_secs: 15,
+        request_ttl_secs: 300,
+        state_save_interval_secs: 30,
+        peer_selection_strategy: 'deterministic_sorted',
+      },
+      onboarding_package: null,
+    };
+    let resolveFinalize: (value: FinalizedRotationProfile) => void = () => {};
+    const finalizePromise = new Promise<FinalizedRotationProfile>((resolve) => {
+      resolveFinalize = resolve;
+    });
+    const connectSpy = vi.spyOn(adapter, 'connectOnboardingPackage').mockResolvedValueOnce({
+      preview: {
+        label: 'Replacement Device',
+        share_public_key: 'replacement-share-pub',
+        group_public_key: 'group-pub-1',
+        relays: ['wss://relay.primal.net'],
+        group_package_json:
+          '{"group_name":"Test Group","group_pk":"group-pub-1","threshold":2,"members":[]}',
+        share_package_json: '{"idx":1}',
+        source: 'bfonboard',
+      },
+      passphrase: 'package-pass',
+      package_text: 'bfonboard1demo-package',
+      profile_string: 'bfprofile1replacement',
+      share_string: 'bfshare1replacement',
+      manual_peer_policy_overrides: [],
+      peer_pubkey: null,
+      runtime_snapshot_json: null,
+    });
+    const finalizeSpy = vi.spyOn(adapter, 'finalizeRotationUpdateFromConnection').mockReturnValueOnce(finalizePromise);
+    const startSessionSpy = vi
+      .spyOn(adapter, 'startSession')
+      .mockResolvedValueOnce({
+        active: true,
+        profile: {
+          id: '77'.repeat(32),
+          label: 'Primary Browser Device',
+          share_public_key: 'share-pub-1',
+          group_public_key: 'group-pub-1',
+          relays: ['wss://relay.primal.net'],
+          group_package_json:
+            '{"group_name":"Test Group","group_pk":"group-pub-1","threshold":2,"members":[]}',
+          member_idx: 1,
+          source: 'bfprofile',
+          relay_profile: 'browser',
+          group_ref: 'group-ref',
+          encrypted_profile_ref: 'encrypted-profile-ref',
+          state_path: '/tmp/igloo-pwa/profile-77',
+          created_at: 1700000000000,
+          encrypted_bfshare_artifact: 'bfshare1demo',
+          profile_string: 'bfprofile1demo',
+          share_string: 'bfshare1demo',
+          signer_settings: {
+            sign_timeout_secs: 30,
+            ping_timeout_secs: 15,
+            request_ttl_secs: 300,
+            state_save_interval_secs: 30,
+            peer_selection_strategy: 'deterministic_sorted',
+          },
+          onboarding_package: null,
+        },
+        runtime_status: null,
+        readiness: null,
+        runtime_log_lines: [],
+        runtime_host: null,
+      })
+      .mockResolvedValueOnce({
+        active: true,
+        profile: updatedProfile,
+        runtime_status: null,
+        readiness: null,
+        runtime_log_lines: [],
+        runtime_host: null,
+      });
+
+    render(<App />);
+
+    fireEvent.click(screen.getByTestId(CRITICAL_E2E_TEST_IDS.welcomeProfileUnlock));
+    fireEvent.change(screen.getByTestId(CRITICAL_E2E_TEST_IDS.welcomeUnlockPassword), {
+      target: { value: 'current-device-pass' },
+    });
+    fireEvent.click(screen.getByTestId(CRITICAL_E2E_TEST_IDS.welcomeUnlockSubmit));
+
+    await waitFor(() => {
+      expect(screen.getByTestId(CRITICAL_E2E_TEST_IDS.dashboardTabSettings)).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByTestId(CRITICAL_E2E_TEST_IDS.dashboardTabSettings));
+    fireEvent.click(screen.getByTestId(CRITICAL_E2E_TEST_IDS.maintenanceRotateShare));
+    fireEvent.change(screen.getByTestId(CRITICAL_E2E_TEST_IDS.rotationPackageInput), {
+      target: { value: 'bfonboard1demo-package' },
+    });
+    fireEvent.change(screen.getByTestId(CRITICAL_E2E_TEST_IDS.rotationPasswordInput), {
+      target: { value: 'package-pass' },
+    });
+    fireEvent.click(screen.getByTestId(CRITICAL_E2E_TEST_IDS.rotationConnectSubmit));
+
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: 'Applying Replacement' })).toBeInTheDocument();
+    });
+    expect(screen.getByText('Validated package')).toBeInTheDocument();
+    expect(screen.getByText('Matched Group Profile')).toBeInTheDocument();
+    expect(screen.getByText('Replacing local share')).toBeInTheDocument();
+    expect(screen.getByText('Saving updated local share')).toBeInTheDocument();
+    expect(screen.queryByTestId(CRITICAL_E2E_TEST_IDS.rotationConfirmSubmit)).not.toBeInTheDocument();
+    expect(connectSpy).toHaveBeenCalledWith({
+      packageText: 'bfonboard1demo-package',
+      password: 'package-pass',
+    });
+    expect(finalizeSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        targetPassphrase: 'current-device-pass',
+      }),
+    );
+
+    resolveFinalize(updatedProfile);
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: 'Share Replaced' })).toBeInTheDocument();
+    });
+    expect(screen.getByText('Replacement share is active on this device')).toBeInTheDocument();
+    expect(startSessionSpy).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ id: '77'.repeat(32) }),
+      'current-device-pass',
+      expect.anything(),
+    );
+    expect(startSessionSpy).toHaveBeenNthCalledWith(
+      2,
+      updatedProfile,
+      'package-pass',
+      expect.anything(),
+    );
+
+    connectSpy.mockRestore();
+    finalizeSpy.mockRestore();
+    startSessionSpy.mockRestore();
   });
 });
 
@@ -690,6 +1197,7 @@ describe('toPersistable allow-list (D.1)', () => {
       encrypted_profile_ref: 'encrypted-profile-ref',
       state_path: '/tmp/profile',
       created_at: 1700000000,
+      updated_at: 1700000100,
       encrypted_bfshare_artifact: 'bfshare1valid',
       profile_string: 'bfprofile1valid',
       share_string: 'bfshare1valid',
@@ -791,6 +1299,7 @@ describe('toPersistable allow-list (D.1)', () => {
     const [persistedProfile] = toPersistable(state).profiles;
     expect(persistedProfile.id).toBe(state.profiles[0].id);
     expect(persistedProfile.encrypted_bfshare_artifact).toBe('bfshare1valid');
+    expect(persistedProfile.updated_at).toBe(1700000100);
     expect(persistedProfile.member_idx).toBe(1);
     expect(persistedProfile.signer_settings.sign_timeout_secs).toBe(30);
     // PR16b: `share_package_json` is no longer on the persistable

@@ -27,6 +27,7 @@ const PROFILE_ALLOWED_KEYS = [
   'id',
   'label',
   'created_at',
+  'updated_at',
   'relay_profile',
   'state_path',
   'group_ref',

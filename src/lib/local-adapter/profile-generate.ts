@@ -1,14 +1,15 @@
 import {
   buildRotationDraftFromBfshares,
-  encodeBfOnboardPackage,
+  createBrowserOnboardSponsorshipPackage,
+  createBrowserOnboardSponsorshipPackageFromBfshare,
   getWasmKeysetApi,
+  groupPackageFromWireJson,
   groupPackageToWireJson,
   normalizeHex32,
   publicKeyFromSecret,
   recoverRotationSourceFromBfshare,
   recoverSecretKeyFromShares,
   sharePackageToWireJson,
-  type BrowserOnboardPackagePayload,
 } from 'igloo-shared';
 import { nip19 } from 'nostr-tools';
 
@@ -20,11 +21,11 @@ import type {
 import {
   createStoredProfileFromPayload,
   normalizeRelayUrls,
-  parseJsonObject,
   profilePayloadFromGeneratedShare,
   type DistributionPackageInput,
   type GeneratedKeysetInput,
   type GeneratedProfileInput,
+  normalizeRelayList,
 } from './common';
 
 
@@ -175,28 +176,61 @@ export async function createOnboardingPackageForShare(input: DistributionPackage
     throw new Error('At least one relay is required.');
   }
 
-  const shareJson = parseJsonObject(share.share_package_json, 'share package JSON');
-  const shareSecret = normalizeHex32(
-    typeof shareJson.seckey === 'string' ? shareJson.seckey : '',
-    'share secret',
-  );
-
-  const payload: BrowserOnboardPackagePayload = {
-    shareSecret,
+  const payload = await profilePayloadFromGeneratedShare(
+    input.keyset,
+    input.shareMemberIdx,
+    input.label,
     relays,
-    peerPubkey: normalizeHex32(input.signerPubkey, 'peer pubkey'),
-  };
+  );
+  const sponsored = await createBrowserOnboardSponsorshipPackage({
+    label: input.label,
+    groupPackage: payload.groupPackage,
+    memberIdx: input.shareMemberIdx,
+    shareSecret: payload.device.shareSecret,
+    relays,
+    peerPubkey: input.signerPubkey,
+    password: input.password,
+  });
 
+  const { share_package_json: _secretSharePackageJson, ...publicPreview } = sponsored.preview;
   return {
-    package_text: await encodeBfOnboardPackage(payload, input.password),
+    package_text: sponsored.packageText,
     preview: {
-      label: input.label.trim(),
-      share_public_key: share.share_public_key,
-      group_public_key: input.keyset.group_public_key,
-      relays,
-      group_package_json: input.keyset.group_package_json,
-      member_idx: share.member_idx,
-      source: 'bfonboard',
+      ...publicPreview,
+      member_idx: sponsored.memberIdx,
+    } satisfies PwaProfilePreview,
+  };
+}
+
+export async function createSettingsOnboardingPackageFromBfshare(input: {
+  profile: PwaProfile;
+  label: string;
+  sourcePackageText: string;
+  sourcePackagePassword: string;
+  password: string;
+  signerPubkey: string;
+}) {
+  const relays = normalizeRelayList(input.profile.relays);
+  if (!relays.length) {
+    throw new Error('At least one relay is required.');
+  }
+
+  const sponsored = await createBrowserOnboardSponsorshipPackageFromBfshare({
+    label: input.label,
+    groupPackage: groupPackageFromWireJson(input.profile.group_package_json),
+    sourcePackageText: input.sourcePackageText,
+    sourcePackagePassword: input.sourcePackagePassword,
+    relays,
+    peerPubkey: input.signerPubkey,
+    password: input.password,
+  });
+
+  const { share_package_json: _secretSharePackageJson, ...publicPreview } = sponsored.preview;
+  return {
+    package_text: sponsored.packageText,
+    preview: {
+      ...publicPreview,
+      member_idx: sponsored.memberIdx,
     } satisfies PwaProfilePreview,
   };
 }

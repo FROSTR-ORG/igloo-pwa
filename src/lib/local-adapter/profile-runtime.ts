@@ -10,6 +10,7 @@ import type { BrowserRuntimeSession } from '../page-runtime-host';
 import {
   normalizePwaSignerSettings,
   normalizeRelayList,
+  now,
   toRuntimeProfile,
   toRuntimeSnapshot,
   type OperatorSettingsInput,
@@ -378,6 +379,7 @@ export async function applyOperatorSettings(
     label: input.label.trim() || profile.label,
     relays,
     signer_settings: normalizePwaSignerSettings(input.signerSettings),
+    updated_at: now(),
   };
 
   const previousRelays = profile.relays.join('\n');

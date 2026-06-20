@@ -25,6 +25,7 @@ export type PwaView =
   | 'onboard-save'
   | 'rotate-connect'
   | 'rotate-save'
+  | 'rotate-complete'
   | 'recover-collect'
   | 'recover-key'
   | 'dashboard'
@@ -100,6 +101,7 @@ export type PwaProfile = PwaProfilePreview & {
   encrypted_profile_ref: string;
   state_path: string;
   created_at: number;
+  updated_at?: number;
   /**
    * Password-encrypted bfshare1 bech32m artifact. Produced by
    * `encode_bfshare_package` (WASM). Decrypting it with the user's

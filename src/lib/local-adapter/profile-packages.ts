@@ -1,4 +1,5 @@
 import {
+  changeBrowserProfilePackagePassword,
   createBrowserOnboardingConnection,
   createProfilePackagePair,
   decodeBfProfilePackage,
@@ -15,6 +16,7 @@ import type {
 } from '../types';
 import {
   createStoredProfileFromPayload,
+  now,
   toPwaProfile,
   type LoadInput,
   type OnboardConnectInput,
@@ -102,6 +104,8 @@ export async function finalizeRotationUpdateFromConnection(input: {
   const next = toPwaProfile(finalized);
   return {
     ...next,
+    created_at: input.targetProfile.created_at,
+    updated_at: now(),
     signer_settings: input.targetProfile.signer_settings,
     relay_profile: input.targetProfile.relay_profile,
   } satisfies PwaProfile;
@@ -177,4 +181,27 @@ export async function exportEncryptedPackage(input: {
   const payload = await decodeBfProfilePackage(input.profileString, input.storedPassword);
   const pair = await createProfilePackagePair(payload, input.exportPassword);
   return input.format === 'bfprofile' ? pair.profileString : pair.shareString;
+}
+
+export async function changeProfilePassword(input: {
+  profile: PwaProfile;
+  currentPassword: string;
+  nextPassword: string;
+}): Promise<PwaProfile> {
+  const changed = await changeBrowserProfilePackagePassword({
+    profileString: input.profile.profile_string,
+    currentPassword: input.currentPassword,
+    nextPassword: input.nextPassword,
+    label: input.profile.label,
+    relays: input.profile.relays,
+    manualPeerPolicyOverrides: input.profile.manual_peer_policy_overrides ?? null,
+  });
+
+  return {
+    ...input.profile,
+    profile_string: changed.profileString,
+    share_string: changed.shareString,
+    encrypted_bfshare_artifact: changed.shareString,
+    updated_at: now(),
+  };
 }

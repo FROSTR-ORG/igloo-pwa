@@ -155,6 +155,7 @@ export function toPwaProfile(finalized: Awaited<ReturnType<typeof createFinalize
   // in-memory `sharePackageJsonByProfileId` map populated at session
   // start (see `startSession`).
   const { share_package_json: sharePackageJson, ...publicPreview } = finalized.preview;
+  const createdAt = now();
   return {
     ...publicPreview,
     member_idx: memberIdxFromSharePackageJson(sharePackageJson),
@@ -163,7 +164,8 @@ export function toPwaProfile(finalized: Awaited<ReturnType<typeof createFinalize
     group_ref: finalized.artifactRefs.groupRef,
     encrypted_profile_ref: finalized.artifactRefs.encryptedProfileRef,
     state_path: finalized.artifactRefs.statePath,
-    created_at: now(),
+    created_at: createdAt,
+    updated_at: createdAt,
     // `shareString` is the bfshare1 bech32m artifact produced by the
     // WASM `encode_bfshare_package` call — already password-encrypted.
     // We surface it as `encrypted_bfshare_artifact` so the session-start

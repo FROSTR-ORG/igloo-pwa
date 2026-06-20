@@ -48,14 +48,15 @@ describe('deriveMemberLabel', () => {
 
 describe('deriveGroupSummary', () => {
   it('reads the keyset name and member count from the group package json', () => {
-    const json = JSON.stringify({ group_name: 'Treasury', members: [{}, {}, {}] });
-    expect(deriveGroupSummary(json)).toEqual({ keysetName: 'Treasury', memberCount: 3 });
+    const json = JSON.stringify({ group_name: 'Treasury', threshold: 2, members: [{}, {}, {}] });
+    expect(deriveGroupSummary(json)).toEqual({ keysetName: 'Treasury', threshold: 2, memberCount: 3 });
   });
 
   it('degrades to empty fields for malformed json or missing/typed-wrong fields', () => {
     expect(deriveGroupSummary('not json')).toEqual({});
-    expect(deriveGroupSummary(JSON.stringify({ group_name: 5, members: 'nope' }))).toEqual({
+    expect(deriveGroupSummary(JSON.stringify({ group_name: 5, threshold: 'two', members: 'nope' }))).toEqual({
       keysetName: undefined,
+      threshold: undefined,
       memberCount: undefined,
     });
   });
