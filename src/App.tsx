@@ -334,7 +334,10 @@ export function RecoverPrivateKeyView({
     : null;
   const fieldLabel = encrypt ? 'Encrypted Key (ncryptsec)' : 'Recovered NSEC';
   const displayValue = exportValue ?? recovered.nsec;
-  const masked = `${displayValue.slice(0, 10)}${'•'.repeat(32)}`;
+  // Show only the bech32 HRP (e.g. `nsec1` / `ncryptsec1`) when masked — never any
+  // key data — so the recovered key is not partially exposed before an explicit reveal.
+  const hrpEnd = displayValue.indexOf('1');
+  const masked = `${hrpEnd >= 0 ? displayValue.slice(0, hrpEnd + 1) : ''}${'•'.repeat(32)}`;
 
   function copyKey() {
     if (!exportValue) return;

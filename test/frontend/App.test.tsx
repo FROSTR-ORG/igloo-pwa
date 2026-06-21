@@ -649,6 +649,10 @@ describe('igloo-pwa app shell', () => {
 
     // Masked by default — the full nsec is not shown.
     expect(screen.queryByText(recovered.nsec)).not.toBeInTheDocument();
+    // Only the bech32 HRP (`nsec1`) is shown when masked — no key data leaks by default.
+    const maskedShown = screen.getByTestId(CRITICAL_E2E_TEST_IDS.recoverKeyValue).textContent ?? '';
+    expect(maskedShown.startsWith('nsec1')).toBe(true);
+    expect(maskedShown).not.toContain('q');
 
     fireEvent.click(screen.getByRole('button', { name: 'Reveal' }));
     expect(screen.getByText(recovered.nsec)).toBeInTheDocument();
