@@ -280,15 +280,6 @@ function parseJsonObject(value: string) {
   }
 }
 
-function readNumber(value: unknown, fallback: number) {
-  if (typeof value === 'number' && Number.isFinite(value)) return value;
-  if (typeof value === 'string') {
-    const parsed = Number.parseInt(value, 10);
-    if (Number.isFinite(parsed)) return parsed;
-  }
-  return fallback;
-}
-
 function formatWelcomeKey(value: string) {
   if (value.length <= 16) return value;
   return `${value.slice(0, 8)}...${value.slice(-4)}`;
