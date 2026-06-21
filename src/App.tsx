@@ -144,8 +144,8 @@ function buildOperatorSettingsDraft(
   };
 }
 
-function derivePendingOperations(runtimeStatus: unknown) {
-  const summary = (runtimeStatus ?? null) as RuntimeStatusSummary | null;
+function derivePendingOperations(runtimeStatus: RuntimeStatusSummary | null | undefined) {
+  const summary = runtimeStatus ?? null;
   return (summary?.pending_operations ?? []).map((operation) => ({
     id: operation.request_id,
     operationLabel: operation.op_type,
@@ -180,8 +180,8 @@ function deriveSignerDashboardView(
 ): SignerDashboardViewModel | null {
   if (!profile) return null;
 
-  const summary = (runtimeSnapshot?.runtime_status ?? null) as RuntimeStatusSummary | null;
-  const readiness = (runtimeSnapshot?.readiness ?? null) as RuntimeReadiness | null;
+  const summary = runtimeSnapshot?.runtime_status ?? null;
+  const readiness = runtimeSnapshot?.readiness ?? null;
   const peerTotal = summary?.metadata?.peers?.length ? summary.metadata.peers.length + 1 : null;
   const thresholdLabel =
     typeof readiness?.threshold === 'number' && peerTotal ? `${readiness.threshold}/${peerTotal}` : 'threshold n/a';
@@ -1325,7 +1325,7 @@ function AppShell() {
     const policyView = derivePolicyDashboardView(Boolean(store.runtimeSnapshot?.active), store.peerPermissionStates);
     const dashboardState = deriveDashboardState({
       active: Boolean(store.runtimeSnapshot?.active),
-      status: (store.runtimeSnapshot?.runtime_status ?? null) as RuntimeStatusSummary | null,
+      status: store.runtimeSnapshot?.runtime_status ?? null,
       // A hard start/restore failure throws out of connect() (no runtime to
       // query), so startSigner captures it into store.dashboardLoadError and
       // routes here to show the full-panel load-failed screen.
