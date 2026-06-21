@@ -25,6 +25,7 @@ import {
   type SignerSettings,
   type RuntimeStatusSummary,
   normalizeSignerSettings,
+  toErrorMessage,
 } from 'igloo-shared';
 import { ensureIglooSharedConfigured } from './configure-igloo-shared';
 
@@ -133,15 +134,6 @@ let browserRuntimeTestHooks: BrowserRuntimeTestHooks | null = null;
 
 export function setBrowserRuntimeTestHooks(hooks: BrowserRuntimeTestHooks | null) {
   browserRuntimeTestHooks = hooks;
-}
-
-function toErrorMessage(error: unknown, fallback = 'Unknown error') {
-  if (error instanceof Error && error.message) return error.message;
-  if (typeof error === 'string' && error.trim()) return error;
-  if (error && typeof error === 'object' && typeof (error as { message?: unknown }).message === 'string') {
-    return (error as { message: string }).message;
-  }
-  return fallback;
 }
 
 function formatLogLine(level: 'info' | 'warn' | 'error', payload: unknown) {
@@ -373,7 +365,7 @@ export async function connectOnboardingPackageAndCaptureProfile(input: {
     await (node as typeof node & { shutdown: () => Promise<void> })
       .shutdown()
       .catch(() => undefined);
-    throw new Error(`${toErrorMessage(error)}${suffix}`);
+    throw new Error(`${toErrorMessage(error, 'Unknown error')}${suffix}`);
   }
 }
 

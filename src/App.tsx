@@ -64,6 +64,7 @@ import {
 import {
   pingRelay,
   shortProfileId,
+  toErrorMessage,
   type RuntimeReadiness,
   type RuntimeStatusSummary,
 } from 'igloo-shared';
@@ -99,11 +100,9 @@ function toPwaEventRows(lines: string[] = []): EventLogRowModel[] {
 }
 
 function formatUiError(error: unknown) {
-  if (error instanceof Error && error.message.trim()) return error.message;
-  if (typeof error === 'string' && error.trim()) return error;
+  const message = toErrorMessage(error, '');
+  if (message) return message;
   if (error && typeof error === 'object') {
-    const message = Reflect.get(error, 'message');
-    if (typeof message === 'string' && message.trim()) return message;
     try {
       const serialized = JSON.stringify(error);
       if (serialized && serialized !== '{}') return serialized;

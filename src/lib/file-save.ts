@@ -1,15 +1,10 @@
 // Shared client-side file-save helpers. Used by both the distribution "save"
 // flow (store) and the export modal so confirmed-write semantics are consistent.
 
-export function downloadText(filename: string, value: string) {
-  const blob = new Blob([value], { type: 'text/plain;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = filename;
-  link.click();
-  URL.revokeObjectURL(url);
-}
+import { downloadText } from 'igloo-ui';
+
+// Re-exported so existing consumers (store, export modal) keep importing it here.
+export { downloadText };
 
 type SaveFilePicker = (options?: {
   suggestedName?: string;
