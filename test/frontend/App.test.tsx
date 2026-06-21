@@ -667,6 +667,21 @@ describe('igloo-pwa app shell', () => {
     expect(onClear).toHaveBeenCalledTimes(1);
   });
 
+  it('auto-clears the recovered key after 60 seconds', () => {
+    cleanup();
+    vi.useFakeTimers();
+    try {
+      const onClear = vi.fn();
+      const recovered = { nsec: `nsec1${'q'.repeat(58)}`, signingKeyHex: '11'.repeat(32) };
+      render(<RecoverPrivateKeyView recovered={recovered} onClear={onClear} />);
+      expect(onClear).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(60_000);
+      expect(onClear).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('routes Import Existing Device directly into the 2-step Import Device Profile flow', () => {
     renderApp();
     fireEvent.click(screen.getByRole('button', { name: 'Import Existing Device' }));
