@@ -678,9 +678,20 @@ function AppShell() {
       return (
         <WelcomeEntryHero
           logoSrc="/igloo-paper-mark.png"
-          onNewKeyset={() => store.setActiveView('create-generate')}
-          onImportProfile={() => store.startLoadImport()}
-          onOnboard={() => store.setActiveView('onboard-connect')}
+          productLabel="Igloo Web"
+          tagline="Split your Nostr key. Sign from anywhere."
+          primaryAction={{
+            heading: 'Generate New Keyset',
+            description: 'Generate a new threshold keyset and set up its first device profile.',
+            buttonLabel: 'Generate Keyset',
+            onAction: () => store.setActiveView('create-generate'),
+            testId: CRITICAL_E2E_TEST_IDS.welcomeEntryGenerate,
+          }}
+          secondaryActions={[
+            { id: 'import', label: 'Import Existing Device', onAction: () => store.startLoadImport(), testId: CRITICAL_E2E_TEST_IDS.welcomeEntryImport },
+            { id: 'onboard', label: 'Onboard New Device', onAction: () => store.setActiveView('onboard-connect'), testId: CRITICAL_E2E_TEST_IDS.welcomeEntryOnboard },
+          ]}
+          footer={<PublicFocusFooter />}
         />
       );
     }
@@ -688,6 +699,7 @@ function AppShell() {
     return (
       <WelcomeReturningHero
         logoSrc="/igloo-paper-mark.png"
+        productLabel="Igloo Web"
         layout={deriveWelcomeReturningLayout(store.profiles.length)}
         profiles={store.profiles.map(deriveWelcomeReturningProfile)}
         onUnlock={openWelcomeUnlock}
@@ -700,9 +712,12 @@ function AppShell() {
           store.startRecoverKey(profileId);
         }}
         onDelete={openWelcomeDelete}
-        onNewKeyset={() => store.setActiveView('create-generate')}
-        onImportProfile={() => store.startLoadImport()}
-        onOnboard={() => store.setActiveView('onboard-connect')}
+        secondaryActions={[
+          { id: 'generate', label: 'Generate Keyset', onAction: () => store.setActiveView('create-generate'), testId: CRITICAL_E2E_TEST_IDS.welcomeEntryGenerate },
+          { id: 'import', label: 'Import Existing Device', onAction: () => store.startLoadImport(), testId: CRITICAL_E2E_TEST_IDS.welcomeEntryImport },
+          { id: 'onboard', label: 'Onboard New Device', onAction: () => store.setActiveView('onboard-connect'), testId: CRITICAL_E2E_TEST_IDS.welcomeEntryOnboard },
+        ]}
+        footer={<PublicFocusFooter />}
       />
     );
   }
