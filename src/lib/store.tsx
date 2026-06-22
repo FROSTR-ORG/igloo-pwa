@@ -29,6 +29,7 @@ import {
   ensureDistributionPasswordSlot,
   normalizeLoadedState,
 } from './store-hydrate';
+import { setDraftFormField, setDraftSecretField } from './store-drafts';
 import type {
   PwaDashboardTab,
   PwaDistributionActionResult,
@@ -502,34 +503,13 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           if (field === 'privateKey') {
             // The raw nsec is a secret: it lives only in draftSecrets, never in
             // the persistable drafts partition.
-            return {
-              ...current,
-              draftSecrets: { ...current.draftSecrets, createFormPrivateKey: value },
-            };
+            return setDraftSecretField(current, 'createFormPrivateKey', value);
           }
-          return {
-            ...current,
-            drafts: {
-              ...current.drafts,
-              createForm: {
-                ...current.drafts.createForm,
-                [field]: value,
-              },
-            },
-          };
+          return setDraftFormField(current, 'createForm', field, value);
         });
       },
       updateRotationForm(field, value) {
-        setState((current) => ({
-          ...current,
-          drafts: {
-            ...current.drafts,
-            rotationForm: {
-              ...current.drafts.rotationForm,
-              [field]: value,
-            },
-          },
-        }));
+        setState((current) => setDraftFormField(current, 'rotationForm', field, value));
       },
       updateRotationSource(index, field, value) {
         setState((current) => {
@@ -861,16 +841,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         }));
       },
       updateProfileForm(field, value) {
-        setState((current) => ({
-          ...current,
-          drafts: {
-            ...current.drafts,
-            profileForm: {
-              ...current.drafts.profileForm,
-              [field]: value,
-            },
-          },
-        }));
+        setState((current) => setDraftFormField(current, 'profileForm', field, value));
       },
       continueToSaveProfile() {
         if (!state.pendingKeyset || state.selectedGeneratedShareIdx == null) {
@@ -879,13 +850,13 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         setState((current) => ({ ...current, activeView: 'create-save-profile' }));
       },
       updateProfileFormPassword(field, value) {
-        setState((current) => ({
-          ...current,
-          draftSecrets: {
-            ...current.draftSecrets,
-            [field === 'password' ? 'profileFormPassword' : 'profileFormConfirm']: value,
-          },
-        }));
+        setState((current) =>
+          setDraftSecretField(
+            current,
+            field === 'password' ? 'profileFormPassword' : 'profileFormConfirm',
+            value,
+          ),
+        );
       },
       async acceptGeneratedProfile() {
         if (!state.pendingKeyset || state.selectedGeneratedShareIdx == null) {
@@ -1255,46 +1226,22 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         setState((current) => ({ ...current, activeView: 'load-import' }));
       },
       updateImportProfileForm(field, value) {
-        setState((current) => ({
-          ...current,
-          drafts: {
-            ...current.drafts,
-            importProfileForm: {
-              ...current.drafts.importProfileForm,
-              [field]: value,
-            },
-          },
-        }));
+        setState((current) => setDraftFormField(current, 'importProfileForm', field, value));
       },
       updateImportProfilePassword(value) {
-        setState((current) => ({
-          ...current,
-          draftSecrets: {
-            ...current.draftSecrets,
-            importProfileFormPassword: value,
-          },
-        }));
+        setState((current) => setDraftSecretField(current, 'importProfileFormPassword', value));
       },
       updateImportSaveForm(field, value) {
-        setState((current) => ({
-          ...current,
-          drafts: {
-            ...current.drafts,
-            importSaveForm: {
-              ...current.drafts.importSaveForm,
-              [field]: value,
-            },
-          },
-        }));
+        setState((current) => setDraftFormField(current, 'importSaveForm', field, value));
       },
       updateImportSavePassword(field, value) {
-        setState((current) => ({
-          ...current,
-          draftSecrets: {
-            ...current.draftSecrets,
-            [field === 'password' ? 'importSaveFormPassword' : 'importSaveFormConfirm']: value,
-          },
-        }));
+        setState((current) =>
+          setDraftSecretField(
+            current,
+            field === 'password' ? 'importSaveFormPassword' : 'importSaveFormConfirm',
+            value,
+          ),
+        );
       },
       async loadBfProfile() {
         let confirmation: PwaLoadConfirmation;
@@ -1392,25 +1339,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         }));
       },
       updateOnboardConnectForm(field, value) {
-        setState((current) => ({
-          ...current,
-          drafts: {
-            ...current.drafts,
-            onboardConnectForm: {
-              ...current.drafts.onboardConnectForm,
-              [field]: value,
-            },
-          },
-        }));
+        setState((current) => setDraftFormField(current, 'onboardConnectForm', field, value));
       },
       updateOnboardConnectPassword(value) {
-        setState((current) => ({
-          ...current,
-          draftSecrets: {
-            ...current.draftSecrets,
-            onboardConnectFormPassword: value,
-          },
-        }));
+        setState((current) => setDraftSecretField(current, 'onboardConnectFormPassword', value));
       },
       async connectOnboardingPackage() {
         // Fresh entry: release any node staged by a prior (abandoned) handshake
@@ -1464,25 +1396,16 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         }
       },
       updateOnboardSaveForm(field, value) {
-        setState((current) => ({
-          ...current,
-          drafts: {
-            ...current.drafts,
-            onboardSaveForm: {
-              ...current.drafts.onboardSaveForm,
-              [field]: value,
-            },
-          },
-        }));
+        setState((current) => setDraftFormField(current, 'onboardSaveForm', field, value));
       },
       updateOnboardSavePassword(field, value) {
-        setState((current) => ({
-          ...current,
-          draftSecrets: {
-            ...current.draftSecrets,
-            [field === 'password' ? 'onboardSaveFormPassword' : 'onboardSaveFormConfirm']: value,
-          },
-        }));
+        setState((current) =>
+          setDraftSecretField(
+            current,
+            field === 'password' ? 'onboardSaveFormPassword' : 'onboardSaveFormConfirm',
+            value,
+          ),
+        );
       },
       async finalizeOnboardedDevice() {
         if (!state.pendingOnboardConnection) {
@@ -1561,25 +1484,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         }));
       },
       updateRotateConnectForm(field, value) {
-        setState((current) => ({
-          ...current,
-          drafts: {
-            ...current.drafts,
-            rotateConnectForm: {
-              ...current.drafts.rotateConnectForm,
-              [field]: value,
-            },
-          },
-        }));
+        setState((current) => setDraftFormField(current, 'rotateConnectForm', field, value));
       },
       updateRotateConnectPassword(value) {
-        setState((current) => ({
-          ...current,
-          draftSecrets: {
-            ...current.draftSecrets,
-            rotateConnectFormPassword: value,
-          },
-        }));
+        setState((current) => setDraftSecretField(current, 'rotateConnectFormPassword', value));
       },
       async connectRotationPackage() {
         if (!selectedProfile) {
