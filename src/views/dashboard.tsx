@@ -1,0 +1,316 @@
+import * as React from 'react';
+import {
+  Checkbox,
+  ContentCard,
+  CRITICAL_E2E_TEST_IDS,
+  DashboardConditionBanner,
+  DashboardLoadingScreen,
+  DashboardLoadFailedScreen,
+  OperatorDashboardTabs,
+  OperatorPermissionsPanel,
+  OperatorSettingsPanel,
+  OperatorSignerPanel,
+  deriveDashboardState,
+  type DashboardKeyModel,
+} from 'igloo-ui';
+import {
+  derivePolicyDashboardView,
+  deriveSignerDashboardView,
+  formatRuntimeTimestamp,
+} from '../lib/dashboard-view';
+import type { useStore } from '../lib/store';
+import type { PwaProfile, PwaSignerSettings } from '../lib/types';
+
+type PwaStore = ReturnType<typeof useStore>;
+type RunAction = (action: () => Promise<void> | void) => Promise<void>;
+
+export type OperatorSettingsDraft = {
+  signerName: string;
+  relays: string[];
+  newRelayUrl: string;
+  signerSettings: PwaSignerSettings;
+};
+
+export function DashboardView({
+  store,
+  run,
+  selectedProfile,
+  operatorSettingsDraft,
+  setOperatorSettingsDraft,
+  requestDashboardTab,
+  dashboardCopiedField,
+  copyDashboardKey,
+  dismissedSignFailureId,
+  setDismissedSignFailureId,
+  openExportModal,
+  setClearCredentialsOpen,
+}: {
+  store: PwaStore;
+  run: RunAction;
+  selectedProfile: PwaProfile | null;
+  operatorSettingsDraft: OperatorSettingsDraft;
+  setOperatorSettingsDraft: React.Dispatch<React.SetStateAction<OperatorSettingsDraft>>;
+  requestDashboardTab: (tab: 'signer' | 'permissions' | 'settings') => void;
+  dashboardCopiedField: 'group' | 'share' | null;
+  copyDashboardKey: (field: 'group' | 'share', keyModel: DashboardKeyModel | undefined, format?: 'npub' | 'hex') => void;
+  dismissedSignFailureId: string | null;
+  setDismissedSignFailureId: (requestId: string) => void;
+  openExportModal: (format: 'bfprofile' | 'bfshare') => void;
+  setClearCredentialsOpen: (open: boolean) => void;
+}) {
+  const runtimeState = store.runtimeSnapshot?.active ? 'running' : 'stopped';
+  const runtimeControlLabel = runtimeState === 'running' ? 'Stop Signer' : 'Start Signer';
+  const signerView = deriveSignerDashboardView(selectedProfile, store.runtimeSnapshot, store.peerPermissionStates);
+  const policyView = derivePolicyDashboardView(Boolean(store.runtimeSnapshot?.active), store.peerPermissionStates);
+  const dashboardState = deriveDashboardState({
+    active: Boolean(store.runtimeSnapshot?.active),
+    status: store.runtimeSnapshot?.runtime_status ?? null,
+    // A hard start/restore failure throws out of connect() (no runtime to
+    // query), so startSigner captures it into store.dashboardLoadError and
+    // routes here to show the full-panel load-failed screen.
+    loadError: store.dashboardLoadError,
+    dismissedSignFailureId,
+  });
+
+  return (
+    <div data-testid={CRITICAL_E2E_TEST_IDS.dashboardRoot} className="space-y-6">
+      <OperatorDashboardTabs
+        tabs={[
+          { key: 'signer', label: 'Signer', description: 'runtime console' },
+          { key: 'permissions', label: 'Permissions', description: 'peer policies' },
+          { key: 'settings', label: 'Settings', description: 'operator controls' },
+        ]}
+        activeTab={store.activeDashboardTab}
+        onChangeTab={requestDashboardTab}
+      />
+      {store.activeDashboardTab === 'signer' ? (
+        <div role="tabpanel" id="operator-panel-signer" aria-labelledby="operator-tab-signer">
+          {dashboardState.kind === 'loading' ? (
+            <DashboardLoadingScreen detail={dashboardState.detail} />
+          ) : dashboardState.kind === 'load-failed' ? (
+            <DashboardLoadFailedScreen
+              message={dashboardState.message}
+              timestampLabel={dashboardState.at ? formatRuntimeTimestamp(dashboardState.at) : undefined}
+              onRetry={() => void run(() => store.startSigner())}
+              onClear={() => setClearCredentialsOpen(true)}
+            />
+          ) : (
+            <>
+              {dashboardState.banners.map((banner) => (
+                <DashboardConditionBanner
+                  key={banner.kind}
+                  banner={banner}
+                  timestampLabel={
+                    banner.kind === 'signing-failed' ? formatRuntimeTimestamp(banner.at) : undefined
+                  }
+                  onDismiss={
+                    banner.kind === 'signing-failed'
+                      ? () => setDismissedSignFailureId(banner.requestId)
+                      : undefined
+                  }
+                />
+              ))}
+              <OperatorSignerPanel
+                view={signerView}
+                emptyDescription="Load or onboard a device profile before opening the signer dashboard."
+                runtimeControlLabel={runtimeControlLabel}
+                copiedField={dashboardCopiedField}
+                onCopyGroupKey={(format) => copyDashboardKey('group', signerView?.groupKey, format)}
+                onCopyShareKey={(format) => copyDashboardKey('share', signerView?.shareKey, format)}
+                onPrimaryAction={() =>
+                  void run(() => (store.runtimeSnapshot?.active ? store.stopSigner() : store.startSigner()))
+                }
+                onRefreshPeers={() => void run(() => store.refreshSigner())}
+                refreshPeersDisabled={!store.runtimeSnapshot?.active}
+                // Clearing the host-side log buffer requires an active session, so
+                // only expose the control while the signer is running.
+                onClearLogs={
+                  store.runtimeSnapshot?.active ? () => void run(() => store.clearLogs()) : undefined
+                }
+                onApproveOnce={(id) => void run(() => store.resolveApproval(id, true))}
+                onDenyApproval={(id) => void run(() => store.resolveApproval(id, false))}
+                onAlwaysAllow={(id) => {
+                  const row = signerView?.pendingApprovalRows?.find((approval) => approval.id === id);
+                  if (!row) return;
+                  // Approve this request, then persist an Allow override so future
+                  // requests for this peer+method skip the queue.
+                  void run(async () => {
+                    await store.resolveApproval(id, true);
+                    await store.updatePeerPolicy(row.pubkey, 'respond', row.method, 'allow');
+                  });
+                }}
+              />
+            </>
+          )}
+        </div>
+      ) : null}
+
+      {store.activeDashboardTab === 'permissions' ? (
+        <div role="tabpanel" id="operator-panel-permissions" aria-labelledby="operator-tab-permissions">
+          <OperatorPermissionsPanel
+            view={policyView}
+            showPeerSummary={false}
+            onRefresh={() => void run(() => store.refreshSigner())}
+            onClearAllPeerPermissions={() => void run(() => store.clearPeerPolicies())}
+            onPeerPolicyOverrideChange={(pubkey, direction, method, value) =>
+              void run(() => store.updatePeerPolicy(pubkey, direction, method, value))
+            }
+            peerClearAllLabel="Remove Overrides"
+            peerDescription="Live outbound and inbound peer policy state for the active browser signer."
+            peerEmptyText={
+              store.runtimeSnapshot?.active
+                ? 'No peer policy state is currently available from the active runtime.'
+                : 'Start the signer to inspect and edit live peer policy state.'
+            }
+          />
+        </div>
+      ) : null}
+
+      {store.activeDashboardTab === 'settings' ? (
+        <div role="tabpanel" id="operator-panel-settings" aria-labelledby="operator-tab-settings">
+          <OperatorSettingsPanel
+            hasProfile={Boolean(selectedProfile)}
+            signerName={operatorSettingsDraft.signerName}
+            onSignerNameChange={(value) =>
+              setOperatorSettingsDraft((current) => ({ ...current, signerName: value }))
+            }
+            relays={operatorSettingsDraft.relays}
+            newRelayUrl={operatorSettingsDraft.newRelayUrl}
+            onNewRelayUrlChange={(value) =>
+              setOperatorSettingsDraft((current) => ({ ...current, newRelayUrl: value }))
+            }
+            onAddRelay={() =>
+              setOperatorSettingsDraft((current) => {
+                const normalized = current.newRelayUrl.trim();
+                if (!normalized || current.relays.includes(normalized)) return current;
+                return {
+                  ...current,
+                  relays: [...current.relays, normalized],
+                  newRelayUrl: '',
+                };
+              })
+            }
+            onRemoveRelay={(relay) =>
+              setOperatorSettingsDraft((current) => ({
+                ...current,
+                relays: current.relays.filter((item) => item !== relay),
+              }))
+            }
+            signerSettings={operatorSettingsDraft.signerSettings}
+            onSignerSettingNumberChange={(field, value) =>
+              setOperatorSettingsDraft((current) => ({
+                ...current,
+                signerSettings: {
+                  ...current.signerSettings,
+                  [field]: Number.parseInt(value, 10) || current.signerSettings[field],
+                },
+              }))
+            }
+            onPeerSelectionStrategyChange={(value) =>
+              setOperatorSettingsDraft((current) => ({
+                ...current,
+                signerSettings: {
+                  ...current.signerSettings,
+                  peer_selection_strategy: value,
+                },
+              }))
+            }
+            onSave={() =>
+              void run(() =>
+                store.saveOperatorSettings({
+                  label: operatorSettingsDraft.signerName,
+                  relays: operatorSettingsDraft.relays,
+                  signerSettings: operatorSettingsDraft.signerSettings,
+                }),
+              )
+            }
+            saveDisabled={!selectedProfile || !store.runtimeSnapshot?.active}
+            message={
+              store.runtimeSnapshot?.active ? null : 'Start the signer to apply settings live.'
+            }
+            sections={[
+              {
+                title: 'Replace Share',
+                description:
+                  "Import a bfonboard package to replace only this device's local share while keeping the same group public key and profile.",
+                actionLabel: 'Replace Share',
+                testId: CRITICAL_E2E_TEST_IDS.maintenanceRotateShare,
+                variant: 'secondary',
+                disabled: !selectedProfile,
+                onAction: () =>
+                  void run(() => {
+                    store.startRotateKey();
+                  }),
+              },
+              {
+                title: 'Export Profile',
+                description: 'Encrypted backup of your share and configuration.',
+                actionLabel: 'Export Profile',
+                testId: CRITICAL_E2E_TEST_IDS.settingsCopyProfile,
+                variant: 'secondary',
+                disabled: !selectedProfile,
+                onAction: () => openExportModal('bfprofile'),
+              },
+              {
+                title: 'Export Share',
+                description: 'Password-protected bfshare package.',
+                actionLabel: 'Export Share',
+                testId: CRITICAL_E2E_TEST_IDS.settingsCopyShare,
+                variant: 'secondary',
+                disabled: !selectedProfile,
+                onAction: () => openExportModal('bfshare'),
+              },
+              {
+                title: 'Logout',
+                description: 'Return to the profile list to open another profile.',
+                actionLabel: 'Logout',
+                testId: CRITICAL_E2E_TEST_IDS.settingsLogout,
+                variant: 'outline',
+                disabled: !selectedProfile,
+                onAction: () => void run(() => store.logout()),
+              },
+              {
+                title: 'Clear Credentials',
+                description:
+                  'Permanently remove every stored profile and credential from this device. This cannot be undone.',
+                actionLabel: 'Clear Credentials',
+                testId: CRITICAL_E2E_TEST_IDS.settingsClearCredentials,
+                variant: 'destructive',
+                disabled: store.profiles.length === 0,
+                onAction: () => setClearCredentialsOpen(true),
+              },
+            ]}
+            extraSections={
+              <ContentCard
+                title="Browser Settings"
+                description="PWA-specific preferences for persistence, routing, and install prompting."
+              >
+                <div className="igloo-settings-grid">
+                  <Checkbox
+                    checked={store.settings.remember_browser_state}
+                    onCheckedChange={(checked) => store.updateSettings('remember_browser_state', checked)}
+                    label="Remember browser state"
+                    description="Persist profiles, drafts, and the last active workspace in this browser."
+                  />
+                  <Checkbox
+                    checked={store.settings.auto_open_signer}
+                    onCheckedChange={(checked) => store.updateSettings('auto_open_signer', checked)}
+                    label="Open signer after import"
+                    description="Jump straight into the signer workspace after a successful setup action."
+                    data-testid={CRITICAL_E2E_TEST_IDS.settingsAutoOpenToggle}
+                  />
+                  <Checkbox
+                    checked={store.settings.prefer_install_prompt}
+                    onCheckedChange={(checked) => store.updateSettings('prefer_install_prompt', checked)}
+                    label="Prefer install prompt"
+                    description="Keep the PWA install affordance visible when the browser makes it available."
+                  />
+                </div>
+              </ContentCard>
+            }
+          />
+        </div>
+      ) : null}
+    </div>
+  );
+}

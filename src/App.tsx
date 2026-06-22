@@ -3,101 +3,37 @@ import * as React from 'react';
 import {
   Alert,
   AppHeader,
-  Button,
-  Card,
-  Checkbox,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-  ContentCard,
-  CreateFlowDistributionSection,
   ConfirmDialog,
-  CreateFlowGenerateCard,
-  CreateFlowProfileSetup,
-  CreateFlowShareSelection,
-  ImportProfileEntry,
-  OnboardFailedPanel,
-  OnboardHandshakePanel,
-  OnboardingClientCard,
-  OnboardPackageEntry,
-  OperatorDashboardTabs,
-  RecoverCollectSharesPanel,
-  RotateKeysetPanel,
-  WarningCard,
-  HostFlowShell,
-  OperatorPermissionsPanel,
-  OperatorSettingsPanel,
-  OperatorSignerPanel,
-  DashboardLoadingScreen,
-  DashboardLoadFailedScreen,
-  DashboardConditionBanner,
   PageLayout,
-  PageBackLink,
-  PasswordField,
-  ProfileConfirmationCard,
   ExportPackageModal,
-  PublicFocusFooter,
-  PublicTaskShell,
-  PublicTaskTitle,
-  QrPayloadModal,
-  StepProgress,
-  Textarea,
-  WelcomeEntryHero,
-  WelcomeReturningHero,
   WelcomeDeleteModal,
   WelcomeUnlockModal,
-  CRITICAL_E2E_TEST_IDS,
-  buildPeerReadinessRows,
-  buildPendingApprovalRows,
-  deriveDashboardState,
-  observabilityEventsToEventRows,
-  passwordManagerOptOutProps,
   type DashboardKeyModel,
-  type EventLogRowModel,
-  type PeerPolicy,
-  type SharedDistributionResult,
-  type PolicyDashboardViewModel,
-  type SignerDashboardViewModel,
   type WelcomeReturningProfileModel,
 } from 'igloo-ui';
-import {
-  pingRelay,
-  shortProfileId,
-  toErrorMessage,
-  type RuntimeReadiness,
-  type RuntimeStatusSummary,
-} from 'igloo-shared';
-import * as nip49 from 'nostr-tools/nip49';
-import { deriveExportSummary, toDashboardKey } from './lib/dashboard-view';
+import { toErrorMessage } from 'igloo-shared';
+import { deriveExportSummary } from './lib/dashboard-view';
 import { saveTextToFile } from './lib/file-save';
-
 import { StoreProvider, useStore } from './lib/store';
-import type { PwaDistributionActionResult, PwaGeneratedShare } from './lib/types';
+import {
+  CreateDistributeView,
+  CreateGenerateView,
+  CreateSaveProfileView,
+  CreateSelectShareView,
+} from './views/create';
+import { DashboardView, type OperatorSettingsDraft } from './views/dashboard';
+import { LoadConfirmView, LoadErrorView, LoadImportView } from './views/import';
+import { LandingView } from './views/landing';
+import {
+  OnboardConnectView,
+  OnboardFailedView,
+  OnboardHandshakeView,
+  OnboardSaveView,
+} from './views/onboard';
+import { RecoverCollectView, RecoverKeyView } from './views/recover';
+import { RotateConnectView, RotateSaveView } from './views/rotate';
 
-function hexToBytes(hex: string): Uint8Array {
-  const normalized = hex.length % 2 === 0 ? hex : `0${hex}`;
-  const bytes = new Uint8Array(normalized.length / 2);
-  for (let index = 0; index < bytes.length; index += 1) {
-    bytes[index] = Number.parseInt(normalized.slice(index * 2, index * 2 + 2), 16);
-  }
-  return bytes;
-}
-
-const CREATE_FLOW_STEPS = ['Create Keyset', 'Select Share', 'Save Profile', 'Distribute Shares'];
-const IMPORT_FLOW_STEPS = ['Import Profile', 'Save Profile'];
-const ONBOARD_FLOW_STEPS = ['Input Package', 'Onboard Device', 'Save Profile'];
-const RECOVER_FLOW_STEPS = ['Collect Shares', 'Recover Key'];
-
-function toPwaEventRows(lines: string[] = []): EventLogRowModel[] {
-  return lines.map((line, index) => ({
-    id: `pwa-log-${index}-${line}`,
-    badgeLabel: line.startsWith('[error]') ? 'error' : line.startsWith('[warn]') ? 'warn' : 'info',
-    badgeTone: line.startsWith('[error]') ? 'danger' : line.startsWith('[warn]') ? 'warning' : 'info',
-    message: line.replace(/^\[[^\]]+\]\s*/, ''),
-    timestampLabel: 'live',
-  }));
-}
+export { RecoverPrivateKeyView } from './views/recover';
 
 function formatUiError(error: unknown) {
   const message = toErrorMessage(error, '');
@@ -113,19 +49,6 @@ function formatUiError(error: unknown) {
   return 'Unexpected error.';
 }
 
-type OperatorSettingsDraft = {
-  signerName: string;
-  relays: string[];
-  newRelayUrl: string;
-  signerSettings: {
-    sign_timeout_secs: number;
-    ping_timeout_secs: number;
-    request_ttl_secs: number;
-    state_save_interval_secs: number;
-    peer_selection_strategy: 'deterministic_sorted' | 'random';
-  };
-};
-
 function buildOperatorSettingsDraft(
   profile: ReturnType<typeof useStore>['profiles'][number] | null,
 ): OperatorSettingsDraft {
@@ -140,98 +63,6 @@ function buildOperatorSettingsDraft(
       state_save_interval_secs: 30,
       peer_selection_strategy: 'deterministic_sorted',
     },
-  };
-}
-
-function derivePendingOperations(runtimeStatus: RuntimeStatusSummary | null | undefined) {
-  const summary = runtimeStatus ?? null;
-  return (summary?.pending_operations ?? []).map((operation) => ({
-    id: operation.request_id,
-    operationLabel: operation.op_type,
-    thresholdLabel: `threshold ${operation.threshold}`,
-    startedLabel: formatRuntimeTimestamp(operation.started_at),
-    timeoutLabel: formatRuntimeTimestamp(operation.timeout_at),
-    responseLabel: `${Array.isArray(operation.collected_responses) ? operation.collected_responses.length : 0} responses`,
-  }));
-}
-
-function formatRuntimeTimestamp(value: number | null) {
-  if (typeof value !== 'number') return 'n/a';
-  const normalized = value > 10_000_000_000 ? value : value * 1000;
-  return new Date(normalized).toLocaleString();
-}
-
-function deriveRuntimeSummaryLabel(runtimeSnapshot: ReturnType<typeof useStore>['runtimeSnapshot']) {
-  if (!runtimeSnapshot?.active) return 'Signer Stopped';
-  const readiness = runtimeSnapshot.readiness ?? null;
-  if (readiness && (!readiness.sign_ready || !readiness.ecdh_ready || !readiness.restore_complete)) {
-    return 'Signer Running (Degraded)';
-  }
-  return 'Signer Running';
-}
-
-// Summary line for the export modal, e.g.
-// "Share #1 · Keyset: My Signing Key · 2 relays · 3 peers".
-function deriveSignerDashboardView(
-  profile: ReturnType<typeof useStore>['profiles'][number] | null,
-  runtimeSnapshot: ReturnType<typeof useStore>['runtimeSnapshot'],
-  peerPermissionStates: ReturnType<typeof useStore>['peerPermissionStates'],
-): SignerDashboardViewModel | null {
-  if (!profile) return null;
-
-  const summary = runtimeSnapshot?.runtime_status ?? null;
-  const readiness = runtimeSnapshot?.readiness ?? null;
-  const peerTotal = summary?.metadata?.peers?.length ? summary.metadata.peers.length + 1 : null;
-  const thresholdLabel =
-    typeof readiness?.threshold === 'number' && peerTotal ? `${readiness.threshold}/${peerTotal}` : 'threshold n/a';
-
-  const peerRows = buildPeerReadinessRows({
-    peers: summary?.peers ?? [],
-    rosterPubkeys: summary?.metadata?.peers ?? [],
-    policyPubkeys: peerPermissionStates.map((state) => state.pubkey),
-  });
-
-  return {
-    profileName: profile.label || 'Unnamed device',
-    thresholdLabel,
-    memberLabel: Number.isFinite(profile.member_idx) ? `Share #${profile.member_idx}` : undefined,
-    publicKeyLabel: profile.group_public_key,
-    shareLabel: profile.share_public_key,
-    groupKey: toDashboardKey(profile.group_public_key),
-    shareKey: toDashboardKey(profile.share_public_key),
-    running: Boolean(runtimeSnapshot?.active),
-    readinessLabel: deriveRuntimeSummaryLabel(runtimeSnapshot),
-    relaySummary: runtimeSnapshot?.active ? 'Browser runtime connected' : 'Runtime stopped',
-    pendingApprovalRows: buildPendingApprovalRows({
-      approvals: summary?.pending_approvals ?? [],
-      peerAliases: Object.fromEntries(peerRows.map((row) => [row.pubkey, row.alias])),
-    }),
-    peerRows,
-    pendingOperationRows: derivePendingOperations(runtimeSnapshot?.runtime_status),
-    // Prefer structured events (domain/event tags + filter); fall back to the
-    // formatted log lines for sessions that only surface plain strings.
-    eventRows: runtimeSnapshot?.events?.length
-      ? observabilityEventsToEventRows(runtimeSnapshot.events)
-      : toPwaEventRows(runtimeSnapshot?.runtime_log_lines),
-  };
-}
-
-function derivePolicyDashboardView(
-  active: boolean,
-  peerPermissionStates: ReturnType<typeof useStore>['peerPermissionStates'],
-): PolicyDashboardViewModel {
-  return {
-    peerRows: active
-      ? peerPermissionStates.map((policy) => ({
-          pubkey: policy.pubkey,
-          request: policy.effective_policy.request,
-          respond: policy.effective_policy.respond,
-          manualOverride: {
-            request: policy.manual_override.request,
-            respond: policy.manual_override.respond,
-          },
-        }))
-      : [],
   };
 }
 
@@ -288,169 +119,6 @@ function deriveWelcomeReturningLayout(profileCount: number) {
   if (profileCount === 1) return 'single';
   if (profileCount <= 3) return 'multi';
   return 'many';
-}
-
-export function RecoverPrivateKeyView({
-  recovered,
-  onClear,
-}: {
-  recovered: { nsec: string; signingKeyHex: string };
-  onClear: () => void;
-}) {
-  const [revealed, setRevealed] = React.useState(false);
-  const [copied, setCopied] = React.useState(false);
-  const [qrOpen, setQrOpen] = React.useState(false);
-  const [encrypt, setEncrypt] = React.useState(false);
-  const [password, setPassword] = React.useState('');
-  const [confirmPassword, setConfirmPassword] = React.useState('');
-
-  // Auto-clear the recovered key from memory after 60 seconds (matches the Paper
-  // security treatment). The key is never persisted; this is an extra safeguard on
-  // top of the navigate-away clear.
-  React.useEffect(() => {
-    const timer = window.setTimeout(onClear, 60_000);
-    return () => window.clearTimeout(timer);
-  }, [onClear]);
-
-  // Encrypt Key: when enabled with a valid (non-empty, matching) password, every export
-  // emits a NIP-49 `ncryptsec1` instead of the plaintext nsec. The encryption runs in
-  // memory only; neither form is ever persisted.
-  const passwordsMatch = password === confirmPassword;
-  const encryptReady = encrypt && password.length > 0 && passwordsMatch;
-  const encryptedKey = React.useMemo(() => {
-    if (!encryptReady) return null;
-    try {
-      return nip49.encrypt(hexToBytes(recovered.signingKeyHex), password);
-    } catch {
-      return null;
-    }
-  }, [encryptReady, password, recovered.signingKeyHex]);
-
-  // When Encrypt Key is on, exports are blocked until the password is valid.
-  const exportValue = encrypt ? encryptedKey : recovered.nsec;
-  const exportsDisabled = encrypt && !encryptedKey;
-  const passwordError = encrypt && confirmPassword.length > 0 && !passwordsMatch
-    ? 'Passwords do not match.'
-    : null;
-  const fieldLabel = encrypt ? 'Encrypted Key (ncryptsec)' : 'Recovered NSEC';
-  const displayValue = exportValue ?? recovered.nsec;
-  // Show only the bech32 HRP (e.g. `nsec1` / `ncryptsec1`) when masked — never any
-  // key data — so the recovered key is not partially exposed before an explicit reveal.
-  const hrpEnd = displayValue.indexOf('1');
-  const masked = `${hrpEnd >= 0 ? displayValue.slice(0, hrpEnd + 1) : ''}${'•'.repeat(32)}`;
-
-  function copyKey() {
-    if (!exportValue) return;
-    void navigator.clipboard?.writeText(exportValue);
-    setCopied(true);
-    window.setTimeout(() => setCopied(false), 1500);
-  }
-
-  function saveKey() {
-    if (!exportValue) return;
-    const blob = new Blob([exportValue], { type: 'text/plain' });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement('a');
-    anchor.href = url;
-    anchor.download = encrypt ? 'recovered-key.ncryptsec' : 'recovered-nsec.txt';
-    anchor.click();
-    URL.revokeObjectURL(url);
-  }
-
-  return (
-    <>
-      <PublicTaskShell>
-        <StepProgress steps={RECOVER_FLOW_STEPS} active={1} />
-        <PageBackLink label="Back to Welcome" onBack={onClear} />
-        <PublicTaskTitle
-          title="Recover Private Key"
-          description="Your private key has been recovered. Please handle it with care!"
-        />
-        <section className="igloo-flow-root igloo-stack">
-          <section className="igloo-task-banner">
-            <span className="igloo-task-kicker">Security Warning</span>
-            <ul>
-              <li>Your private key will auto-clear in 60 seconds.</li>
-              <li>Do not screenshot or share this key.</li>
-              <li>Copy to a secure password manager.</li>
-            </ul>
-          </section>
-
-          <label>
-            {fieldLabel}
-            <div className="igloo-recover-key-field">
-              <span data-testid={CRITICAL_E2E_TEST_IDS.recoverKeyValue}>
-                {revealed ? displayValue : masked}
-              </span>
-            </div>
-          </label>
-
-          <div className="igloo-button-row">
-            <Button type="button" size="sm" onClick={copyKey} disabled={exportsDisabled}>
-              {copied ? 'Copied!' : 'Copy'}
-            </Button>
-            <Button type="button" size="sm" variant="secondary" onClick={saveKey} disabled={exportsDisabled}>
-              Save
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              variant="secondary"
-              onClick={() => setQrOpen(true)}
-              disabled={exportsDisabled}
-            >
-              QR code
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              variant="secondary"
-              data-testid={CRITICAL_E2E_TEST_IDS.recoverRevealKey}
-              onClick={() => setRevealed((value) => !value)}
-            >
-              {revealed ? 'Hide' : 'Reveal'}
-            </Button>
-            <Button type="button" size="sm" variant="secondary" onClick={onClear}>
-              Clear
-            </Button>
-          </div>
-
-          <label className="igloo-recover-encrypt-toggle">
-            <input type="checkbox" checked={encrypt} onChange={(event) => setEncrypt(event.target.checked)} />
-            <span>
-              <strong>Encrypt Key</strong>
-              <small>Protect the exported key with a password before saving or sharing.</small>
-            </span>
-          </label>
-          {encrypt ? (
-            <div className="igloo-stack">
-              <label>
-                Password
-                <PasswordField value={password} onChange={(event) => setPassword(event.target.value)} />
-              </label>
-              <label>
-                Confirm Password
-                <PasswordField
-                  value={confirmPassword}
-                  onChange={(event) => setConfirmPassword(event.target.value)}
-                />
-              </label>
-              {passwordError ? <span className="igloo-field-error">{passwordError}</span> : null}
-            </div>
-          ) : null}
-        </section>
-      </PublicTaskShell>
-      <PublicFocusFooter />
-
-      <QrPayloadModal
-        open={qrOpen}
-        onClose={() => setQrOpen(false)}
-        title={encrypt ? 'Encrypted Key (ncryptsec)' : 'Recovered NSEC'}
-        payload={exportValue ?? ''}
-        label={encrypt ? 'Scan to import the encrypted key' : 'Scan to import the recovered private key'}
-      />
-    </>
-  );
 }
 
 function AppShell() {
@@ -651,932 +319,96 @@ function AppShell() {
     [closeWelcomeUnlock, store, welcomeUnlockPassword, welcomeUnlockProfileId],
   );
 
-  function renderError() {
-    // When a signer-start failure is showing as the full-panel load-failed
-    // screen, suppress the duplicate top-level banner (it carries the same message).
-    if (!uiError || store.dashboardLoadError) return null;
-    return <Alert tone="danger">{uiError}</Alert>;
-  }
-
-  function renderRuntimeWarning() {
-    if (!store.runtimeWarning) return null;
-    return <Alert tone="warning">{store.runtimeWarning}</Alert>;
-  }
-
-  // The device list is global (shared across tabs), so any saved device shows on
-  // the returning hero regardless of which tab or session this is. A brand-new
-  // tab with no devices yet shows the base entry hero.
-  function renderLanding() {
-    if (store.profiles.length === 0) {
-      return (
-        <WelcomeEntryHero
-          logoSrc="/igloo-paper-mark.png"
-          productLabel="Igloo Web"
-          tagline="Split your Nostr key. Sign from anywhere."
-          primaryAction={{
-            heading: 'Generate New Keyset',
-            description: 'Generate a new threshold keyset and set up its first device profile.',
-            buttonLabel: 'Generate Keyset',
-            onAction: () => store.setActiveView('create-generate'),
-            testId: CRITICAL_E2E_TEST_IDS.welcomeEntryGenerate,
-          }}
-          secondaryActions={[
-            { id: 'import', label: 'Import Existing Device', onAction: () => store.startLoadImport(), testId: CRITICAL_E2E_TEST_IDS.welcomeEntryImport },
-            { id: 'onboard', label: 'Onboard New Device', onAction: () => store.setActiveView('onboard-connect'), testId: CRITICAL_E2E_TEST_IDS.welcomeEntryOnboard },
-          ]}
-          footer={<PublicFocusFooter />}
-        />
-      );
-    }
-
-    return (
-      <WelcomeReturningHero
-        logoSrc="/igloo-paper-mark.png"
-        productLabel="Igloo Web"
-        layout={deriveWelcomeReturningLayout(store.profiles.length)}
-        profiles={store.profiles.map(deriveWelcomeReturningProfile)}
-        onUnlock={openWelcomeUnlock}
-        onRotate={(profileId) => {
-          store.selectProfile(profileId);
-          store.setActiveView('rotate-connect');
-        }}
-        onRecover={(profileId) => {
-          setRecoveredKey(null);
-          store.startRecoverKey(profileId);
-        }}
-        onDelete={openWelcomeDelete}
-        secondaryActions={[
-          { id: 'generate', label: 'Generate Keyset', onAction: () => store.setActiveView('create-generate'), testId: CRITICAL_E2E_TEST_IDS.welcomeEntryGenerate },
-          { id: 'import', label: 'Import Existing Device', onAction: () => store.startLoadImport(), testId: CRITICAL_E2E_TEST_IDS.welcomeEntryImport },
-          { id: 'onboard', label: 'Onboard New Device', onAction: () => store.setActiveView('onboard-connect'), testId: CRITICAL_E2E_TEST_IDS.welcomeEntryOnboard },
-        ]}
-        footer={<PublicFocusFooter />}
-      />
-    );
-  }
-
-  function renderCreateGenerate() {
-    return (
-      <>
-        <PublicTaskShell>
-          <StepProgress steps={CREATE_FLOW_STEPS} active={0} />
-          <PublicTaskTitle
-            title="Create Keyset"
-            description="Define the group profile for a new keyset. After generation, choose which share stays on this device, then distribute the rest."
-          />
-          {store.drafts.createForm.mode === 'new' ? (
-            <CreateFlowGenerateCard
-              groupName={store.drafts.createForm.groupName}
-              threshold={store.drafts.createForm.threshold}
-              count={store.drafts.createForm.count}
-              privateKey={store.draftSecrets.createFormPrivateKey}
-              onChangeForm={(field, value) => store.updateCreateForm(field, value)}
-              onGenerate={() => void run(() => store.generateKeyset())}
-              onBack={goToLanding}
-            />
-          ) : null}
-          {store.profiles.length > 0 ? (
-            <div className="igloo-button-row igloo-button-row-tight" role="group" aria-label="Keyset action mode">
-              <Button
-                type="button"
-                size="sm"
-                variant={store.drafts.createForm.mode === 'new' ? 'default' : 'secondary'}
-                data-testid={CRITICAL_E2E_TEST_IDS.createModeNew}
-                onClick={() => store.updateCreateForm('mode', 'new')}
-              >
-                New Keyset
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                variant={store.drafts.createForm.mode === 'rotate' ? 'default' : 'secondary'}
-                data-testid={CRITICAL_E2E_TEST_IDS.createModeRotate}
-                onClick={() => store.updateCreateForm('mode', 'rotate')}
-              >
-                Rotate Existing
-              </Button>
-            </div>
-          ) : null}
-          {store.drafts.createForm.mode === 'rotate' ? (
-            <RotateKeysetPanel
-              sourceProfileId={store.drafts.rotationForm.sourceProfileId}
-              availableProfiles={store.profiles.map((profile) => ({
-                id: profile.id,
-                label: `${profile.label || 'Unnamed device'} (${shortProfileId(profile.id)})`,
-              }))}
-              devicePassphrase={store.draftSecrets.rotateDevicePassphrase}
-              onChangeDevicePassphrase={(value) => store.setRotateDevicePassphrase(value)}
-              deviceShareValidated={store.draftSecrets.rotateDeviceUnlockVerified}
-              onVerifyDevicePassphrase={() => void store.verifyRotateDeviceUnlock()}
-              rotationSources={store.drafts.rotationForm.sources.map((source, index) => ({
-                packageText: source.packageText,
-                packagePassword: store.draftSecrets.rotationSources[index] ?? '',
-              }))}
-              onChangeSourceProfile={(profileId) => store.updateRotationForm('sourceProfileId', profileId)}
-              onChangeRotationSource={(index, field, value) =>
-                store.updateRotationSource(index, field === 'packagePassword' ? 'password' : 'packageText', value)
-              }
-              onAddRotationSource={() => store.addRotationSource()}
-              onRemoveRotationSource={(index) => store.removeRotationSource(index)}
-              onRotate={() => void run(() => store.generateKeyset())}
-            />
-          ) : null}
-        </PublicTaskShell>
-        <PublicFocusFooter />
-      </>
-    );
-  }
-
-  function renderCreateSelectShare() {
-    if (!store.pendingKeyset) return null;
-    return (
-      <>
-        <PublicTaskShell>
-          <StepProgress steps={CREATE_FLOW_STEPS} active={1} />
-          <PublicTaskTitle
-            title="Select Share"
-            description="Choose which share stays on this device. The group public key identifies the shared signer for every device."
-          />
-          <CreateFlowShareSelection
-            shares={store.pendingKeyset.shares}
-            selectedMemberIdx={store.selectedGeneratedShareIdx}
-            keysetName={store.pendingKeyset.group_name}
-            groupPublicKey={store.pendingKeyset.group_public_key}
-            onSelectShare={(memberIdx) => store.selectGeneratedShare(memberIdx)}
-            onCopyGroupPublicKey={() => {
-              if (navigator.clipboard?.writeText) {
-                void navigator.clipboard.writeText(store.pendingKeyset?.group_public_key ?? '');
-              }
+  const landingProfiles = store.profiles.map(deriveWelcomeReturningProfile);
+  const activeViewContent = (() => {
+    switch (store.activeView) {
+      case 'landing':
+        return (
+          <LandingView
+            profiles={landingProfiles}
+            layout={deriveWelcomeReturningLayout(store.profiles.length)}
+            onGenerate={() => store.setActiveView('create-generate')}
+            onImport={() => store.startLoadImport()}
+            onOnboard={() => store.setActiveView('onboard-connect')}
+            onUnlock={openWelcomeUnlock}
+            onRotate={(profileId) => {
+              store.selectProfile(profileId);
+              store.setActiveView('rotate-connect');
             }}
-            onAction={() => void run(() => store.continueToSaveProfile())}
-            onBack={() => store.setActiveView('create-generate')}
-          />
-        </PublicTaskShell>
-        <PublicFocusFooter />
-      </>
-    );
-  }
-
-  function renderCreateSaveProfile() {
-    if (!store.pendingKeyset) return null;
-    return (
-      <>
-        <PublicTaskShell>
-          <StepProgress steps={CREATE_FLOW_STEPS} active={2} />
-          <PublicTaskTitle
-            title="Save Profile"
-            description="Name and protect the local profile before remote shares are packaged for distribution."
-          />
-          <CreateFlowProfileSetup
-            draft={{
-              label: store.drafts.profileForm.label,
-              relayUrls: store.drafts.profileForm.relayUrls,
-              primarySecret: store.draftSecrets.profileFormPassword,
-              secondarySecret: store.draftSecrets.profileFormConfirm,
+            onRecover={(profileId) => {
+              setRecoveredKey(null);
+              store.startRecoverKey(profileId);
             }}
-            actionLabel="Next Step"
-            onLabelChange={(value) => store.updateProfileForm('label', value)}
-            onPrimarySecretChange={(value) => store.updateProfileFormPassword('password', value)}
-            onSecondarySecretChange={(value) => store.updateProfileFormPassword('confirmPassword', value)}
-            onRelaysChange={(relays) => store.updateProfileForm('relayUrls', relays.join('\n'))}
-            onPingRelay={(url) => pingRelay(url)}
-            onAction={() => void run(() => store.acceptGeneratedProfile())}
-            onBack={() => store.setActiveView('create-select-share')}
+            onDelete={openWelcomeDelete}
           />
-        </PublicTaskShell>
-        <PublicFocusFooter />
-      </>
-    );
-  }
-
-  function renderCreateDistribute() {
-    if (!store.pendingKeyset || !store.distributionSession || !selectedProfile) return null;
-    const session = store.distributionSession;
-    const remainingShares = store.pendingKeyset.shares.filter((share) =>
-      session.remaining_member_indices.includes(share.member_idx),
-    );
-    const distributionResults = Object.fromEntries(
-      Object.entries(session.results).map(([memberIdx, result]) => [
-        Number(memberIdx),
-        {
-          status: result.status,
-          label: result.label,
-          packageText: result.package_text,
-        },
-      ]),
-    ) as Record<number, SharedDistributionResult>;
-
-    const handleFinishSetup = () => {
-      const undelivered = session.remaining_member_indices.filter((idx) => {
-        const status = session.results[idx]?.status ?? 'draft';
-        return status === 'draft' || status === 'packaged';
-      });
-      if (undelivered.length > 0) {
-        const confirmed = window.confirm(
-          `${undelivered.length} ${undelivered.length === 1 ? 'share is' : 'shares are'} not yet delivered. Finish setup anyway?`,
         );
-        if (!confirmed) return;
-      }
-      void run(() => store.finishSetup());
-    };
-
-    return (
-      <>
-        <PublicTaskShell>
-          <StepProgress steps={CREATE_FLOW_STEPS} active={3} />
-          <PublicTaskTitle
-            title="Distribute Shares"
-            description="Create each remote onboarding package, set its peer permissions, and mark it delivered when the package has been handed off."
-          />
-          <CreateFlowDistributionSection
-            sectionTitle="Remote Shares"
-            sectionDescription="Each share can be copied, saved, shown as a QR package, or marked delivered after handoff."
-            beforeCards={
-              <OnboardingClientCard
-                running={Boolean(store.runtimeSnapshot?.active)}
-                relayCount={selectedProfile.relays.length}
-                peerCount={store.peerPermissionStates.length}
-                signerPubkey={session.signer_pubkey}
-                onStart={() => void run(() => store.startDistributionClient())}
-                onStop={() => void run(() => store.stopDistributionClient())}
-              />
-            }
-            shares={remainingShares}
-            drafts={Object.fromEntries(
-              Object.entries(store.drafts.distributionForms).map(([memberIdx, form]) => {
-                const idx = Number(memberIdx);
-                const passwordSlot = store.draftSecrets.distributionPasswords[idx] ?? {
-                  password: '',
-                  confirmPassword: '',
-                };
-                return [
-                  idx,
-                  {
-                    label: form.label,
-                    packagePassword: passwordSlot.password,
-                    confirmPassword: passwordSlot.confirmPassword,
-                  },
-                ];
-              }),
-            )}
-            results={distributionResults}
-            permissions={store.drafts.distributionPermissions}
-            onTogglePermission={(memberIdx, permission, enabled) =>
-              void run(() => store.updateDistributionPermission(memberIdx, permission, enabled))
-            }
-            onChangeDraft={(memberIdx, field, value) => {
-              if (field === 'packagePassword') {
-                store.updateDistributionPassword(memberIdx, 'password', value);
-              } else if (field === 'confirmPassword') {
-                store.updateDistributionPassword(memberIdx, 'confirmPassword', value);
-              } else {
-                store.updateDistributionForm(memberIdx, 'label', value);
-              }
+      case 'create-generate':
+        return <CreateGenerateView store={store} run={run} onBack={goToLanding} />;
+      case 'create-select-share':
+        return <CreateSelectShareView store={store} run={run} />;
+      case 'create-save-profile':
+        return <CreateSaveProfileView store={store} run={run} />;
+      case 'create-distribute':
+        return <CreateDistributeView store={store} run={run} selectedProfile={selectedProfile} />;
+      case 'load-import':
+        return <LoadImportView store={store} run={run} onBack={goToLanding} />;
+      case 'load-confirm':
+        return <LoadConfirmView store={store} run={run} />;
+      case 'load-error':
+        return <LoadErrorView store={store} onBack={goToLanding} />;
+      case 'onboard-connect':
+        return <OnboardConnectView store={store} run={run} onBack={goToLanding} />;
+      case 'onboard-handshake':
+        return <OnboardHandshakeView store={store} />;
+      case 'onboard-failed':
+        return (
+          <OnboardFailedView
+            store={store}
+            onRetry={() => {
+              setUiError(null);
+              store.setActiveView('onboard-connect');
             }}
-            onDistribute={(memberIdx, kind) => void run(() => store.distributeShare(memberIdx, kind))}
-            onFinish={handleFinishSetup}
-            onBack={() => store.setActiveView('create-save-profile')}
           />
-          <QrPayloadModal
-            open={Boolean(session.qr_package)}
-            onClose={() => store.closeQrPackage()}
-            title="Onboarding Package QR"
-            label={session.qr_package?.label}
-            payload={session.qr_package?.package_text ?? ''}
+        );
+      case 'onboard-save':
+        return <OnboardSaveView store={store} run={run} />;
+      case 'rotate-connect':
+        return <RotateConnectView store={store} run={run} selectedProfile={selectedProfile} onBack={goToDashboard} />;
+      case 'rotate-save':
+        return <RotateSaveView store={store} run={run} selectedProfile={selectedProfile} />;
+      case 'recover-collect':
+        return (
+          <RecoverCollectView
+            store={store}
+            run={run}
+            selectedProfile={selectedProfile}
+            onBack={goToLanding}
+            onRecovered={setRecoveredKey}
           />
-        </PublicTaskShell>
-        <PublicFocusFooter />
-      </>
-    );
-  }
-
-  function renderLoadImport() {
-    return (
-      <>
-        <PublicTaskShell>
-          <StepProgress steps={IMPORT_FLOW_STEPS} active={0} />
-          <PageBackLink label="Back to Welcome" onBack={goToLanding} />
-          <PublicTaskTitle
-            title="Import Device Profile"
-            description="Import an existing signing device using an encrypted backup."
+        );
+      case 'recover-key':
+        return <RecoverKeyView recoveredKey={recoveredKey} onClear={goToLanding} />;
+      case 'dashboard':
+        return (
+          <DashboardView
+            store={store}
+            run={run}
+            selectedProfile={selectedProfile}
+            operatorSettingsDraft={operatorSettingsDraft}
+            setOperatorSettingsDraft={setOperatorSettingsDraft}
+            requestDashboardTab={requestDashboardTab}
+            dashboardCopiedField={dashboardCopiedField}
+            copyDashboardKey={copyDashboardKey}
+            dismissedSignFailureId={dismissedSignFailureId}
+            setDismissedSignFailureId={setDismissedSignFailureId}
+            openExportModal={openExportModal}
+            setClearCredentialsOpen={setClearCredentialsOpen}
           />
-          <section className="igloo-flow-root">
-            <ImportProfileEntry
-              profileString={store.drafts.importProfileForm.profileString}
-              password={store.draftSecrets.importProfileFormPassword}
-              onProfileStringChange={(value) => store.updateImportProfileForm('profileString', value)}
-              onPasswordChange={(value) => store.updateImportProfilePassword(value)}
-              onNext={() => void run(() => store.loadBfProfile())}
-            />
-          </section>
-        </PublicTaskShell>
-        <PublicFocusFooter />
-      </>
-    );
-  }
-
-  function renderLoadError() {
-    return (
-      <>
-        <PublicTaskShell>
-          <StepProgress steps={IMPORT_FLOW_STEPS} active={0} />
-          <PageBackLink label="Back to Welcome" onBack={goToLanding} />
-          <PublicTaskTitle
-            title="Import Error"
-            description="We couldn't import this profile backup. Resolve the issue below and try again."
-          />
-          <section className="igloo-flow-root">
-            <div className="igloo-onboard-form">
-              <WarningCard
-                title="Import Failed"
-                message={store.pendingLoadError ?? 'We couldn’t import this profile backup.'}
-              />
-              <div className="igloo-onboard-action-row">
-                <Button type="button" onClick={() => store.clearLoadError()}>
-                  Try Again
-                </Button>
-                <Button type="button" variant="secondary" onClick={goToLanding}>
-                  Back to Welcome
-                </Button>
-              </div>
-            </div>
-          </section>
-        </PublicTaskShell>
-        <PublicFocusFooter />
-      </>
-    );
-  }
-
-  function renderLoadConfirm() {
-    if (!store.pendingLoadConfirmation) return null;
-    return (
-      <>
-        <PublicTaskShell>
-          <StepProgress steps={IMPORT_FLOW_STEPS} active={1} />
-          <PageBackLink label="Back" onBack={() => store.setActiveView('load-import')} />
-          <PublicTaskTitle
-            title="Save Profile"
-            description="Name this local profile, protect it with a password, and choose the relays it should use."
-          />
-          <section className="igloo-flow-root">
-            <CreateFlowProfileSetup
-              draft={{
-                label: store.drafts.importSaveForm.label,
-                relayUrls: store.drafts.importSaveForm.relayUrls,
-                primarySecret: store.draftSecrets.importSaveFormPassword,
-                secondarySecret: store.draftSecrets.importSaveFormConfirm,
-              }}
-              lockIdentity
-              actionLabel="Launch Signer"
-              onLabelChange={(value) => store.updateImportSaveForm('label', value)}
-              onPrimarySecretChange={(value) => store.updateImportSavePassword('password', value)}
-              onSecondarySecretChange={(value) => store.updateImportSavePassword('confirmPassword', value)}
-              onPingRelay={(url) => pingRelay(url)}
-              onAction={() => void run(() => store.acceptPendingLoadConfirmation())}
-            />
-          </section>
-        </PublicTaskShell>
-        <PublicFocusFooter />
-      </>
-    );
-  }
-
-  function renderOnboardConnect() {
-    return (
-      <>
-        <PublicTaskShell>
-          <StepProgress steps={ONBOARD_FLOW_STEPS} active={0} />
-          <PageBackLink label="Back to Welcome" onBack={goToLanding} />
-          <PublicTaskTitle
-            title="Input Package"
-            description="Create a new signing device from an onboarding package."
-          />
-          <section className="igloo-flow-root">
-            <OnboardPackageEntry
-              packageText={store.drafts.onboardConnectForm.packageText}
-              password={store.draftSecrets.onboardConnectFormPassword}
-              onPackageTextChange={(value) => store.updateOnboardConnectForm('packageText', value)}
-              onPasswordChange={(value) => store.updateOnboardConnectPassword(value)}
-              onConnect={() => void run(() => store.connectOnboardingPackage())}
-              actionLabel="Next Step"
-            />
-          </section>
-        </PublicTaskShell>
-        <PublicFocusFooter />
-      </>
-    );
-  }
-
-  function renderOnboardHandshake() {
-    return (
-      <>
-        <PublicTaskShell>
-          <StepProgress steps={ONBOARD_FLOW_STEPS} active={1} />
-          <section className="igloo-flow-root">
-            <OnboardHandshakePanel
-              title="Onboard Device"
-              packageText={store.drafts.onboardConnectForm.packageText}
-              keysetName="My Signing Key"
-              thresholdLabel="2/3"
-              activeStep="negotiate"
-              onCancel={() => store.setActiveView('onboard-connect')}
-            />
-          </section>
-        </PublicTaskShell>
-        <PublicFocusFooter />
-      </>
-    );
-  }
-
-  function renderOnboardFailed() {
-    return (
-      <>
-        <PublicTaskShell>
-          <StepProgress steps={ONBOARD_FLOW_STEPS} active={1} />
-          <PublicTaskTitle
-            title="Onboarding Failed"
-            description="We couldn't finish onboarding this device. Review the details below and retry."
-          />
-          <section className="igloo-flow-root">
-            <OnboardFailedPanel
-              keysetName="My Signing Key"
-              thresholdLabel="2/3"
-              activeStep="negotiate"
-              onRetry={() => {
-                setUiError(null);
-                store.setActiveView('onboard-connect');
-              }}
-            />
-          </section>
-        </PublicTaskShell>
-        <PublicFocusFooter />
-      </>
-    );
-  }
-
-  function renderOnboardSave() {
-    if (!store.pendingOnboardConnection) return null;
-    return (
-      <>
-        <PublicTaskShell>
-          <StepProgress steps={ONBOARD_FLOW_STEPS} active={2} />
-          <PageBackLink label="Cancel" onBack={() => store.cancelOnboarding()} />
-          <PublicTaskTitle
-            title="Save Profile"
-            description="Name and protect this profile on the device before launching the signer."
-          />
-          <section className="igloo-flow-root">
-            <CreateFlowProfileSetup
-              draft={{
-                label: store.drafts.onboardSaveForm.label,
-                relayUrls: store.drafts.onboardSaveForm.relayUrls,
-                primarySecret: store.draftSecrets.onboardSaveFormPassword,
-                secondarySecret: store.draftSecrets.onboardSaveFormConfirm,
-              }}
-              lockIdentity
-              lockName={false}
-              actionLabel="Launch Signer"
-              onLabelChange={(value) => store.updateOnboardSaveForm('label', value)}
-              onPrimarySecretChange={(value) => store.updateOnboardSavePassword('password', value)}
-              onSecondarySecretChange={(value) => store.updateOnboardSavePassword('confirmPassword', value)}
-              onPingRelay={(url) => pingRelay(url)}
-              onAction={() => void run(() => store.finalizeOnboardedDevice())}
-            />
-          </section>
-        </PublicTaskShell>
-        <PublicFocusFooter />
-      </>
-    );
-  }
-
-  function renderRotateConnect() {
-    if (!selectedProfile) return null;
-    return (
-      <HostFlowShell
-        title="Rotate Key"
-        description="Connect with a rotated onboarding package and prepare to replace the active device share."
-        onBack={goToDashboard}
-        backTooltip="Back to dashboard"
-      >
-        <section className="igloo-flow-root igloo-stack">
-          <ProfileConfirmationCard
-            title="Current Device"
-            profileName={selectedProfile.label}
-            sharePublicKey={selectedProfile.share_public_key}
-            groupPublicKey={selectedProfile.group_public_key}
-            relays={selectedProfile.relays}
-          />
-          <Card>
-            <CardHeader>
-              <CardTitle>Connect Rotated bfonboard</CardTitle>
-              <CardDescription>Use a rotated onboarding package to replace this device while keeping the same keyset identity.</CardDescription>
-            </CardHeader>
-            <CardContent className="igloo-stack">
-              <label>
-                bfonboard
-                <Textarea
-                  className="min-h-[112px]"
-                  data-testid={CRITICAL_E2E_TEST_IDS.rotationPackageInput}
-                  value={store.drafts.rotateConnectForm.packageText}
-                  onChange={(event) => store.updateRotateConnectForm('packageText', event.target.value)}
-                  placeholder="Paste bfonboard1..."
-                />
-              </label>
-              <label>
-                Package Password
-                <input
-                  type="password"
-                  {...passwordManagerOptOutProps}
-                  data-testid={CRITICAL_E2E_TEST_IDS.rotationPasswordInput}
-                  value={store.draftSecrets.rotateConnectFormPassword}
-                  onChange={(event) => store.updateRotateConnectPassword(event.target.value)}
-                />
-              </label>
-              <div className="igloo-button-row">
-                <Button
-                  type="button"
-                  size="sm"
-                  data-testid={CRITICAL_E2E_TEST_IDS.rotationConnectSubmit}
-                  onClick={() => void run(() => store.connectRotationPackage())}
-                >
-                  Connect Rotation Package
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        </section>
-      </HostFlowShell>
-    );
-  }
-
-  function renderRotateSave() {
-    if (!store.pendingRotationConnection || !selectedProfile) return null;
-    return (
-      <HostFlowShell
-        title="Confirm Rotated Device"
-        description="Review the replacement device details before replacing the active local profile."
-        onBack={() => store.setActiveView('rotate-connect')}
-        backTooltip="Back to connect"
-      >
-        <section className="igloo-flow-root igloo-stack">
-          <ProfileConfirmationCard
-            title="Replacement Preview"
-            profileName={selectedProfile.label}
-            sharePublicKey={store.pendingRotationConnection.preview.share_public_key}
-            groupPublicKey={store.pendingRotationConnection.preview.group_public_key}
-            relays={store.pendingRotationConnection.preview.relays}
-          />
-          <section className="igloo-task-banner">
-            <span className="igloo-task-kicker">Same keyset, fresh device share</span>
-            <p>This replacement keeps the same group public key and replaces this device with a new share and profile id.</p>
-          </section>
-          <label>
-            Current Device Passphrase
-            <input
-              type="password"
-              value={store.unlockPassphrase}
-              onChange={(event) => store.setUnlockPassphrase(event.target.value)}
-              placeholder="Enter the passphrase for the active device"
-            />
-          </label>
-          <div className="igloo-button-row">
-            <Button
-              type="button"
-              size="sm"
-              data-testid={CRITICAL_E2E_TEST_IDS.rotationConfirmSubmit}
-              onClick={() => void run(() => store.finalizeRotationUpdate())}
-            >
-              Replace Active Device
-            </Button>
-          </div>
-        </section>
-      </HostFlowShell>
-    );
-  }
-
-  function renderRecoverCollect() {
-    const threshold = (() => {
-      try {
-        const group = selectedProfile?.group_package_json
-          ? (JSON.parse(selectedProfile.group_package_json) as { threshold?: unknown })
-          : null;
-        return typeof group?.threshold === 'number' && group.threshold > 0 ? group.threshold : 2;
-      } catch {
-        return 2;
-      }
-    })();
-    const sources = store.drafts.recoverKeyForm.sources;
-    const lostDevice = store.draftSecrets.recoverLostDevice;
-    const deviceShareValidated = store.draftSecrets.recoverDeviceUnlockVerified;
-    const pastedCount = sources.filter((source) => source.packageText.trim().length > 0).length;
-    // The device share counts toward the threshold only once its passphrase has
-    // actually unlocked it; in lost-device mode it never counts.
-    const deviceContribution = lostDevice ? 0 : deviceShareValidated ? 1 : 0;
-    const collectedCount = deviceContribution + pastedCount;
-    return (
-      <>
-        <PublicTaskShell>
-          <StepProgress steps={RECOVER_FLOW_STEPS} active={0} />
-          <PageBackLink label="Back to Welcome" onBack={goToLanding} />
-          <PublicTaskTitle
-            title="Collect Shares"
-            description="Collect enough existing source packages to recover this key. Once the threshold is met, you can reveal and export the recovered private key."
-          />
-          <section className="igloo-flow-root">
-            <RecoverCollectSharesPanel
-              devicePassphrase={store.draftSecrets.recoverDevicePassphrase}
-              onChangeDevicePassphrase={(value) => store.setRecoverDevicePassphrase(value)}
-              lostDeviceMode={lostDevice}
-              onToggleLostDevice={(value) => store.setRecoverLostDevice(value)}
-              deviceShareValidated={deviceShareValidated}
-              onVerifyDevicePassphrase={() => void store.verifyRecoverDeviceUnlock()}
-              sources={sources.map((source, index) => ({
-                packageText: source.packageText,
-                packagePassword: store.draftSecrets.recoverKeySources[index] ?? '',
-              }))}
-              threshold={threshold}
-              collectedCount={collectedCount}
-              onChangeSource={(index, field, value) =>
-                store.updateRecoverSource(index, field === 'packagePassword' ? 'password' : 'packageText', value)
-              }
-              onAddSource={() => store.addRecoverSource()}
-              onRemoveSource={(index) => store.removeRecoverSource(index)}
-              onNext={() =>
-                void run(async () => {
-                  const recovered = await store.recoverKeyFromShares();
-                  setRecoveredKey(recovered);
-                })
-              }
-            />
-          </section>
-        </PublicTaskShell>
-        <PublicFocusFooter />
-      </>
-    );
-  }
-
-  function renderRecoverKey() {
-    if (!recoveredKey) return null;
-    return <RecoverPrivateKeyView recovered={recoveredKey} onClear={goToLanding} />;
-  }
-
-  function renderDashboard() {
-    const runtimeState = store.runtimeSnapshot?.active ? 'running' : 'stopped';
-    const runtimeControlLabel = runtimeState === 'running' ? 'Stop Signer' : 'Start Signer';
-    const signerView = deriveSignerDashboardView(selectedProfile, store.runtimeSnapshot, store.peerPermissionStates);
-    const policyView = derivePolicyDashboardView(Boolean(store.runtimeSnapshot?.active), store.peerPermissionStates);
-    const dashboardState = deriveDashboardState({
-      active: Boolean(store.runtimeSnapshot?.active),
-      status: store.runtimeSnapshot?.runtime_status ?? null,
-      // A hard start/restore failure throws out of connect() (no runtime to
-      // query), so startSigner captures it into store.dashboardLoadError and
-      // routes here to show the full-panel load-failed screen.
-      loadError: store.dashboardLoadError,
-      dismissedSignFailureId,
-    });
-
-    return (
-      <div data-testid={CRITICAL_E2E_TEST_IDS.dashboardRoot} className="space-y-6">
-          <OperatorDashboardTabs
-            tabs={[
-              { key: 'signer', label: 'Signer', description: 'runtime console' },
-              { key: 'permissions', label: 'Permissions', description: 'peer policies' },
-              { key: 'settings', label: 'Settings', description: 'operator controls' },
-            ]}
-            activeTab={store.activeDashboardTab}
-            onChangeTab={requestDashboardTab}
-          />
-          {store.activeDashboardTab === 'signer' ? (
-            <div role="tabpanel" id="operator-panel-signer" aria-labelledby="operator-tab-signer">
-              {dashboardState.kind === 'loading' ? (
-                <DashboardLoadingScreen detail={dashboardState.detail} />
-              ) : dashboardState.kind === 'load-failed' ? (
-                <DashboardLoadFailedScreen
-                  message={dashboardState.message}
-                  timestampLabel={dashboardState.at ? formatRuntimeTimestamp(dashboardState.at) : undefined}
-                  onRetry={() => void run(() => store.startSigner())}
-                  onClear={() => setClearCredentialsOpen(true)}
-                />
-              ) : (
-                <>
-                  {dashboardState.banners.map((banner) => (
-                    <DashboardConditionBanner
-                      key={banner.kind}
-                      banner={banner}
-                      timestampLabel={
-                        banner.kind === 'signing-failed' ? formatRuntimeTimestamp(banner.at) : undefined
-                      }
-                      onDismiss={
-                        banner.kind === 'signing-failed'
-                          ? () => setDismissedSignFailureId(banner.requestId)
-                          : undefined
-                      }
-                    />
-                  ))}
-              <OperatorSignerPanel
-                view={signerView}
-                emptyDescription="Load or onboard a device profile before opening the signer dashboard."
-                runtimeControlLabel={runtimeControlLabel}
-                copiedField={dashboardCopiedField}
-                onCopyGroupKey={(format) => copyDashboardKey('group', signerView?.groupKey, format)}
-                onCopyShareKey={(format) => copyDashboardKey('share', signerView?.shareKey, format)}
-                onPrimaryAction={() =>
-                  void run(() => (store.runtimeSnapshot?.active ? store.stopSigner() : store.startSigner()))
-                }
-                onRefreshPeers={() => void run(() => store.refreshSigner())}
-                refreshPeersDisabled={!store.runtimeSnapshot?.active}
-                // Clearing the host-side log buffer requires an active session, so
-                // only expose the control while the signer is running.
-                onClearLogs={
-                  store.runtimeSnapshot?.active ? () => void run(() => store.clearLogs()) : undefined
-                }
-                onApproveOnce={(id) => void run(() => store.resolveApproval(id, true))}
-                onDenyApproval={(id) => void run(() => store.resolveApproval(id, false))}
-                onAlwaysAllow={(id) => {
-                  const row = signerView?.pendingApprovalRows?.find((approval) => approval.id === id);
-                  if (!row) return;
-                  // Approve this request, then persist an Allow override so future
-                  // requests for this peer+method skip the queue.
-                  void run(async () => {
-                    await store.resolveApproval(id, true);
-                    await store.updatePeerPolicy(row.pubkey, 'respond', row.method, 'allow');
-                  });
-                }}
-              />
-                </>
-              )}
-            </div>
-          ) : null}
-
-          {store.activeDashboardTab === 'permissions' ? (
-            <div role="tabpanel" id="operator-panel-permissions" aria-labelledby="operator-tab-permissions">
-              <OperatorPermissionsPanel
-                view={policyView}
-                showPeerSummary={false}
-                onRefresh={() => void run(() => store.refreshSigner())}
-                onClearAllPeerPermissions={() => void run(() => store.clearPeerPolicies())}
-                onPeerPolicyOverrideChange={(pubkey, direction, method, value) =>
-                  void run(() => store.updatePeerPolicy(pubkey, direction, method, value))
-                }
-                peerClearAllLabel="Remove Overrides"
-                peerDescription="Live outbound and inbound peer policy state for the active browser signer."
-                peerEmptyText={
-                  store.runtimeSnapshot?.active
-                    ? 'No peer policy state is currently available from the active runtime.'
-                    : 'Start the signer to inspect and edit live peer policy state.'
-                }
-              />
-            </div>
-          ) : null}
-
-          {store.activeDashboardTab === 'settings' ? (
-            <div role="tabpanel" id="operator-panel-settings" aria-labelledby="operator-tab-settings">
-              <OperatorSettingsPanel
-                hasProfile={Boolean(selectedProfile)}
-                signerName={operatorSettingsDraft.signerName}
-                onSignerNameChange={(value) =>
-                  setOperatorSettingsDraft((current) => ({ ...current, signerName: value }))
-                }
-                relays={operatorSettingsDraft.relays}
-                newRelayUrl={operatorSettingsDraft.newRelayUrl}
-                onNewRelayUrlChange={(value) =>
-                  setOperatorSettingsDraft((current) => ({ ...current, newRelayUrl: value }))
-                }
-                onAddRelay={() =>
-                  setOperatorSettingsDraft((current) => {
-                    const normalized = current.newRelayUrl.trim();
-                    if (!normalized || current.relays.includes(normalized)) return current;
-                    return {
-                      ...current,
-                      relays: [...current.relays, normalized],
-                      newRelayUrl: '',
-                    };
-                  })
-                }
-                onRemoveRelay={(relay) =>
-                  setOperatorSettingsDraft((current) => ({
-                    ...current,
-                    relays: current.relays.filter((item) => item !== relay),
-                  }))
-                }
-                signerSettings={operatorSettingsDraft.signerSettings}
-                onSignerSettingNumberChange={(field, value) =>
-                  setOperatorSettingsDraft((current) => ({
-                    ...current,
-                    signerSettings: {
-                      ...current.signerSettings,
-                      [field]: Number.parseInt(value, 10) || current.signerSettings[field],
-                    },
-                  }))
-                }
-                onPeerSelectionStrategyChange={(value) =>
-                  setOperatorSettingsDraft((current) => ({
-                    ...current,
-                    signerSettings: {
-                      ...current.signerSettings,
-                      peer_selection_strategy: value,
-                    },
-                  }))
-                }
-                onSave={() =>
-                  void run(() =>
-                    store.saveOperatorSettings({
-                      label: operatorSettingsDraft.signerName,
-                      relays: operatorSettingsDraft.relays,
-                      signerSettings: operatorSettingsDraft.signerSettings,
-                    }),
-                  )
-                }
-                saveDisabled={!selectedProfile || !store.runtimeSnapshot?.active}
-                message={
-                  store.runtimeSnapshot?.active ? null : 'Start the signer to apply settings live.'
-                }
-                sections={[
-                  {
-                    title: 'Replace Share',
-                    description:
-                      "Import a bfonboard package to replace only this device's local share while keeping the same group public key and profile.",
-                    actionLabel: 'Replace Share',
-                    testId: CRITICAL_E2E_TEST_IDS.maintenanceRotateShare,
-                    variant: 'secondary',
-                    disabled: !selectedProfile,
-                    onAction: () =>
-                      void run(() => {
-                        store.startRotateKey();
-                      }),
-                  },
-                  {
-                    title: 'Export Profile',
-                    description: 'Encrypted backup of your share and configuration.',
-                    actionLabel: 'Export Profile',
-                    testId: CRITICAL_E2E_TEST_IDS.settingsCopyProfile,
-                    variant: 'secondary',
-                    disabled: !selectedProfile,
-                    onAction: () => openExportModal('bfprofile'),
-                  },
-                  {
-                    title: 'Export Share',
-                    description: 'Password-protected bfshare package.',
-                    actionLabel: 'Export Share',
-                    testId: CRITICAL_E2E_TEST_IDS.settingsCopyShare,
-                    variant: 'secondary',
-                    disabled: !selectedProfile,
-                    onAction: () => openExportModal('bfshare'),
-                  },
-                  {
-                    title: 'Logout',
-                    description: 'Return to the profile list to open another profile.',
-                    actionLabel: 'Logout',
-                    testId: CRITICAL_E2E_TEST_IDS.settingsLogout,
-                    variant: 'outline',
-                    disabled: !selectedProfile,
-                    onAction: () => void run(() => store.logout()),
-                  },
-                  {
-                    title: 'Clear Credentials',
-                    description:
-                      'Permanently remove every stored profile and credential from this device. This cannot be undone.',
-                    actionLabel: 'Clear Credentials',
-                    testId: CRITICAL_E2E_TEST_IDS.settingsClearCredentials,
-                    variant: 'destructive',
-                    disabled: store.profiles.length === 0,
-                    onAction: () => setClearCredentialsOpen(true),
-                  },
-                ]}
-                extraSections={
-                  <ContentCard
-                    title="Browser Settings"
-                    description="PWA-specific preferences for persistence, routing, and install prompting."
-                  >
-                    <div className="igloo-settings-grid">
-                      <Checkbox
-                        checked={store.settings.remember_browser_state}
-                        onCheckedChange={(checked) => store.updateSettings('remember_browser_state', checked)}
-                        label="Remember browser state"
-                        description="Persist profiles, drafts, and the last active workspace in this browser."
-                      />
-                      <Checkbox
-                        checked={store.settings.auto_open_signer}
-                        onCheckedChange={(checked) => store.updateSettings('auto_open_signer', checked)}
-                        label="Open signer after import"
-                        description="Jump straight into the signer workspace after a successful setup action."
-                        data-testid={CRITICAL_E2E_TEST_IDS.settingsAutoOpenToggle}
-                      />
-                      <Checkbox
-                        checked={store.settings.prefer_install_prompt}
-                        onCheckedChange={(checked) => store.updateSettings('prefer_install_prompt', checked)}
-                        label="Prefer install prompt"
-                        description="Keep the PWA install affordance visible when the browser makes it available."
-                      />
-                    </div>
-                  </ContentCard>
-                }
-              />
-            </div>
-          ) : null}
-      </div>
-    );
-  }
+        );
+      default:
+        return null;
+    }
+  })();
 
   return (
     <PageLayout
@@ -1591,8 +423,8 @@ function AppShell() {
         />
       }
     >
-      {renderError()}
-      {renderRuntimeWarning()}
+      {uiError && !store.dashboardLoadError ? <Alert tone="danger">{uiError}</Alert> : null}
+      {store.runtimeWarning ? <Alert tone="warning">{store.runtimeWarning}</Alert> : null}
       <WelcomeUnlockModal
         open={Boolean(welcomeUnlockProfileId)}
         profile={welcomeUnlockProfile}
@@ -1663,23 +495,7 @@ function AppShell() {
         }}
         onCancel={() => setClearCredentialsOpen(false)}
       />
-      {store.activeView === 'landing' ? renderLanding() : null}
-      {store.activeView === 'create-generate' ? renderCreateGenerate() : null}
-      {store.activeView === 'create-select-share' ? renderCreateSelectShare() : null}
-      {store.activeView === 'create-save-profile' ? renderCreateSaveProfile() : null}
-      {store.activeView === 'create-distribute' ? renderCreateDistribute() : null}
-      {store.activeView === 'load-import' ? renderLoadImport() : null}
-      {store.activeView === 'load-confirm' ? renderLoadConfirm() : null}
-      {store.activeView === 'load-error' ? renderLoadError() : null}
-      {store.activeView === 'onboard-connect' ? renderOnboardConnect() : null}
-      {store.activeView === 'onboard-handshake' ? renderOnboardHandshake() : null}
-      {store.activeView === 'onboard-failed' ? renderOnboardFailed() : null}
-      {store.activeView === 'onboard-save' ? renderOnboardSave() : null}
-      {store.activeView === 'rotate-connect' ? renderRotateConnect() : null}
-      {store.activeView === 'rotate-save' ? renderRotateSave() : null}
-      {store.activeView === 'recover-collect' ? renderRecoverCollect() : null}
-      {store.activeView === 'recover-key' ? renderRecoverKey() : null}
-      {store.activeView === 'dashboard' ? renderDashboard() : null}
+      {activeViewContent}
     </PageLayout>
   );
 }

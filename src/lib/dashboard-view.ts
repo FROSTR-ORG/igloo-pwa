@@ -1,6 +1,16 @@
 import { nip19 } from 'nostr-tools';
 
-import type { DashboardKeyModel } from 'igloo-ui';
+import {
+  buildPeerReadinessRows,
+  buildPendingApprovalRows,
+  observabilityEventsToEventRows,
+  type DashboardKeyModel,
+  type EventLogRowModel,
+  type PolicyDashboardViewModel,
+  type SignerDashboardViewModel,
+} from 'igloo-ui';
+import type { RuntimeStatusSummary } from 'igloo-shared';
+import type { PwaPeerPermissionState, PwaProfile, PwaRuntimeSnapshot } from './types';
 
 // Pure helpers backing the signer dashboard's merged identity card. Kept out of
 // App.tsx so they can be unit-tested in isolation (no React/store dependency).
@@ -71,4 +81,104 @@ export function deriveExportSummary(profile: ExportSummaryProfile | null): strin
     typeof memberCount === 'number' ? `${memberCount} peers` : undefined,
   ].filter(Boolean);
   return parts.join(' · ');
+}
+
+function toPwaEventRows(lines: string[] = []): EventLogRowModel[] {
+  return lines.map((line, index) => ({
+    id: `pwa-log-${index}-${line}`,
+    badgeLabel: line.startsWith('[error]') ? 'error' : line.startsWith('[warn]') ? 'warn' : 'info',
+    badgeTone: line.startsWith('[error]') ? 'danger' : line.startsWith('[warn]') ? 'warning' : 'info',
+    message: line.replace(/^\[[^\]]+\]\s*/, ''),
+    timestampLabel: 'live',
+  }));
+}
+
+export function formatRuntimeTimestamp(value: number | null) {
+  if (typeof value !== 'number') return 'n/a';
+  const normalized = value > 10_000_000_000 ? value : value * 1000;
+  return new Date(normalized).toLocaleString();
+}
+
+function derivePendingOperations(runtimeStatus: RuntimeStatusSummary | null | undefined) {
+  const summary = runtimeStatus ?? null;
+  return (summary?.pending_operations ?? []).map((operation) => ({
+    id: operation.request_id,
+    operationLabel: operation.op_type,
+    thresholdLabel: `threshold ${operation.threshold}`,
+    startedLabel: formatRuntimeTimestamp(operation.started_at),
+    timeoutLabel: formatRuntimeTimestamp(operation.timeout_at),
+    responseLabel: `${Array.isArray(operation.collected_responses) ? operation.collected_responses.length : 0} responses`,
+  }));
+}
+
+function deriveRuntimeSummaryLabel(runtimeSnapshot: PwaRuntimeSnapshot | null) {
+  if (!runtimeSnapshot?.active) return 'Signer Stopped';
+  const readiness = runtimeSnapshot.readiness ?? null;
+  if (readiness && (!readiness.sign_ready || !readiness.ecdh_ready || !readiness.restore_complete)) {
+    return 'Signer Running (Degraded)';
+  }
+  return 'Signer Running';
+}
+
+export function deriveSignerDashboardView(
+  profile: PwaProfile | null,
+  runtimeSnapshot: PwaRuntimeSnapshot | null,
+  peerPermissionStates: PwaPeerPermissionState[],
+): SignerDashboardViewModel | null {
+  if (!profile) return null;
+
+  const summary = runtimeSnapshot?.runtime_status ?? null;
+  const readiness = runtimeSnapshot?.readiness ?? null;
+  const peerTotal = summary?.metadata?.peers?.length ? summary.metadata.peers.length + 1 : null;
+  const thresholdLabel =
+    typeof readiness?.threshold === 'number' && peerTotal ? `${readiness.threshold}/${peerTotal}` : 'threshold n/a';
+
+  const peerRows = buildPeerReadinessRows({
+    peers: summary?.peers ?? [],
+    rosterPubkeys: summary?.metadata?.peers ?? [],
+    policyPubkeys: peerPermissionStates.map((state) => state.pubkey),
+  });
+
+  return {
+    profileName: profile.label || 'Unnamed device',
+    thresholdLabel,
+    memberLabel: Number.isFinite(profile.member_idx) ? `Share #${profile.member_idx}` : undefined,
+    publicKeyLabel: profile.group_public_key,
+    shareLabel: profile.share_public_key,
+    groupKey: toDashboardKey(profile.group_public_key),
+    shareKey: toDashboardKey(profile.share_public_key),
+    running: Boolean(runtimeSnapshot?.active),
+    readinessLabel: deriveRuntimeSummaryLabel(runtimeSnapshot),
+    relaySummary: runtimeSnapshot?.active ? 'Browser runtime connected' : 'Runtime stopped',
+    pendingApprovalRows: buildPendingApprovalRows({
+      approvals: summary?.pending_approvals ?? [],
+      peerAliases: Object.fromEntries(peerRows.map((row) => [row.pubkey, row.alias])),
+    }),
+    peerRows,
+    pendingOperationRows: derivePendingOperations(runtimeSnapshot?.runtime_status),
+    // Prefer structured events (domain/event tags + filter); fall back to the
+    // formatted log lines for sessions that only surface plain strings.
+    eventRows: runtimeSnapshot?.events?.length
+      ? observabilityEventsToEventRows(runtimeSnapshot.events)
+      : toPwaEventRows(runtimeSnapshot?.runtime_log_lines),
+  };
+}
+
+export function derivePolicyDashboardView(
+  active: boolean,
+  peerPermissionStates: PwaPeerPermissionState[],
+): PolicyDashboardViewModel {
+  return {
+    peerRows: active
+      ? peerPermissionStates.map((policy) => ({
+          pubkey: policy.pubkey,
+          request: policy.effective_policy.request,
+          respond: policy.effective_policy.respond,
+          manualOverride: {
+            request: policy.manual_override.request,
+            respond: policy.manual_override.respond,
+          },
+        }))
+      : [],
+  };
 }
