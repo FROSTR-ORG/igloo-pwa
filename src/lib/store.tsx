@@ -1571,6 +1571,15 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
             ...current,
             pendingLoadError: message,
             activeView: 'load-error',
+            // Don't retain the decrypt passwords after a failed import — the
+            // error screen never shows them, so clearing is pure hygiene
+            // (mirrors the cancel paths).
+            draftSecrets: {
+              ...current.draftSecrets,
+              importProfileFormPassword: '',
+              importSaveFormPassword: '',
+              importSaveFormConfirm: '',
+            },
           }));
           return;
         }
@@ -1700,6 +1709,14 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           setState((current) => ({
             ...current,
             activeView: 'onboard-failed',
+            // Don't retain the onboarding decrypt passwords after a failed
+            // handshake (mirrors cancelOnboarding's cleanup).
+            draftSecrets: {
+              ...current.draftSecrets,
+              onboardConnectFormPassword: '',
+              onboardSaveFormPassword: '',
+              onboardSaveFormConfirm: '',
+            },
           }));
           throw error;
         }
