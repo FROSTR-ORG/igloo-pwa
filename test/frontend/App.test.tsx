@@ -705,7 +705,9 @@ describe('igloo-pwa app shell', () => {
     await waitFor(() => {
       expect(screen.getByRole('heading', { name: 'Select Share' })).toBeInTheDocument();
       expect(screen.getByText('Choose Local Share')).toBeInTheDocument();
-      expect(screen.getByRole('button', { name: 'Copy group public key' })).toBeInTheDocument();
+      expect(screen.getByText(/^npub1/)).toBeInTheDocument();
+      expect(screen.getByText('22'.repeat(32))).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Copy group public key' })).not.toBeInTheDocument();
     });
     fireEvent.click(screen.getByRole('button', { name: 'Next Step' }));
 

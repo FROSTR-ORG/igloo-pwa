@@ -17,6 +17,7 @@ import {
 import { pingRelay, shortProfileId } from 'igloo-shared';
 import type { useStore } from '../lib/store';
 import type { PwaProfile } from '../lib/types';
+import { toDashboardKey } from '../lib/dashboard-view';
 
 type PwaStore = ReturnType<typeof useStore>;
 type RunAction = (action: () => Promise<void> | void) => Promise<void>;
@@ -118,12 +119,8 @@ export function CreateSelectShareView({ store, run }: { store: PwaStore; run: Ru
           selectedMemberIdx={store.selectedGeneratedShareIdx}
           keysetName={store.pendingKeyset.group_name}
           groupPublicKey={store.pendingKeyset.group_public_key}
+          groupPublicKeyNpub={toDashboardKey(store.pendingKeyset.group_public_key)?.npub}
           onSelectShare={(memberIdx) => store.selectGeneratedShare(memberIdx)}
-          onCopyGroupPublicKey={() => {
-            if (navigator.clipboard?.writeText) {
-              void navigator.clipboard.writeText(store.pendingKeyset?.group_public_key ?? '');
-            }
-          }}
           onAction={() => void run(() => store.continueToSaveProfile())}
           onBack={() => store.setActiveView('create-generate')}
         />
