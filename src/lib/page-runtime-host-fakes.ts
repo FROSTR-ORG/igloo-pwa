@@ -14,6 +14,7 @@ export function createFakeBrowserRuntimeSession(
     clearLogs: () => {},
     read: () => snapshot,
     refreshPeers: async () => snapshot,
+    pingPeer: async () => ({ success: true, latency: 1 }),
     updatePeerPolicyOverride: async () => snapshot,
     clearPeerPolicyOverrides: async () => snapshot,
     updateConfig: () => snapshot,

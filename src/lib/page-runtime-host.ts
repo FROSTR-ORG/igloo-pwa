@@ -12,18 +12,21 @@ import {
   getRuntimeReadiness,
   getRuntimeSnapshot,
   getRuntimeStatus,
+  pingSinglePeer,
   refreshAllPeersOnNode,
   stopSignerNode,
   updateRuntimeConfigOnNode,
   updateRuntimePeerPolicyOverrideOnNode,
   type DecodedOnboardingProfile,
   type ObservabilityEvent,
+  type PingResult,
   type RuntimeMetadata,
   type RuntimePeerPermissionState,
   type RuntimeReadiness,
   type SignerSettings,
   type RuntimeStatusSummary,
   normalizeSignerSettings,
+  type ObservabilityLevel,
 } from 'igloo-shared';
 import { ensureIglooSharedConfigured } from './configure-igloo-shared';
 
@@ -89,6 +92,7 @@ export type BrowserRuntimeSession = {
   clearLogs: () => void;
   read: () => BrowserRuntimeSessionSnapshot;
   refreshPeers: () => Promise<BrowserRuntimeSessionSnapshot>;
+  pingPeer: (pubkey: string) => Promise<PingResult>;
   updatePeerPolicyOverride: (
     pubkey: string,
     patch: {
@@ -132,11 +136,16 @@ function toErrorMessage(error: unknown, fallback = 'Unknown error') {
   return fallback;
 }
 
-function formatLogLine(level: 'info' | 'warn' | 'error', payload: unknown) {
+function isObservabilityLevel(value: unknown): value is ObservabilityLevel {
+  return value === 'debug' || value === 'info' || value === 'warn' || value === 'error';
+}
+
+function formatLogLine(level: ObservabilityLevel, payload: unknown) {
   if (payload && typeof payload === 'object') {
     const record = payload as Record<string, unknown>;
     const domain = typeof record.domain === 'string' ? record.domain : 'runtime';
     const event = typeof record.event === 'string' ? record.event : 'message';
+    const eventLevel = isObservabilityLevel(record.level) ? record.level : level;
     const detailParts: string[] = [];
     if (typeof record.request_id === 'string') detailParts.push(`request_id=${record.request_id}`);
     if (Array.isArray(record.reasons) && record.reasons.length > 0) {
@@ -153,8 +162,8 @@ function formatLogLine(level: 'info' | 'warn' | 'error', payload: unknown) {
       detailParts.push(`error=${record.error_message}`);
     }
     return detailParts.length > 0
-      ? `[${level}] ${domain}.${event} ${detailParts.join(' ')}`
-      : `[${level}] ${domain}.${event}`;
+      ? `[${eventLevel}] ${domain}.${event} ${detailParts.join(' ')}`
+      : `[${eventLevel}] ${domain}.${event}`;
   }
   const text = payload instanceof Error ? payload.message : String(payload);
   return `[${level}] ${text}`;
@@ -198,7 +207,16 @@ async function waitForNonceSnapshot(node: BrowserBridgeNode) {
 function asObservabilityEvent(payload: unknown): ObservabilityEvent | null {
   if (!payload || typeof payload !== 'object') return null;
   const record = payload as Record<string, unknown>;
-  if (typeof record.domain !== 'string' || typeof record.level !== 'string') return null;
+  if (
+    typeof record.domain !== 'string' ||
+    typeof record.event !== 'string' ||
+    typeof record.component !== 'string' ||
+    typeof record.ts !== 'number' ||
+    !Number.isFinite(record.ts) ||
+    !isObservabilityLevel(record.level)
+  ) {
+    return null;
+  }
   return payload as ObservabilityEvent;
 }
 
@@ -345,6 +363,9 @@ function createSession(node: BrowserBridgeNode, logs: ReturnType<typeof attachLo
       await new Promise((resolve) => setTimeout(resolve, 250));
       return buildSessionSnapshot(node, logs.collectEvents());
     },
+    async pingPeer(pubkey) {
+      return await pingSinglePeer(node, normalizePingPeerPubkey(pubkey));
+    },
     async updatePeerPolicyOverride(pubkey, patch) {
       await updateRuntimePeerPolicyOverrideOnNode(node, pubkey, patch);
       return buildSessionSnapshot(node, logs.collectEvents());
@@ -385,6 +406,14 @@ function createSession(node: BrowserBridgeNode, logs: ReturnType<typeof attachLo
       return buildSessionSnapshot(node, logs.collectEvents());
     }
   };
+}
+
+function normalizePingPeerPubkey(pubkey: string) {
+  const normalized = pubkey.trim().toLowerCase();
+  if (/^(02|03)[0-9a-f]{64}$/.test(normalized)) {
+    return normalized.slice(2);
+  }
+  return normalized;
 }
 
 export async function startBrowserRuntimeSession(

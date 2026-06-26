@@ -160,6 +160,21 @@ describe('SessionController idempotent lifecycle (D.4)', () => {
     await expect(controller.clearPeerPolicies(profile.id, epoch)).resolves.toBeNull();
   });
 
+  it('adapter.pingPeer pings through the active controller and refreshes the runtime snapshot', async () => {
+    const controller = new SessionController();
+    const profile = buildProfile();
+    const snapshot = await adapter.startSession(profile, 'test-passphrase', controller);
+    const peerPubkey = '44'.repeat(32);
+
+    const outcome = await adapter.pingPeer(snapshot, peerPubkey, controller);
+
+    expect(outcome?.result).toEqual({ success: true, latency: 1 });
+    expect(outcome?.snapshot.active).toBe(true);
+    expect(outcome?.snapshot.profile?.id).toBe(profile.id);
+
+    await controller.stop();
+  });
+
   it('stale-epoch read returns null after a restart bumps the epoch', async () => {
     const controller = new SessionController();
     const profile = buildProfile();
@@ -239,7 +254,7 @@ describe('SessionController idempotent lifecycle (D.4)', () => {
         '99'.repeat(32),
         'request',
         'sign',
-        true,
+        'allow',
         controller,
       ),
     ).resolves.toBeNull();

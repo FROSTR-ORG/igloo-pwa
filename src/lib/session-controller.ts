@@ -1,4 +1,4 @@
-import type { Passphrase } from 'igloo-shared';
+import type { Passphrase, PingResult } from 'igloo-shared';
 
 import {
   startBrowserRuntimeSession,
@@ -45,6 +45,8 @@ export type SessionStartOutcome = {
  *     profile is currently attached). Never throws.
  *   - `read()` / `refresh()` return `null` when inactive or when the
  *     caller's cached `epoch` is stale. Never throw.
+ *   - `pingPeer()` returns `null` on drift, or a `PingResult` for the
+ *     active session. Never throws.
  *   - `applyPeerPolicy()` / `clearPeerPolicies()` return `null` on drift.
  *     Never throw.
  *   - Only `start()` can throw, and only for genuine programming errors
@@ -205,6 +207,28 @@ export class SessionController {
       return await this.session!.refreshPeers();
     } catch {
       return null;
+    }
+  }
+
+  /**
+   * Ping a peer from the current session. Returns `null` on drift and
+   * a failure result if the runtime call itself fails.
+   */
+  async pingPeer(
+    profileId: string,
+    epoch: SessionEpoch,
+    pubkey: string,
+  ): Promise<PingResult | null> {
+    if (!this.isFresh(profileId, epoch)) {
+      return null;
+    }
+    try {
+      return await this.session!.pingPeer(pubkey);
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error && error.message ? error.message : 'Ping failed',
+      };
     }
   }
 

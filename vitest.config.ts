@@ -13,7 +13,7 @@ export default defineConfig({
   plugins: [react()],
   resolve: resolveConfig,
   test: createVitestBaseConfig({
-    include: ['test/frontend/**/*.test.tsx'],
+    include: ['test/frontend/**/*.test.{ts,tsx}'],
     setupFiles: ['./src/test/setup.ts'],
   }),
 });

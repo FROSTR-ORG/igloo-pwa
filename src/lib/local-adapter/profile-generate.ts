@@ -1,5 +1,5 @@
 import {
-  buildRotationDraftFromBfshares,
+  buildRotationDraftFromSourcePackages,
   createBrowserOnboardSponsorshipPackage,
   createBrowserOnboardSponsorshipPackageFromBfshare,
   getWasmKeysetApi,
@@ -7,7 +7,7 @@ import {
   groupPackageToWireJson,
   normalizeHex32,
   publicKeyFromSecret,
-  recoverRotationSourceFromBfshare,
+  recoverRotationSourceFromPackage,
   recoverSecretKeyFromShares,
   sharePackageToWireJson,
 } from 'igloo-shared';
@@ -102,7 +102,7 @@ export async function createRotatedKeyset(input: {
   if (!input.groupName.trim()) {
     throw new Error('Group name is required.');
   }
-  const draft = await buildRotationDraftFromBfshares({
+  const draft = await buildRotationDraftFromSourcePackages({
     sources: input.sources,
     threshold: input.threshold,
     count: input.count,
@@ -137,7 +137,7 @@ export async function recoverNsecFromShares(input: {
     input.sources
       .filter((source) => source.packageText.trim() && source.password)
       .map((source) =>
-        recoverRotationSourceFromBfshare(source.packageText.trim(), source.password),
+        recoverRotationSourceFromPackage(source.packageText.trim(), source.password),
       ),
   );
   return await recoverSecretKeyFromShares({ sources: recoveredSources });

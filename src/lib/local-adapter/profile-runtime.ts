@@ -1,6 +1,6 @@
-import { decodeBfSharePackage, sharePackageToWireJson } from 'igloo-shared';
+import { decodeBfSharePackage, sharePackageToWireJson, type PingResult } from 'igloo-shared';
 
-import type { PwaProfile, PwaRuntimeSnapshot } from '../types';
+import type { PwaPolicyOverrideValue, PwaProfile, PwaRuntimeSnapshot } from '../types';
 import {
   getDefaultSessionController,
   SessionController,
@@ -11,6 +11,7 @@ import {
   normalizePwaSignerSettings,
   normalizeRelayList,
   now,
+  toPwaPeerPermissionState,
   toRuntimeProfile,
   toRuntimeSnapshot,
   type OperatorSettingsInput,
@@ -233,6 +234,8 @@ export async function refreshSession(
     profile: runtimeProfile,
     runtime_status: refreshed.runtimeStatus,
     readiness: refreshed.readiness,
+    peer_permission_states: refreshed.peerPermissionStates.map(toPwaPeerPermissionState),
+    events: refreshed.events ?? [],
     runtime_log_lines: [
       ...(session?.collectLogs() ?? []),
       '[info] session refresh completed',
@@ -245,6 +248,74 @@ export async function refreshSession(
       signer_pubkey: refreshed.metadata.share_public_key,
     },
   };
+}
+
+export async function pingPeer(
+  current: PwaRuntimeSnapshot | null,
+  pubkey: string,
+  controller?: SessionController | null,
+): Promise<{ result: PingResult; snapshot: PwaRuntimeSnapshot } | null> {
+  if (!current?.profile) return null;
+  const target = resolveController(controller);
+  const profileId = current.profile.id;
+  if (!current.active || target.getActiveProfileId() !== profileId) {
+    return null;
+  }
+  const result = await target.pingPeer(profileId, target.currentEpoch(), pubkey);
+  if (!result) {
+    return null;
+  }
+  const sharePackageJson = target.getSharePackageJson(profileId);
+  const session = target.getActiveSession();
+  if (!sharePackageJson || !session) {
+    return null;
+  }
+  const snapshot = toRuntimeSnapshot(current.profile, session, true, sharePackageJson);
+  return {
+    result,
+    snapshot: withFailedPingPeerOffline(snapshot, pubkey, result),
+  };
+}
+
+function withFailedPingPeerOffline(
+  snapshot: PwaRuntimeSnapshot,
+  pubkey: string,
+  result: PingResult,
+): PwaRuntimeSnapshot {
+  if (result.success || !isOfflinePingResult(result) || !snapshot.runtime_status) {
+    return snapshot;
+  }
+
+  const normalizedPubkey = pubkey.toLowerCase();
+  let changed = false;
+  const peers = snapshot.runtime_status.peers.map((peer) => {
+    if (peer.pubkey.toLowerCase() !== normalizedPubkey) {
+      return peer;
+    }
+    changed = true;
+    const { latency_ms: _latencyMs, ...peerWithoutLatency } = peer;
+    return {
+      ...peerWithoutLatency,
+      online: false,
+    };
+  });
+
+  if (!changed) {
+    return snapshot;
+  }
+
+  return {
+    ...snapshot,
+    runtime_status: {
+      ...snapshot.runtime_status,
+      peers,
+    },
+  };
+}
+
+function isOfflinePingResult(result: PingResult) {
+  const error = result.error?.toLowerCase() ?? '';
+  return error.includes('timeout') || error.includes('timed out') || error.includes('offline') || error.includes('unreachable');
 }
 
 export async function readSession(
@@ -284,7 +355,7 @@ export async function applyPeerPolicy(
   pubkey: string,
   direction: 'request' | 'respond',
   method: 'ping' | 'onboard' | 'sign' | 'ecdh',
-  value: boolean,
+  value: PwaPolicyOverrideValue,
   controller?: SessionController | null,
 ): Promise<PwaRuntimeSnapshot | null> {
   if (!current?.profile) return null;
@@ -300,7 +371,7 @@ export async function applyPeerPolicy(
     pubkey,
     direction,
     method,
-    value: value ? 'allow' : 'deny',
+    value,
   });
   if (!applied) {
     return null;
@@ -352,7 +423,12 @@ export async function clearSessionLogs(
     return null;
   }
   session.clearLogs();
-  return toRuntimeSnapshot(current.profile, session, true, sharePackageJson);
+  const snapshot = toRuntimeSnapshot(current.profile, session, true, sharePackageJson);
+  return {
+    ...snapshot,
+    events: [],
+    runtime_log_lines: [],
+  };
 }
 
 export async function applyOperatorSettings(

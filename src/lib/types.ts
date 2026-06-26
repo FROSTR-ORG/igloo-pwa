@@ -11,7 +11,6 @@ import type {
 
 export type PwaView =
   | 'landing'
-  | 'create-choice'
   | 'create-generate'
   | 'create-select-share'
   | 'create-save-profile'
@@ -32,6 +31,7 @@ export type PwaView =
   | 'settings';
 
 export type PwaDashboardTab = 'signer' | 'permissions' | 'settings';
+export type PwaRecoverReturnView = 'landing' | 'dashboard';
 export type PwaPeerSelectionStrategy = 'deterministic_sorted' | 'random';
 
 export type PwaSignerSettings = SharedSignerSettings;
@@ -242,6 +242,7 @@ export type PwaDraftState = {
   };
   recoverKeyForm: {
     sourceProfileId: string;
+    returnView: PwaRecoverReturnView;
     sources: Array<{ packageText: string }>;
   };
   profileForm: {
@@ -316,6 +317,8 @@ export type PwaPersistedState = {
   pendingLoadConfirmation: PwaLoadConfirmation | null;
   /** In-memory only. Non-secret error string from the last load attempt. */
   pendingLoadError: string | null;
+  /** In-memory only. Distinguishes import-package failures from stored-profile load failures. */
+  pendingLoadErrorKind: 'import' | 'profile' | null;
   /** In-memory only. */
   pendingOnboardConnection: PwaOnboardConnection | null;
   /** In-memory only. */

@@ -3,9 +3,12 @@ import {
   createBrowserOnboardingConnection,
   createProfilePackagePair,
   decodeBfProfilePackage,
+  decodeBfSharePackage,
+  encodeBfSharePackage,
   finalizeConnectedBrowserProfile,
   finalizeRotatedBrowserProfile,
   importBrowserProfilePackage,
+  reconstructBrowserProfilePackagePayload,
 } from 'igloo-shared';
 
 import { connectOnboardingPackageAndCaptureProfile } from '../page-runtime-host';
@@ -173,14 +176,36 @@ export async function finalizeOnboardedDevice(input: OnboardFinalizeInput): Prom
 // decode with that, then re-encode the payload under the export password so the
 // exported backup is portable and independent of the local password.
 export async function exportEncryptedPackage(input: {
-  profileString: string;
+  profile?: PwaProfile;
+  profileString?: string;
+  shareString: string;
   storedPassword: string;
   exportPassword: string;
   format: 'bfprofile' | 'bfshare';
 }): Promise<string> {
+  if (input.format === 'bfshare') {
+    const payload = await decodeBfSharePackage(input.shareString, input.storedPassword);
+    return await encodeBfSharePackage(payload, input.exportPassword);
+  }
+  if (!input.profileString?.trim()) {
+    if (!input.profile) {
+      throw new Error('No bfprofile package is available for this profile.');
+    }
+    const sharePackageJson = await unlockShareFromArtifact(input.profile, input.storedPassword);
+    const payload = reconstructBrowserProfilePackagePayload({
+      id: input.profile.id,
+      label: input.profile.label,
+      relays: input.profile.relays,
+      groupPackageJson: input.profile.group_package_json,
+      sharePackageJson,
+      manualPeerPolicyOverrides: input.profile.manual_peer_policy_overrides ?? [],
+    });
+    const pair = await createProfilePackagePair(payload, input.exportPassword);
+    return pair.profileString;
+  }
   const payload = await decodeBfProfilePackage(input.profileString, input.storedPassword);
   const pair = await createProfilePackagePair(payload, input.exportPassword);
-  return input.format === 'bfprofile' ? pair.profileString : pair.shareString;
+  return pair.profileString;
 }
 
 export async function changeProfilePassword(input: {

@@ -155,6 +155,46 @@ export function adoptInstanceId(id: string): void {
   }
 }
 
+export function instancePartitionHasProfiles(id: string): boolean {
+  try {
+    const raw = window.localStorage.getItem(partitionKeyForId(id));
+    if (!raw) return false;
+    const parsed = JSON.parse(raw);
+    const profiles = (parsed as { profiles?: unknown })?.profiles;
+    return Array.isArray(profiles) && profiles.length > 0;
+  } catch {
+    return false;
+  }
+}
+
+export function forgetInstance(id: string): void {
+  if (!hasWindow()) return;
+  removePartition(id);
+  const records = readInstanceRegistry();
+  const kept = records.filter((record) => record.id !== id);
+  if (kept.length !== records.length) writeInstanceRegistry(kept);
+}
+
+export function pruneUnavailableInstances(opts: { keepId: string }): boolean {
+  if (!hasWindow()) return false;
+  const records = readInstanceRegistry();
+  const kept: InstanceRecord[] = [];
+  for (const record of records) {
+    if (record.id === opts.keepId) {
+      kept.push(record);
+      continue;
+    }
+    if (instancePartitionHasProfiles(record.id)) {
+      kept.push(record);
+      continue;
+    }
+    removePartition(record.id);
+  }
+  if (kept.length === records.length) return false;
+  writeInstanceRegistry(kept);
+  return true;
+}
+
 /**
  * Conservatively prune registry records (and their partition keys) ONLY when
  * the partition holds no profiles. Never touches the current instance and
@@ -190,16 +230,7 @@ function partitionKeyForId(id: string): string {
 }
 
 function partitionIsEmpty(id: string): boolean {
-  try {
-    const raw = window.localStorage.getItem(partitionKeyForId(id));
-    if (!raw) return true;
-    const parsed = JSON.parse(raw);
-    const profiles = (parsed as { profiles?: unknown })?.profiles;
-    return !Array.isArray(profiles) || profiles.length === 0;
-  } catch {
-    // Unparseable partition is treated as empty (safe to reclaim).
-    return true;
-  }
+  return !instancePartitionHasProfiles(id);
 }
 
 function removePartition(id: string): void {

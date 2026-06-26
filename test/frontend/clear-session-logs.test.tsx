@@ -106,6 +106,8 @@ describe('clearSessionLogs adapter', () => {
     expect(cleared).not.toBeNull();
     expect(cleared?.active).toBe(true);
     expect(cleared?.profile?.id).toBe(profile.id);
+    expect(cleared?.events).toEqual([]);
+    expect(cleared?.runtime_log_lines).toEqual([]);
 
     await controller.stop();
   });

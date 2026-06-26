@@ -4,7 +4,6 @@ import ReactDOM from 'react-dom/client';
 import 'igloo-ui/styles.css';
 import App from './App';
 import { ensureIglooSharedConfigured } from './lib/configure-igloo-shared';
-import './index.css';
 
 ensureIglooSharedConfigured();
 

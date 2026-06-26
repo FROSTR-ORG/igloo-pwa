@@ -77,19 +77,33 @@ export type PersistableState = {
   drafts: PwaDraftState;
 };
 
+function toReloadSafeActiveView(state: PwaPersistedState): Pick<PersistableState, 'activeView' | 'activeDashboardTab'> {
+  if (state.activeView === 'dashboard' || state.activeView === 'settings') {
+    return {
+      activeView: 'landing',
+      activeDashboardTab: 'signer',
+    };
+  }
+  return {
+    activeView: state.activeView,
+    activeDashboardTab: state.activeDashboardTab,
+  };
+}
+
 /**
  * Sift the full app state down to the persistable allow-list. Anything
  * not explicitly surfaced here stays in-memory only (secrets, runtime
  * snapshots, pending confirmations, unlock passphrases, etc.).
  */
 export function toPersistable(state: PwaPersistedState): PersistableState {
+  const reloadSafeRoute = toReloadSafeActiveView(state);
   return {
     schemaVersion: SCHEMA_VERSION,
     profiles: state.profiles.map(toPersistableProfile),
     peerPermissionStates: state.peerPermissionStates,
     selectedProfileId: state.selectedProfileId,
-    activeView: state.activeView,
-    activeDashboardTab: state.activeDashboardTab,
+    activeView: reloadSafeRoute.activeView,
+    activeDashboardTab: reloadSafeRoute.activeDashboardTab,
     settings: state.settings,
     drafts: state.drafts,
   };
