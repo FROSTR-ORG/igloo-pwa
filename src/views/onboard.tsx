@@ -9,7 +9,7 @@ import {
   PublicTaskTitle,
   StepProgress,
 } from 'igloo-ui';
-import { pingRelay } from 'igloo-shared';
+import { onboardPreviewDisplayMeta, pingRelay } from 'igloo-shared';
 import type { useStore } from '../lib/store';
 
 type PwaStore = ReturnType<typeof useStore>;
@@ -52,6 +52,8 @@ export function OnboardConnectView({
 }
 
 export function OnboardHandshakeView({ store }: { store: PwaStore }) {
+  const preview = store.pendingOnboardConnection?.preview;
+  const meta = preview ? onboardPreviewDisplayMeta(preview) : null;
   return (
     <>
       <PublicTaskShell>
@@ -60,8 +62,9 @@ export function OnboardHandshakeView({ store }: { store: PwaStore }) {
           <OnboardHandshakePanel
             title="Onboard Device"
             packageText={store.drafts.onboardConnectForm.packageText}
-            keysetName="My Signing Key"
-            thresholdLabel="2/3"
+            keysetName={meta?.keysetName ?? 'Signing Keyset'}
+            thresholdLabel={meta?.thresholdLabel ?? ''}
+            shareLabel={meta?.shareLabel}
             activeStep="negotiate"
             onCancel={() => store.setActiveView('onboard-connect')}
           />
@@ -79,6 +82,8 @@ export function OnboardFailedView({
   store: PwaStore;
   onRetry: () => void;
 }) {
+  const preview = store.pendingOnboardConnection?.preview;
+  const meta = preview ? onboardPreviewDisplayMeta(preview) : null;
   return (
     <>
       <PublicTaskShell>
@@ -89,8 +94,8 @@ export function OnboardFailedView({
         />
         <section className="igloo-flow-root">
           <OnboardFailedPanel
-            keysetName="My Signing Key"
-            thresholdLabel="2/3"
+            keysetName={meta?.keysetName ?? 'Signing Keyset'}
+            thresholdLabel={meta?.thresholdLabel ?? ''}
             activeStep="negotiate"
             onRetry={onRetry}
           />
