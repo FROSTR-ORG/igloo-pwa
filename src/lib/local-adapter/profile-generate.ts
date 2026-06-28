@@ -11,6 +11,7 @@ import {
   Secret,
   sharePackageToWireJson,
   type BrowserOnboardPackagePayload,
+  type ShareSecretHex,
 } from 'igloo-shared';
 import { nip19 } from 'nostr-tools';
 
@@ -118,10 +119,10 @@ export async function createRotatedKeyset(input: {
   // Auto-include the rotating device's own current share when its artifact +
   // passphrase are provided (mirrors the recover flow).
   if (input.encryptedShareArtifact?.trim() && input.devicePassphrase) {
-    let deviceShareSecret: string;
+    let deviceShareSecret: ShareSecretHex;
     try {
       const deviceShare = await decodeBfSharePackage(input.encryptedShareArtifact, Secret.of(input.devicePassphrase));
-      deviceShareSecret = deviceShare.shareSecret;
+      deviceShareSecret = Secret.of(deviceShare.shareSecret);
     } catch {
       throw new Error('Incorrect device passphrase.');
     }
@@ -144,7 +145,7 @@ export async function createRotatedKeyset(input: {
     name: `${draft.groupName} Device ${share.memberIndex}`,
     member_idx: share.memberIndex,
     share_public_key: share.sharePublicKey,
-    share_package_json: sharePackageToWireJson(share.memberIndex, share.shareSecret),
+    share_package_json: sharePackageToWireJson(share.memberIndex, share.shareSecret.expose()),
   }));
   return {
     group_name: draft.groupName,
@@ -156,16 +157,16 @@ export async function createRotatedKeyset(input: {
   };
 }
 
-// Decode a set of pasted bfshare packages into raw share secrets, skipping empty
-// rows. Each row's password decrypts its own package.
+// Decode a set of pasted bfshare packages into redacting share-secret wrappers,
+// skipping empty rows. Each row's password decrypts its own package.
 async function decodeShareSecrets(
   sources: Array<{ packageText: string; password: string }>,
-): Promise<string[]> {
+): Promise<ShareSecretHex[]> {
   const filled = sources.filter((source) => source.packageText.trim() && source.password);
   const decoded = await Promise.all(
     filled.map((source) => decodeBfSharePackage(source.packageText.trim(), Secret.of(source.password))),
   );
-  return decoded.map((share) => share.shareSecret);
+  return decoded.map((share) => Secret.of(share.shareSecret));
 }
 
 // Verify a device passphrase unlocks its own bfshare artifact, without running a
@@ -204,20 +205,24 @@ export async function recoverNsecFromShares(input: {
   // supplied. The lost-device path omits both and relies on the threshold check
   // in recoverSecretKeyFromShares to require enough pasted shares.
   if (input.encryptedShareArtifact?.trim() && input.devicePassphrase) {
-    let deviceShareSecret: string;
+    let deviceShareSecret: ShareSecretHex;
     try {
       const deviceShare = await decodeBfSharePackage(input.encryptedShareArtifact, Secret.of(input.devicePassphrase));
-      deviceShareSecret = deviceShare.shareSecret;
+      deviceShareSecret = Secret.of(deviceShare.shareSecret);
     } catch {
       throw new Error('Incorrect device passphrase.');
     }
     shareSecrets.unshift(deviceShareSecret);
   }
 
-  return await recoverSecretKeyFromShares({
+  const recovered = await recoverSecretKeyFromShares({
     groupPackage,
     shareSecrets,
   });
+  return {
+    nsec: recovered.nsec.expose(),
+    signingKeyHex: recovered.signingKeyHex.expose(),
+  };
 }
 
 export async function createDeviceProfileFromGeneratedShare(
