@@ -16,6 +16,28 @@ function readProfileGroupName(profile: PwaProfile | null) {
   }
 }
 
+function readUnlockedLocalSharePackageJson(
+  profile: PwaProfile | null,
+  snapshot: PwaPersistedState,
+  controller: SessionController,
+) {
+  if (!profile) return null;
+  const inState = snapshot.sharePackageJsonByProfileId[profile.id]?.trim();
+  if (inState) return inState;
+  const inSession = adapter.getSharePackageJsonForProfile(profile.id, controller)?.trim();
+  return inSession || null;
+}
+
+function isKnownLocalSourcePackage(profile: PwaProfile | null, packageText: string) {
+  const trimmed = packageText.trim();
+  if (!profile || !trimmed) return false;
+  return [
+    profile.encrypted_bfshare_artifact,
+    profile.share_string,
+    profile.profile_string,
+  ].some((candidate) => typeof candidate === 'string' && candidate.trim() === trimmed);
+}
+
 export type StoreCreateActions = {
   updateCreateForm: (field: keyof PwaDraftState['createForm'] | 'privateKey', value: string) => void;
   updateRotationForm: (field: 'sourceProfileId', value: string) => void;
@@ -166,6 +188,15 @@ export function createCreateActions({
       if (snapshot.drafts.createForm.mode === 'rotate' && !sourceProfile) {
         throw new Error('Select the device profile to rotate.');
       }
+      const unlockedLocalSharePackageJson = readUnlockedLocalSharePackageJson(
+        sourceProfile,
+        snapshot,
+        controller,
+      );
+      const localSource =
+        sourceProfile && unlockedLocalSharePackageJson
+          ? { profile: sourceProfile, sharePackageJson: unlockedLocalSharePackageJson }
+          : null;
       const keyset =
         snapshot.drafts.createForm.mode === 'rotate' && sourceProfile
           ? await adapter.createRotatedKeyset({
@@ -177,12 +208,18 @@ export function createCreateActions({
               // operator only pastes the other members' bfshares.
               encryptedShareArtifact: sourceProfile.encrypted_bfshare_artifact,
               devicePassphrase: snapshot.draftSecrets.rotateDevicePassphrase,
+              localSource,
               sources: snapshot.drafts.rotationForm.sources
                 .map((source, index) => ({
                   packageText: source.packageText.trim(),
                   password: snapshot.draftSecrets.rotationSources[index] ?? '',
                 }))
-                .filter((source) => source.packageText && source.password),
+                .filter(
+                  (source) =>
+                    source.packageText &&
+                    source.password &&
+                    !(localSource && isKnownLocalSourcePackage(sourceProfile, source.packageText)),
+                ),
             })
           : await adapter.createGeneratedKeyset({
               groupName: snapshot.drafts.createForm.groupName,

@@ -24,6 +24,35 @@ type RunAction = (action: () => Promise<void> | void) => Promise<void>;
 
 const CREATE_FLOW_STEPS = ['Create Keyset', 'Select Share', 'Save Profile', 'Distribute Shares'];
 
+function readNumber(value: unknown, fallback: number) {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string') {
+    const parsed = Number.parseInt(value, 10);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return fallback;
+}
+
+function readRotationThreshold(profile: PwaProfile | null, fallback: string) {
+  if (!profile) return readNumber(fallback, 2);
+  try {
+    const parsed = JSON.parse(profile.group_package_json) as { threshold?: unknown };
+    return readNumber(parsed.threshold, readNumber(fallback, 2));
+  } catch {
+    return readNumber(fallback, 2);
+  }
+}
+
+function isKnownLocalSourcePackage(profile: PwaProfile | null, packageText: string) {
+  const trimmed = packageText.trim();
+  if (!profile || !trimmed) return false;
+  return [
+    profile.encrypted_bfshare_artifact,
+    profile.share_string,
+    profile.profile_string,
+  ].some((candidate) => typeof candidate === 'string' && candidate.trim() === trimmed);
+}
+
 export function CreateGenerateView({
   store,
   run,
@@ -33,6 +62,29 @@ export function CreateGenerateView({
   run: RunAction;
   onBack: () => void;
 }) {
+  const rotationSourceProfile =
+    store.profiles.find((profile) => profile.id === store.drafts.rotationForm.sourceProfileId) ?? null;
+  const rotationThreshold = readRotationThreshold(rotationSourceProfile, store.drafts.createForm.threshold);
+  const localSourceReady = Boolean(
+    rotationSourceProfile &&
+      (
+        store.draftSecrets.rotateDeviceUnlockVerified ||
+        store.sharePackageJsonByProfileId[rotationSourceProfile.id]?.trim() ||
+        (store.runtimeSnapshot?.active && store.runtimeSnapshot.profile?.id === rotationSourceProfile.id)
+      ),
+  );
+  const rotationCollectedCount =
+    (localSourceReady ? 1 : 0) +
+    store.drafts.rotationForm.sources.filter((source, index) => {
+      const hasPackage = source.packageText.trim().length > 0;
+      const hasPassword = (store.draftSecrets.rotationSources[index] ?? '').trim().length > 0;
+      return (
+        hasPackage &&
+        hasPassword &&
+        !isKnownLocalSourcePackage(rotationSourceProfile, source.packageText)
+      );
+    }).length;
+
   return (
     <>
       <PublicTaskShell>
@@ -79,22 +131,37 @@ export function CreateGenerateView({
             sourceProfileId={store.drafts.rotationForm.sourceProfileId}
             availableProfiles={store.profiles.map((profile) => ({
               id: profile.id,
-              label: `${profile.label || 'Unnamed device'} (${shortProfileId(profile.id)})`,
+                label: `${profile.label || 'Unnamed device'} (${shortProfileId(profile.id)})`,
             }))}
-            devicePassphrase={store.draftSecrets.rotateDevicePassphrase}
-            onChangeDevicePassphrase={(value) => store.setRotateDevicePassphrase(value)}
-            deviceShareValidated={store.draftSecrets.rotateDeviceUnlockVerified}
-            onVerifyDevicePassphrase={() => void store.verifyRotateDeviceUnlock()}
+            localSourceLabel={
+              rotationSourceProfile
+                ? `This Device Share (#${rotationSourceProfile.member_idx})`
+                : undefined
+            }
+            localSourceState={localSourceReady ? 'validated' : 'locked'}
+            localPassphrase={store.draftSecrets.rotateDevicePassphrase}
+            threshold={rotationThreshold}
+            newThreshold={store.drafts.createForm.threshold}
+            newCount={store.drafts.createForm.count}
+            collectedCount={rotationCollectedCount}
+            onLocalPassphraseChange={(value) => store.setRotateDevicePassphrase(value)}
+            onSubmitLocalPassphrase={() => void store.verifyRotateDeviceUnlock()}
             rotationSources={store.drafts.rotationForm.sources.map((source, index) => ({
               packageText: source.packageText,
               packagePassword: store.draftSecrets.rotationSources[index] ?? '',
+              duplicateOfLocal: isKnownLocalSourcePackage(rotationSourceProfile, source.packageText),
             }))}
-            onChangeSourceProfile={(profileId) => store.updateRotationForm('sourceProfileId', profileId)}
+            onChangeSourceProfile={(profileId) => {
+              store.updateRotationForm('sourceProfileId', profileId);
+              store.setRotateDevicePassphrase('');
+            }}
             onChangeRotationSource={(index, field, value) =>
               store.updateRotationSource(index, field === 'packagePassword' ? 'password' : 'packageText', value)
             }
+            onChangeNewConfiguration={(field, value) => store.updateCreateForm(field, value)}
             onAddRotationSource={() => store.addRotationSource()}
             onRemoveRotationSource={(index) => store.removeRotationSource(index)}
+            actionLabel="Validate & Continue"
             onRotate={() => void run(() => store.generateKeyset())}
           />
         ) : null}
