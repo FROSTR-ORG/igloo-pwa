@@ -231,12 +231,14 @@ export function createDashboardActions({
             : current.profiles.map((profile) =>
                 profile.id === runtimeSnapshot.profile?.id ? runtimeSnapshot.profile ?? profile : profile,
               ),
-        peerPermissionStates:
-          runtimeSnapshot?.peer_permission_states ?? current.peerPermissionStates,
+        peerPermissionStates: adapter.defaultPeerPermissionStates(),
         runtimeWarning: null,
         dashboardLoadError: null,
-        runtimeSnapshot,
+        runtimeSnapshot: null,
+        activeView: 'landing',
+        activeDashboardTab: 'signer',
         unlockPassphrase: '',
+        draftSecrets: createDefaultDraftSecrets(),
       }));
     },
     async refreshSigner() {
@@ -319,6 +321,7 @@ export function createDashboardActions({
               ),
         peerPermissionStates: adapter.defaultPeerPermissionStates(),
         runtimeWarning: null,
+        dashboardLoadError: null,
         runtimeSnapshot: null,
         activeView: 'landing',
         activeDashboardTab: 'signer',

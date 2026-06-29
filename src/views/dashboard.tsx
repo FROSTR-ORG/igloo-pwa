@@ -199,7 +199,7 @@ export function DashboardView({
   };
 
   return (
-    <div data-testid={CRITICAL_E2E_TEST_IDS.dashboardRoot} className="space-y-6">
+    <div data-testid={CRITICAL_E2E_TEST_IDS.dashboardRoot} className="space-y-6 pb-8 sm:pb-10">
       {store.activeDashboardTab === 'signer' || store.activeDashboardTab === 'settings' ? (
         <div role="tabpanel" id="operator-panel-signer" aria-labelledby="operator-tab-signer">
           {renderSignerPanel()}

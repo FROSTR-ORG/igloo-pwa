@@ -504,6 +504,9 @@ describe('igloo-pwa app shell', () => {
     vi.spyOn(adapter, 'stopSession').mockResolvedValue(null);
     await latestStore!.stopSigner();
     await waitFor(() => expect(latestStore?.dashboardLoadError).toBeNull());
+    expect(latestStore?.activeView).toBe('landing');
+    expect(latestStore?.activeDashboardTab).toBe('signer');
+    expect(latestStore?.unlockPassphrase).toBe('');
 
     startSpy.mockRestore();
   });
