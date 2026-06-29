@@ -111,6 +111,48 @@ const longLogSnapshot: PwaRuntimeSnapshot = {
   }),
 };
 
+const signingBlockedStatus = {
+  ..._fixtureRuntimeStatus,
+  readiness: {
+    ..._fixtureRuntimeStatus.readiness,
+    sign_ready: false,
+    ecdh_ready: false,
+    signing_peer_count: 0,
+    ecdh_peer_count: 0,
+    degraded_reasons: ['not_enough_ready_peers'],
+  },
+  peers: _fixtureRuntimeStatus.peers.map((peer) => ({
+    ...peer,
+    online: false,
+    incoming_available: 0,
+    outgoing_available: 0,
+    outgoing_spent: 0,
+    can_sign: false,
+    can_ecdh: false,
+    can_ping: false,
+    last_response_latency_ms: null,
+    avg_latency_ms: null,
+  })),
+};
+
+const signingBlockedSnapshot: PwaRuntimeSnapshot = {
+  ...runningSnapshot,
+  runtime_status: signingBlockedStatus,
+  readiness: signingBlockedStatus.readiness,
+};
+
+const allRelaysOfflineStatus = {
+  ...signingBlockedStatus,
+  connected_relays: [],
+  configured_relays: [FIXTURE_RELAY],
+};
+
+const allRelaysOfflineSnapshot: PwaRuntimeSnapshot = {
+  ...runningSnapshot,
+  runtime_status: allRelaysOfflineStatus,
+  readiness: allRelaysOfflineStatus.readiness,
+};
+
 /**
  * If `?__frostr_dev=<name>` is present, return a partial state override applied on
  * top of the hydrated state. Returns null in production (no param).
@@ -145,6 +187,22 @@ export function resolveDevScenario(): Partial<PwaPersistedState> | null {
         activeView: 'dashboard',
         activeDashboardTab: 'signer',
         runtimeSnapshot: longLogSnapshot,
+      };
+    case 'dashboard-signing-blocked':
+      return {
+        profiles: [fixtureProfile],
+        selectedProfileId: fixtureProfile.id,
+        activeView: 'dashboard',
+        activeDashboardTab: 'signer',
+        runtimeSnapshot: signingBlockedSnapshot,
+      };
+    case 'dashboard-all-relays-offline':
+      return {
+        profiles: [fixtureProfile],
+        selectedProfileId: fixtureProfile.id,
+        activeView: 'dashboard',
+        activeDashboardTab: 'signer',
+        runtimeSnapshot: allRelaysOfflineSnapshot,
       };
     case 'dashboard-settings':
       return {

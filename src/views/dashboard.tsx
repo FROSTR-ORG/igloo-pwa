@@ -10,6 +10,7 @@ import {
   OperatorSettingsSidebar,
   OperatorSignerPanel,
   deriveDashboardState,
+  type DashboardBanner,
   type DashboardKeyModel,
 } from 'igloo-ui';
 import {
@@ -71,6 +72,13 @@ export function DashboardView({
     loadError: store.dashboardLoadError,
     dismissedSignFailureId,
   });
+  const dashboardBanners = dashboardState.kind === 'ready' ? dashboardState.banners : [];
+  const availabilityIssue =
+    dashboardBanners.find(
+      (banner): banner is Extract<DashboardBanner, { kind: 'all-relays-offline' | 'signing-blocked' }> =>
+        banner.kind === 'all-relays-offline' || banner.kind === 'signing-blocked',
+    ) ?? null;
+  const topBanners = dashboardBanners.filter((banner) => banner.kind === 'signing-failed');
 
   const [onboardSponsorshipOpen, setOnboardSponsorshipOpen] = React.useState(false);
   const [pingingPeerPubkey, setPingingPeerPubkey] = React.useState<string | null>(null);
@@ -99,7 +107,7 @@ export function DashboardView({
     }
     return (
       <>
-        {dashboardState.banners.map((banner) => (
+        {topBanners.map((banner) => (
           <DashboardConditionBanner
             key={banner.kind}
             banner={banner}
@@ -131,6 +139,7 @@ export function DashboardView({
           }}
           pingPeerDisabled={!store.runtimeSnapshot?.active || pingingPeerPubkey != null}
           pingingPeerPubkey={pingingPeerPubkey}
+          availabilityIssue={availabilityIssue}
           // Clearing the host-side log buffer requires an active session, so
           // only expose the control while the signer is running.
           onClearLogs={
