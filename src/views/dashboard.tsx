@@ -12,8 +12,10 @@ import {
   deriveDashboardState,
   type DashboardBanner,
   type DashboardKeyModel,
+  type DashboardProfileSummary,
 } from 'igloo-ui';
 import {
+  deriveGroupSummary,
   deriveSettingsGroupProfile,
   derivePolicyDashboardView,
   deriveSignerDashboardView,
@@ -24,6 +26,12 @@ import type { PwaProfile, PwaSignerSettings } from '../lib/types';
 
 type PwaStore = ReturnType<typeof useStore>;
 type RunAction = (action: () => Promise<void> | void) => Promise<void>;
+
+function compactDashboardKey(value: string | null | undefined) {
+  const trimmed = (value ?? '').trim();
+  if (!trimmed) return undefined;
+  return trimmed.length > 16 ? `${trimmed.slice(0, 8)}...${trimmed.slice(-4)}` : trimmed;
+}
 
 export type OperatorSettingsDraft = {
   signerName: string;
@@ -62,6 +70,26 @@ export function DashboardView({
   const runtimeState = store.runtimeSnapshot?.active ? 'running' : 'stopped';
   const runtimeControlLabel = runtimeState === 'running' ? 'Stop Signer' : 'Start Signer';
   const signerView = deriveSignerDashboardView(selectedProfile, store.runtimeSnapshot, store.peerPermissionStates);
+  const dashboardProfileSummary = React.useMemo<DashboardProfileSummary | undefined>(() => {
+    if (!selectedProfile) return undefined;
+    const { memberCount, threshold } = deriveGroupSummary(selectedProfile.group_package_json);
+    const thresholdLabel =
+      typeof threshold === 'number' && typeof memberCount === 'number'
+        ? `${threshold}/${memberCount}`
+        : signerView?.thresholdLabel && signerView.thresholdLabel !== 'threshold n/a'
+          ? signerView.thresholdLabel
+          : undefined;
+
+    return {
+      profileName: selectedProfile.label || signerView?.profileName || 'Signing profile',
+      thresholdLabel,
+      groupKeyLabel: signerView?.groupKey?.display ?? compactDashboardKey(selectedProfile.group_public_key),
+      shareLabel: Number.isFinite(selectedProfile.member_idx)
+        ? `Share #${selectedProfile.member_idx}`
+        : signerView?.memberLabel,
+      shareKeyLabel: signerView?.shareKey?.display ?? compactDashboardKey(selectedProfile.share_public_key),
+    };
+  }, [selectedProfile, signerView]);
   const policyView = derivePolicyDashboardView(Boolean(store.runtimeSnapshot?.active), store.peerPermissionStates);
   const dashboardState = deriveDashboardState({
     active: Boolean(store.runtimeSnapshot?.active),
@@ -93,7 +121,12 @@ export function DashboardView({
 
   const renderSignerPanel = () => {
     if (dashboardState.kind === 'loading') {
-      return <DashboardLoadingScreen detail={dashboardState.detail} />;
+      return (
+        <DashboardLoadingScreen
+          detail={dashboardState.detail}
+          profileSummary={dashboardProfileSummary}
+        />
+      );
     }
     if (dashboardState.kind === 'load-failed') {
       return (
@@ -102,6 +135,9 @@ export function DashboardView({
           timestampLabel={dashboardState.at ? formatRuntimeTimestamp(dashboardState.at) : undefined}
           onRetry={() => void run(() => store.startSigner())}
           onClear={() => setClearCredentialsOpen(true)}
+          clearLabel="Clear credentials"
+          clearVariant="destructive"
+          profileSummary={dashboardProfileSummary}
         />
       );
     }

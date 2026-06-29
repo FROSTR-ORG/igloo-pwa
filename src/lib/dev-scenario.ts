@@ -111,6 +111,14 @@ const longLogSnapshot: PwaRuntimeSnapshot = {
   }),
 };
 
+const loadingSnapshot: PwaRuntimeSnapshot = {
+  ...runningSnapshot,
+  runtime_status: null,
+  readiness: null,
+  events: [],
+  runtime_log_lines: ['[info] restoring signer profile'],
+};
+
 const signingBlockedStatus = {
   ..._fixtureRuntimeStatus,
   readiness: {
@@ -187,6 +195,27 @@ export function resolveDevScenario(): Partial<PwaPersistedState> | null {
         activeView: 'dashboard',
         activeDashboardTab: 'signer',
         runtimeSnapshot: longLogSnapshot,
+      };
+    case 'dashboard-loading':
+      return {
+        profiles: [fixtureProfile],
+        selectedProfileId: fixtureProfile.id,
+        activeView: 'dashboard',
+        activeDashboardTab: 'signer',
+        runtimeSnapshot: loadingSnapshot,
+        dashboardLoadError: null,
+      };
+    case 'dashboard-load-failed':
+      return {
+        profiles: [fixtureProfile],
+        selectedProfileId: fixtureProfile.id,
+        activeView: 'dashboard',
+        activeDashboardTab: 'signer',
+        runtimeSnapshot: null,
+        dashboardLoadError: {
+          message: 'Unable to restore the saved signer session.',
+          at: EVENT_BASE_TS,
+        },
       };
     case 'dashboard-signing-blocked':
       return {
