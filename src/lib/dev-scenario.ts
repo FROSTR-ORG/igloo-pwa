@@ -98,17 +98,88 @@ const runningSnapshot: PwaRuntimeSnapshot = {
 
 const longLogSnapshot: PwaRuntimeSnapshot = {
   ...runningSnapshot,
-  events: Array.from({ length: 24 }, (_, index) => {
-    const domains = ['runtime', 'relay', 'sign', 'ecdh', 'ping', 'sync'];
-    const domain = domains[index % domains.length];
-    return {
-      ts: EVENT_BASE_TS + index * 1_000,
-      level: 'info' as const,
+  events: [
+    {
+      ts: EVENT_BASE_TS,
+      level: 'info',
       component: 'browser',
-      domain,
-      event: `${domain}_event_${index + 1}`,
-    };
-  }),
+      domain: 'runtime',
+      event: 'wasm_runtime_init_ok',
+      message: 'Signer runtime ready',
+    },
+    {
+      ts: EVENT_BASE_TS + 1_000,
+      level: 'info',
+      component: 'browser',
+      domain: 'relay',
+      event: 'relay_ack',
+      message: 'Relay wss://relay.primal.net acknowledged event',
+    },
+    {
+      ts: EVENT_BASE_TS + 2_000,
+      level: 'warn',
+      component: 'browser',
+      domain: 'relay',
+      event: 'connection_lost',
+      message: 'Connection to wss://purplepag.es lost - retrying in 30s',
+    },
+    {
+      ts: EVENT_BASE_TS + 3_000,
+      level: 'info',
+      component: 'browser',
+      domain: 'sign',
+      event: 'signature_request_received',
+      message: 'Signed event kind:1 for npub1qe3...7k4m',
+    },
+    {
+      ts: EVENT_BASE_TS + 4_000,
+      level: 'info',
+      component: 'browser',
+      domain: 'ecdh',
+      event: 'ecdh_request_processed',
+      message: 'Encrypted DM key exchange with 02e8f4a1...d9c2',
+    },
+    {
+      ts: EVENT_BASE_TS + 5_000,
+      level: 'info',
+      component: 'browser',
+      domain: 'ping',
+      event: 'ping_sweep',
+      message: 'Ping sweep - 2/3 online (avg 31ms) - pools balanced',
+    },
+    {
+      ts: EVENT_BASE_TS + 6_000,
+      level: 'info',
+      component: 'browser',
+      domain: 'echo',
+      event: 'round_echoed',
+      message: 'Round broadcast echoed by peer 2',
+    },
+    {
+      ts: EVENT_BASE_TS + 7_000,
+      level: 'info',
+      component: 'browser',
+      domain: 'sync',
+      event: 'pool_sync',
+      message: 'Pool sync with peer #0 - 50 received - 50 sent',
+    },
+    {
+      ts: EVENT_BASE_TS + 8_000,
+      level: 'info',
+      component: 'browser',
+      domain: 'policy',
+      event: 'signer_policy_required',
+      message: 'ECDH request from peer #2 - signer policy required',
+    },
+    {
+      ts: EVENT_BASE_TS + 9_000,
+      level: 'info',
+      component: 'browser',
+      domain: 'peer_policy',
+      event: 'peer_policy_override',
+      message: 'Peer policy allowed sign requests for peer #1',
+    },
+  ],
 };
 
 const loadingSnapshot: PwaRuntimeSnapshot = {

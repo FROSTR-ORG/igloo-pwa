@@ -116,8 +116,8 @@ export function deriveExportSummary(profile: ExportSummaryProfile | null): strin
 function toPwaEventRows(lines: string[] = []): EventLogRowModel[] {
   return lines.map((line, index) => ({
     id: `pwa-log-${index}-${line}`,
-    badgeLabel: line.startsWith('[error]') ? 'error' : line.startsWith('[warn]') ? 'warn' : 'info',
-    badgeTone: line.startsWith('[error]') ? 'danger' : line.startsWith('[warn]') ? 'warning' : 'info',
+    badgeLabel: line.startsWith('[error]') || line.startsWith('[warn]') ? 'error' : 'info',
+    badgeTone: line.startsWith('[error]') || line.startsWith('[warn]') ? 'error' : 'info',
     message: line.replace(/^\[[^\]]+\]\s*/, ''),
     timestampLabel: 'live',
   }));

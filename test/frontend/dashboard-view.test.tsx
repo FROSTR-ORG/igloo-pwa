@@ -279,8 +279,8 @@ describe('deriveSignerDashboardView', () => {
       responseLabel: '1 responses',
     }));
     expect(view?.eventRows[0]).toEqual(expect.objectContaining({
-      badgeLabel: 'warn',
-      badgeTone: 'warning',
+      badgeLabel: 'error',
+      badgeTone: 'error',
       message: 'relay slow',
     }));
   });
