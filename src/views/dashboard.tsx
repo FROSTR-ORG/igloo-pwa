@@ -1,19 +1,19 @@
 import * as React from 'react';
 import {
   Checkbox,
-  ContentCard,
   CRITICAL_E2E_TEST_IDS,
   DashboardConditionBanner,
   DashboardLoadingScreen,
   DashboardLoadFailedScreen,
-  OperatorDashboardTabs,
+  OnboardDeviceSponsorshipDialog,
   OperatorPermissionsPanel,
-  OperatorSettingsPanel,
+  OperatorSettingsSidebar,
   OperatorSignerPanel,
   deriveDashboardState,
   type DashboardKeyModel,
 } from 'igloo-ui';
 import {
+  deriveSettingsGroupProfile,
   derivePolicyDashboardView,
   deriveSignerDashboardView,
   formatRuntimeTimestamp,
@@ -72,76 +72,85 @@ export function DashboardView({
     dismissedSignFailureId,
   });
 
+  const [onboardSponsorshipOpen, setOnboardSponsorshipOpen] = React.useState(false);
+  const settingsGroupProfile = React.useMemo(
+    () => deriveSettingsGroupProfile(selectedProfile),
+    [selectedProfile],
+  );
+  const settingsMemberLabel = Number.isFinite(selectedProfile?.member_idx)
+    ? `Share #${selectedProfile?.member_idx}`
+    : undefined;
+  const settingsSaveDisabled = !selectedProfile || !store.runtimeSnapshot?.active;
+
+  const renderSignerPanel = () => {
+    if (dashboardState.kind === 'loading') {
+      return <DashboardLoadingScreen detail={dashboardState.detail} />;
+    }
+    if (dashboardState.kind === 'load-failed') {
+      return (
+        <DashboardLoadFailedScreen
+          message={dashboardState.message}
+          timestampLabel={dashboardState.at ? formatRuntimeTimestamp(dashboardState.at) : undefined}
+          onRetry={() => void run(() => store.startSigner())}
+          onClear={() => setClearCredentialsOpen(true)}
+        />
+      );
+    }
+    return (
+      <>
+        {dashboardState.banners.map((banner) => (
+          <DashboardConditionBanner
+            key={banner.kind}
+            banner={banner}
+            timestampLabel={
+              banner.kind === 'signing-failed' ? formatRuntimeTimestamp(banner.at) : undefined
+            }
+            onDismiss={
+              banner.kind === 'signing-failed'
+                ? () => setDismissedSignFailureId(banner.requestId)
+                : undefined
+            }
+          />
+        ))}
+        <OperatorSignerPanel
+          view={signerView}
+          emptyDescription="Load or onboard a device profile before opening the signer dashboard."
+          runtimeControlLabel={runtimeControlLabel}
+          copiedField={dashboardCopiedField}
+          onCopyGroupKey={(format) => copyDashboardKey('group', signerView?.groupKey, format)}
+          onCopyShareKey={(format) => copyDashboardKey('share', signerView?.shareKey, format)}
+          onPrimaryAction={() =>
+            void run(() => (store.runtimeSnapshot?.active ? store.stopSigner() : store.startSigner()))
+          }
+          onRefreshPeers={() => void run(() => store.refreshSigner())}
+          refreshPeersDisabled={!store.runtimeSnapshot?.active}
+          // Clearing the host-side log buffer requires an active session, so
+          // only expose the control while the signer is running.
+          onClearLogs={
+            store.runtimeSnapshot?.active ? () => void run(() => store.clearLogs()) : undefined
+          }
+          onApproveOnce={(id) => void run(() => store.resolveApproval(id, true))}
+          onDenyApproval={(id) => void run(() => store.resolveApproval(id, false))}
+          onAlwaysAllow={(id) => {
+            const row = signerView?.pendingApprovalRows?.find((approval) => approval.id === id);
+            if (!row) return;
+            // Approve this request, then persist an Allow override so future
+            // requests for this peer+method skip the queue.
+            void run(async () => {
+              await store.resolveApproval(id, true);
+              await store.updatePeerPolicy(row.pubkey, 'respond', row.method, 'allow');
+            });
+          }}
+        />
+      </>
+    );
+  };
+
   return (
     <div data-testid={CRITICAL_E2E_TEST_IDS.dashboardRoot} className="space-y-6">
-      <OperatorDashboardTabs
-        tabs={[
-          { key: 'signer', label: 'Signer', description: 'runtime console' },
-          { key: 'permissions', label: 'Permissions', description: 'peer policies' },
-          { key: 'settings', label: 'Settings', description: 'operator controls' },
-        ]}
-        activeTab={store.activeDashboardTab}
-        onChangeTab={requestDashboardTab}
-      />
-      {store.activeDashboardTab === 'signer' ? (
+      {store.activeDashboardTab === 'signer' || store.activeDashboardTab === 'settings' ? (
         <div role="tabpanel" id="operator-panel-signer" aria-labelledby="operator-tab-signer">
-          {dashboardState.kind === 'loading' ? (
-            <DashboardLoadingScreen detail={dashboardState.detail} />
-          ) : dashboardState.kind === 'load-failed' ? (
-            <DashboardLoadFailedScreen
-              message={dashboardState.message}
-              timestampLabel={dashboardState.at ? formatRuntimeTimestamp(dashboardState.at) : undefined}
-              onRetry={() => void run(() => store.startSigner())}
-              onClear={() => setClearCredentialsOpen(true)}
-            />
-          ) : (
-            <>
-              {dashboardState.banners.map((banner) => (
-                <DashboardConditionBanner
-                  key={banner.kind}
-                  banner={banner}
-                  timestampLabel={
-                    banner.kind === 'signing-failed' ? formatRuntimeTimestamp(banner.at) : undefined
-                  }
-                  onDismiss={
-                    banner.kind === 'signing-failed'
-                      ? () => setDismissedSignFailureId(banner.requestId)
-                      : undefined
-                  }
-                />
-              ))}
-              <OperatorSignerPanel
-                view={signerView}
-                emptyDescription="Load or onboard a device profile before opening the signer dashboard."
-                runtimeControlLabel={runtimeControlLabel}
-                copiedField={dashboardCopiedField}
-                onCopyGroupKey={(format) => copyDashboardKey('group', signerView?.groupKey, format)}
-                onCopyShareKey={(format) => copyDashboardKey('share', signerView?.shareKey, format)}
-                onPrimaryAction={() =>
-                  void run(() => (store.runtimeSnapshot?.active ? store.stopSigner() : store.startSigner()))
-                }
-                onRefreshPeers={() => void run(() => store.refreshSigner())}
-                refreshPeersDisabled={!store.runtimeSnapshot?.active}
-                // Clearing the host-side log buffer requires an active session, so
-                // only expose the control while the signer is running.
-                onClearLogs={
-                  store.runtimeSnapshot?.active ? () => void run(() => store.clearLogs()) : undefined
-                }
-                onApproveOnce={(id) => void run(() => store.resolveApproval(id, true))}
-                onDenyApproval={(id) => void run(() => store.resolveApproval(id, false))}
-                onAlwaysAllow={(id) => {
-                  const row = signerView?.pendingApprovalRows?.find((approval) => approval.id === id);
-                  if (!row) return;
-                  // Approve this request, then persist an Allow override so future
-                  // requests for this peer+method skip the queue.
-                  void run(async () => {
-                    await store.resolveApproval(id, true);
-                    await store.updatePeerPolicy(row.pubkey, 'respond', row.method, 'allow');
-                  });
-                }}
-              />
-            </>
-          )}
+          {renderSignerPanel()}
         </div>
       ) : null}
 
@@ -167,8 +176,10 @@ export function DashboardView({
       ) : null}
 
       {store.activeDashboardTab === 'settings' ? (
-        <div role="tabpanel" id="operator-panel-settings" aria-labelledby="operator-tab-settings">
-          <OperatorSettingsPanel
+        <>
+          <OperatorSettingsSidebar
+            open
+            onClose={() => requestDashboardTab('signer')}
             hasProfile={Boolean(selectedProfile)}
             signerName={operatorSettingsDraft.signerName}
             onSignerNameChange={(value) =>
@@ -196,6 +207,29 @@ export function DashboardView({
                 relays: current.relays.filter((item) => item !== relay),
               }))
             }
+            onSave={() =>
+              void run(() =>
+                store.saveOperatorSettings({
+                  label: operatorSettingsDraft.signerName,
+                  relays: operatorSettingsDraft.relays,
+                  signerSettings: operatorSettingsDraft.signerSettings,
+                }),
+              )
+            }
+            saveDisabled={settingsSaveDisabled}
+            message={
+              store.runtimeSnapshot?.active ? null : 'Start the signer to apply settings live.'
+            }
+            memberLabel={settingsMemberLabel}
+            profilePasswordAction={{
+              title: 'Profile Password',
+              description: 'Change the local password.',
+              actionLabel: 'Change',
+              testId: CRITICAL_E2E_TEST_IDS.settingsProfilePassword,
+              disabled: true,
+              onAction: () => {},
+            }}
+            groupProfile={settingsGroupProfile}
             signerSettings={operatorSettingsDraft.signerSettings}
             onSignerSettingNumberChange={(field, value) =>
               setOperatorSettingsDraft((current) => ({
@@ -215,101 +249,105 @@ export function DashboardView({
                 },
               }))
             }
-            onSave={() =>
-              void run(() =>
-                store.saveOperatorSettings({
-                  label: operatorSettingsDraft.signerName,
-                  relays: operatorSettingsDraft.relays,
-                  signerSettings: operatorSettingsDraft.signerSettings,
+            onboardAction={{
+              title: 'Onboard a Device',
+              description: 'Sponsor a new device to join this keyset with an encrypted bfonboard package.',
+              actionLabel: 'Onboard a Device',
+              testId: CRITICAL_E2E_TEST_IDS.settingsOnboardDevice,
+              disabled: !selectedProfile,
+              onAction: () => setOnboardSponsorshipOpen(true),
+            }}
+            replaceShareAction={{
+              title: 'Replace Share',
+              description:
+                "Import a bfonboard package to replace only this device's local share while keeping the same group public key and profile.",
+              actionLabel: 'Replace Share',
+              testId: CRITICAL_E2E_TEST_IDS.maintenanceRotateShare,
+              variant: 'secondary',
+              disabled: !selectedProfile,
+              onAction: () =>
+                void run(() => {
+                  store.startRotateKey();
                 }),
-              )
-            }
-            saveDisabled={!selectedProfile || !store.runtimeSnapshot?.active}
-            message={
-              store.runtimeSnapshot?.active ? null : 'Start the signer to apply settings live.'
-            }
-            sections={[
-              {
-                title: 'Replace Share',
-                description:
-                  "Import a bfonboard package to replace only this device's local share while keeping the same group public key and profile.",
-                actionLabel: 'Replace Share',
-                testId: CRITICAL_E2E_TEST_IDS.maintenanceRotateShare,
-                variant: 'secondary',
-                disabled: !selectedProfile,
-                onAction: () =>
-                  void run(() => {
-                    store.startRotateKey();
-                  }),
-              },
-              {
-                title: 'Export Profile',
-                description: 'Encrypted backup of your share and configuration.',
-                actionLabel: 'Export Profile',
-                testId: CRITICAL_E2E_TEST_IDS.settingsCopyProfile,
-                variant: 'secondary',
-                disabled: !selectedProfile,
-                onAction: () => openExportModal('bfprofile'),
-              },
-              {
-                title: 'Export Share',
-                description: 'Password-protected bfshare package.',
-                actionLabel: 'Export Share',
-                testId: CRITICAL_E2E_TEST_IDS.settingsCopyShare,
-                variant: 'secondary',
-                disabled: !selectedProfile,
-                onAction: () => openExportModal('bfshare'),
-              },
-              {
-                title: 'Logout',
-                description: 'Return to the profile list to open another profile.',
-                actionLabel: 'Logout',
-                testId: CRITICAL_E2E_TEST_IDS.settingsLogout,
-                variant: 'outline',
-                disabled: !selectedProfile,
-                onAction: () => void run(() => store.logout()),
-              },
-              {
-                title: 'Clear Credentials',
-                description:
-                  'Permanently remove every stored profile and credential from this device. This cannot be undone.',
-                actionLabel: 'Clear Credentials',
-                testId: CRITICAL_E2E_TEST_IDS.settingsClearCredentials,
-                variant: 'destructive',
-                disabled: store.profiles.length === 0,
-                onAction: () => setClearCredentialsOpen(true),
-              },
-            ]}
-            extraSections={
-              <ContentCard
-                title="Browser Settings"
-                description="PWA-specific preferences for persistence, routing, and install prompting."
-              >
-                <div className="igloo-settings-grid">
-                  <Checkbox
-                    checked={store.settings.remember_browser_state}
-                    onCheckedChange={(checked) => store.updateSettings('remember_browser_state', checked)}
-                    label="Remember browser state"
-                    description="Persist profiles, drafts, and the last active workspace in this browser."
-                  />
-                  <Checkbox
-                    checked={store.settings.auto_open_signer}
-                    onCheckedChange={(checked) => store.updateSettings('auto_open_signer', checked)}
-                    label="Open signer after import"
-                    description="Jump straight into the signer workspace after a successful setup action."
-                    data-testid={CRITICAL_E2E_TEST_IDS.settingsAutoOpenToggle}
-                  />
-                  <Checkbox
-                    checked={store.settings.prefer_install_prompt}
-                    onCheckedChange={(checked) => store.updateSettings('prefer_install_prompt', checked)}
-                    label="Prefer install prompt"
-                    description="Keep the PWA install affordance visible when the browser makes it available."
-                  />
-                </div>
-              </ContentCard>
+            }}
+            exportProfileAction={{
+              title: 'Export Profile',
+              description: 'Encrypted backup of your share and configuration',
+              actionLabel: 'Export',
+              testId: CRITICAL_E2E_TEST_IDS.settingsCopyProfile,
+              variant: 'secondary',
+              disabled: !selectedProfile,
+              onAction: () => openExportModal('bfprofile'),
+            }}
+            exportShareAction={{
+              title: 'Export Share',
+              description: 'Password-protected bfshare package',
+              actionLabel: 'Export',
+              testId: CRITICAL_E2E_TEST_IDS.settingsCopyShare,
+              variant: 'secondary',
+              disabled: !selectedProfile,
+              onAction: () => openExportModal('bfshare'),
+            }}
+            lockProfileAction={{
+              title: 'Logout',
+              description: 'Return to the profile list to open another profile',
+              actionLabel: 'Logout',
+              testId: CRITICAL_E2E_TEST_IDS.settingsLogout,
+              variant: 'destructive',
+              disabled: !selectedProfile,
+              onAction: () => void run(() => store.logout()),
+            }}
+            clearCredentialsAction={{
+              title: 'Clear Credentials',
+              description:
+                "Delete this device's saved profile, share, password, and relay configuration",
+              actionLabel: 'Clear',
+              testId: CRITICAL_E2E_TEST_IDS.settingsClearCredentials,
+              variant: 'destructive',
+              disabled: store.profiles.length === 0,
+              onAction: () => setClearCredentialsOpen(true),
+            }}
+            browserPreferences={
+              <div className="igloo-settings-grid">
+                <Checkbox
+                  checked={store.settings.remember_browser_state}
+                  onCheckedChange={(checked) => store.updateSettings('remember_browser_state', checked)}
+                  label="Remember browser state"
+                  description="Persist profiles, drafts, and the last active workspace in this browser."
+                />
+                <Checkbox
+                  checked={store.settings.auto_open_signer}
+                  onCheckedChange={(checked) => store.updateSettings('auto_open_signer', checked)}
+                  label="Open signer after import"
+                  description="Jump straight into the signer workspace after a successful setup action."
+                  data-testid={CRITICAL_E2E_TEST_IDS.settingsAutoOpenToggle}
+                />
+                <Checkbox
+                  checked={store.settings.prefer_install_prompt}
+                  onCheckedChange={(checked) => store.updateSettings('prefer_install_prompt', checked)}
+                  label="Prefer install prompt"
+                  description="Keep the PWA install affordance visible when the browser makes it available."
+                />
+              </div>
             }
           />
-        </div>
+          <OnboardDeviceSponsorshipDialog
+            open={onboardSponsorshipOpen}
+            onClose={() => setOnboardSponsorshipOpen(false)}
+            onExportShare={() => {
+              setOnboardSponsorshipOpen(false);
+              openExportModal('bfshare');
+            }}
+            onReplaceShare={() => {
+              setOnboardSponsorshipOpen(false);
+              void run(() => {
+                store.startRotateKey();
+              });
+            }}
+            exportShareDisabled={!selectedProfile}
+            replaceShareDisabled={!selectedProfile}
+          />
+        </>
       ) : null}
     </div>
   );

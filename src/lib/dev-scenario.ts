@@ -49,13 +49,43 @@ const fixtureProfile: PwaProfile = {
 // A representative running runtime snapshot: signer online with two peers (one
 // online, one offline) so the dashboard renders the Peers card with content.
 const _fixtureRuntimeStatus = createFixtureRuntimeStatusSummary();
+const EVENT_BASE_TS = 1_700_000_000_000;
 const runningSnapshot: PwaRuntimeSnapshot = {
   active: true,
   profile: fixtureProfile,
   runtime_status: _fixtureRuntimeStatus,
   readiness: _fixtureRuntimeStatus.readiness,
   peer_permission_states: [],
-  events: [],
+  events: [
+    {
+      ts: EVENT_BASE_TS,
+      level: 'info',
+      component: 'browser',
+      domain: 'runtime',
+      event: 'wasm_runtime_init_begin',
+    },
+    {
+      ts: EVENT_BASE_TS + 1_000,
+      level: 'info',
+      component: 'browser',
+      domain: 'runtime',
+      event: 'wasm_runtime_init_ok',
+    },
+    {
+      ts: EVENT_BASE_TS + 2_000,
+      level: 'info',
+      component: 'browser',
+      domain: 'relay',
+      event: 'bootstrap_begin',
+    },
+    {
+      ts: EVENT_BASE_TS + 3_000,
+      level: 'info',
+      component: 'browser',
+      domain: 'relay',
+      event: 'connected',
+    },
+  ],
   runtime_log_lines: ['[info] signer online', '[info] 2 peers known'],
   runtime_host: {
     profile_id: fixtureProfile.id,
@@ -64,6 +94,21 @@ const runningSnapshot: PwaRuntimeSnapshot = {
     started_at: 1_700_000_000,
     signer_pubkey: FIXTURE_SHARE_PK,
   },
+};
+
+const longLogSnapshot: PwaRuntimeSnapshot = {
+  ...runningSnapshot,
+  events: Array.from({ length: 24 }, (_, index) => {
+    const domains = ['runtime', 'relay', 'sign', 'ecdh', 'ping', 'sync'];
+    const domain = domains[index % domains.length];
+    return {
+      ts: EVENT_BASE_TS + index * 1_000,
+      level: 'info' as const,
+      component: 'browser',
+      domain,
+      event: `${domain}_event_${index + 1}`,
+    };
+  }),
 };
 
 /**
@@ -91,6 +136,22 @@ export function resolveDevScenario(): Partial<PwaPersistedState> | null {
         selectedProfileId: fixtureProfile.id,
         activeView: 'dashboard',
         activeDashboardTab: 'signer',
+        runtimeSnapshot: runningSnapshot,
+      };
+    case 'dashboard-running-long-log':
+      return {
+        profiles: [fixtureProfile],
+        selectedProfileId: fixtureProfile.id,
+        activeView: 'dashboard',
+        activeDashboardTab: 'signer',
+        runtimeSnapshot: longLogSnapshot,
+      };
+    case 'dashboard-settings':
+      return {
+        profiles: [fixtureProfile],
+        selectedProfileId: fixtureProfile.id,
+        activeView: 'dashboard',
+        activeDashboardTab: 'settings',
         runtimeSnapshot: runningSnapshot,
       };
     case 'dashboard-stopped':

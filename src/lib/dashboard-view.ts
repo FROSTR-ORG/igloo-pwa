@@ -6,6 +6,7 @@ import {
   observabilityEventsToEventRows,
   type DashboardKeyModel,
   type EventLogRowModel,
+  type OperatorSettingsSidebarGroupProfile,
   type PolicyDashboardViewModel,
   type SignerDashboardViewModel,
 } from 'igloo-ui';
@@ -48,16 +49,45 @@ export function deriveMemberLabel(sharePackageJson: string): string | undefined 
 export function deriveGroupSummary(groupPackageJson: string): {
   keysetName?: string;
   memberCount?: number;
+  threshold?: number;
 } {
   try {
-    const group = JSON.parse(groupPackageJson) as { group_name?: unknown; members?: unknown };
+    const group = JSON.parse(groupPackageJson) as { group_name?: unknown; members?: unknown; threshold?: unknown };
     return {
       keysetName: typeof group.group_name === 'string' ? group.group_name : undefined,
       memberCount: Array.isArray(group.members) ? group.members.length : undefined,
+      threshold: typeof group.threshold === 'number' ? group.threshold : undefined,
     };
   } catch {
     return {};
   }
+}
+
+function formatProfileDate(value: number | null | undefined) {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return undefined;
+  const normalized = value > 10_000_000_000 ? value : value * 1000;
+  return new Intl.DateTimeFormat('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  }).format(new Date(normalized));
+}
+
+export function deriveSettingsGroupProfile(
+  profile: PwaProfile | null,
+): OperatorSettingsSidebarGroupProfile | undefined {
+  if (!profile) return undefined;
+  const { keysetName, memberCount, threshold } = deriveGroupSummary(profile.group_package_json);
+  const keyNpub = toDashboardKey(profile.group_public_key)?.display;
+  return {
+    keysetName: keysetName ?? profile.label,
+    keyNpub,
+    thresholdLabel:
+      typeof threshold === 'number' && typeof memberCount === 'number'
+        ? `${threshold} of ${memberCount}`
+        : undefined,
+    createdLabel: formatProfileDate(profile.created_at),
+  };
 }
 
 type ExportSummaryProfile = {
@@ -120,6 +150,30 @@ function deriveRuntimeSummaryLabel(runtimeSnapshot: PwaRuntimeSnapshot | null) {
   return 'Signer Running';
 }
 
+function deriveThresholdLabel(
+  readiness: PwaRuntimeSnapshot['readiness'] | null | undefined,
+  summary: RuntimeStatusSummary | null,
+) {
+  const peerTotal = summary?.metadata?.peers?.length ? summary.metadata.peers.length + 1 : null;
+  return typeof readiness?.threshold === 'number' && peerTotal
+    ? `${readiness.threshold} of ${peerTotal}`
+    : 'threshold n/a';
+}
+
+function deriveRelaySummary(profile: PwaProfile, runtimeSnapshot: PwaRuntimeSnapshot | null) {
+  if (!runtimeSnapshot?.active) return 'Runtime stopped';
+
+  const reportedConnected = runtimeSnapshot.runtime_status?.connected_relays;
+  if (Array.isArray(reportedConnected)) {
+    return reportedConnected.length ? `Connected to ${reportedConnected.join(', ')}` : 'No relays connected';
+  }
+
+  const configuredRelays = runtimeSnapshot.runtime_status?.configured_relays?.filter(Boolean) ?? [];
+  const profileRelays = profile.relays.filter(Boolean);
+  const relays = configuredRelays.length ? configuredRelays : profileRelays;
+  return relays.length ? `Connected to ${relays.join(', ')}` : 'Connected';
+}
+
 export function deriveSignerDashboardView(
   profile: PwaProfile | null,
   runtimeSnapshot: PwaRuntimeSnapshot | null,
@@ -129,9 +183,7 @@ export function deriveSignerDashboardView(
 
   const summary = runtimeSnapshot?.runtime_status ?? null;
   const readiness = runtimeSnapshot?.readiness ?? null;
-  const peerTotal = summary?.metadata?.peers?.length ? summary.metadata.peers.length + 1 : null;
-  const thresholdLabel =
-    typeof readiness?.threshold === 'number' && peerTotal ? `${readiness.threshold}/${peerTotal}` : 'threshold n/a';
+  const thresholdLabel = deriveThresholdLabel(readiness, summary);
 
   const peerRows = buildPeerReadinessRows({
     peers: summary?.peers ?? [],
@@ -149,7 +201,7 @@ export function deriveSignerDashboardView(
     shareKey: toDashboardKey(profile.share_public_key),
     running: Boolean(runtimeSnapshot?.active),
     readinessLabel: deriveRuntimeSummaryLabel(runtimeSnapshot),
-    relaySummary: runtimeSnapshot?.active ? 'Browser runtime connected' : 'Runtime stopped',
+    relaySummary: deriveRelaySummary(profile, runtimeSnapshot),
     pendingApprovalRows: buildPendingApprovalRows({
       approvals: summary?.pending_approvals ?? [],
       peerAliases: Object.fromEntries(peerRows.map((row) => [row.pubkey, row.alias])),

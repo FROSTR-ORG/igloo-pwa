@@ -6,6 +6,7 @@ import {
   CreateFlowShareSelection,
   CRITICAL_E2E_TEST_IDS,
   OnboardingClientCard,
+  PageBackLink,
   PublicFocusFooter,
   PublicTaskShell,
   PublicTaskTitle,
@@ -23,6 +24,7 @@ type PwaStore = ReturnType<typeof useStore>;
 type RunAction = (action: () => Promise<void> | void) => Promise<void>;
 
 const CREATE_FLOW_STEPS = ['Create Keyset', 'Select Share', 'Save Profile', 'Distribute Shares'];
+const ROTATE_FLOW_STEPS = ['Collect Shares', 'Select Share', 'Save Profile', 'Distribute Shares'];
 
 function readNumber(value: unknown, fallback: number) {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
@@ -64,6 +66,7 @@ export function CreateGenerateView({
 }) {
   const rotationSourceProfile =
     store.profiles.find((profile) => profile.id === store.drafts.rotationForm.sourceProfileId) ?? null;
+  const isRotateMode = store.drafts.createForm.mode === 'rotate';
   const rotationThreshold = readRotationThreshold(rotationSourceProfile, store.drafts.createForm.threshold);
   const localSourceReady = Boolean(
     rotationSourceProfile &&
@@ -88,10 +91,15 @@ export function CreateGenerateView({
   return (
     <>
       <PublicTaskShell>
-        <StepProgress steps={CREATE_FLOW_STEPS} active={0} />
+        <StepProgress steps={isRotateMode ? ROTATE_FLOW_STEPS : CREATE_FLOW_STEPS} active={0} />
+        {isRotateMode ? <PageBackLink label="Back to Welcome" onBack={onBack} /> : null}
         <PublicTaskTitle
-          title="Create Keyset"
-          description="Define the group profile for a new keyset. After generation, choose which share stays on this device, then distribute the rest."
+          title={isRotateMode ? 'Collect Shares' : 'Create Keyset'}
+          description={
+            isRotateMode
+              ? "Enter this device's profile passphrase, then collect enough remote source packages to rotate this keyset. Once the threshold is met, continue to select the new local share."
+              : 'Define the group profile for a new keyset. After generation, choose which share stays on this device, then distribute the rest.'
+          }
         />
         {store.drafts.createForm.mode === 'new' ? (
           <CreateFlowGenerateCard
@@ -104,7 +112,7 @@ export function CreateGenerateView({
             onBack={onBack}
           />
         ) : null}
-        {store.profiles.length > 0 ? (
+        {store.profiles.length > 0 && !isRotateMode ? (
           <div className="igloo-button-row igloo-button-row-tight" role="group" aria-label="Keyset action mode">
             <Button
               type="button"
@@ -126,7 +134,7 @@ export function CreateGenerateView({
             </Button>
           </div>
         ) : null}
-        {store.drafts.createForm.mode === 'rotate' ? (
+        {isRotateMode ? (
           <RotateKeysetPanel
             sourceProfileId={store.drafts.rotationForm.sourceProfileId}
             availableProfiles={store.profiles.map((profile) => ({

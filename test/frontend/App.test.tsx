@@ -1069,10 +1069,14 @@ describe('igloo-pwa app shell', () => {
 
     render(<App />);
 
-    expect(screen.getAllByRole('button', { name: 'Export Profile' }).length).toBeGreaterThan(0);
-    expect(screen.getAllByRole('button', { name: 'Export Share' }).length).toBeGreaterThan(0);
-    expect(screen.getAllByRole('button', { name: 'Replace Share' }).length).toBeGreaterThan(0);
-    expect(screen.getAllByRole('button', { name: 'Logout' }).length).toBeGreaterThan(0);
+    expect(screen.getByRole('heading', { name: 'Export Profile' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Export Share' })).toBeInTheDocument();
+    expect(screen.getAllByRole('heading', { name: 'Replace Share' }).length).toBeGreaterThan(0);
+    expect(screen.getByRole('heading', { name: 'Logout' })).toBeInTheDocument();
+    expect(screen.getByTestId(CRITICAL_E2E_TEST_IDS.settingsCopyProfile)).toBeInTheDocument();
+    expect(screen.getByTestId(CRITICAL_E2E_TEST_IDS.settingsCopyShare)).toBeInTheDocument();
+    expect(screen.getByTestId(CRITICAL_E2E_TEST_IDS.maintenanceRotateShare)).toBeInTheDocument();
+    expect(screen.getByTestId(CRITICAL_E2E_TEST_IDS.settingsLogout)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /reset browser workspace/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /wipe/i })).not.toBeInTheDocument();
   });

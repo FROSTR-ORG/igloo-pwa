@@ -3,9 +3,12 @@ import * as React from 'react';
 import {
   Alert,
   AppHeader,
-  ConfirmDialog,
+  ClearCredentialsDialog,
+  CRITICAL_E2E_TEST_IDS,
+  DashboardHeaderActions,
   PageLayout,
   ExportPackageModal,
+  SettingsUnsavedChangesDialog,
   WelcomeDeleteModal,
   WelcomeUnlockModal,
   type DashboardKeyModel,
@@ -76,9 +79,11 @@ function isPaperWelcomeSurface(store: ReturnType<typeof useStore>) {
   return store.activeView === 'landing' || store.activeView === 'create-generate';
 }
 
-function deriveHeaderTaskLabel(activeView: ReturnType<typeof useStore>['activeView']) {
-  if (activeView.startsWith('create')) return 'Create';
+function deriveHeaderTaskLabel(store: ReturnType<typeof useStore>) {
+  const activeView = store.activeView;
+  if (activeView.startsWith('create')) return store.drafts.createForm.mode === 'rotate' ? 'Rotate' : 'Create';
   if (activeView.startsWith('rotate')) return 'Rotate';
+  if (activeView.startsWith('recover')) return 'Recover';
   if (activeView.startsWith('onboard')) return 'Onboard';
   if (activeView.startsWith('load')) return 'Import';
   return 'Installable browser workspace';
@@ -320,6 +325,30 @@ function AppShell() {
   );
 
   const landingProfiles = store.profiles.map(deriveWelcomeReturningProfile);
+  const isWelcomeSurface = isPaperWelcomeSurface(store);
+  const isDashboardSurface = store.activeView === 'dashboard';
+  const dashboardHeaderActions = isDashboardSurface ? (
+    <DashboardHeaderActions
+      dashboard={{
+        label: 'Dashboard',
+        active: store.activeDashboardTab === 'signer',
+        testId: CRITICAL_E2E_TEST_IDS.dashboardTabSigner,
+        onClick: () => requestDashboardTab('signer'),
+      }}
+      permissions={{
+        label: 'Permissions',
+        active: store.activeDashboardTab === 'permissions',
+        testId: CRITICAL_E2E_TEST_IDS.dashboardTabPermissions,
+        onClick: () => requestDashboardTab('permissions'),
+      }}
+      settings={{
+        label: 'Settings',
+        active: store.activeDashboardTab === 'settings',
+        testId: CRITICAL_E2E_TEST_IDS.dashboardTabSettings,
+        onClick: () => requestDashboardTab('settings'),
+      }}
+    />
+  ) : null;
   const activeViewContent = (() => {
     switch (store.activeView) {
       case 'landing':
@@ -333,7 +362,9 @@ function AppShell() {
             onUnlock={openWelcomeUnlock}
             onRotate={(profileId) => {
               store.selectProfile(profileId);
-              store.setActiveView('rotate-connect');
+              store.updateCreateForm('mode', 'rotate');
+              store.updateRotationForm('sourceProfileId', profileId);
+              store.setActiveView('create-generate');
             }}
             onRecover={(profileId) => {
               setRecoveredKey(null);
@@ -412,14 +443,15 @@ function AppShell() {
 
   return (
     <PageLayout
-      surface={isPaperWelcomeSurface(store) ? 'welcome' : 'default'}
-      maxWidth={isPaperWelcomeSurface(store) ? 'max-w-none' : undefined}
+      surface={isWelcomeSurface ? 'welcome' : isDashboardSurface ? 'dashboard' : 'default'}
+      maxWidth={isWelcomeSurface ? 'max-w-none' : isDashboardSurface ? 'max-w-[1000px]' : 'max-w-none'}
       header={
         <AppHeader
           mode={deriveHeaderMode(store.activeView)}
           logoSrc="/igloo-paper-mark.png"
-          taskLabel={deriveHeaderTaskLabel(store.activeView)}
+          taskLabel={deriveHeaderTaskLabel(store)}
           profileName={selectedProfile?.label}
+          actions={dashboardHeaderActions}
         />
       }
     >
@@ -468,27 +500,18 @@ function AppShell() {
           void saveTextToFile(filename, value);
         }}
       />
-      <ConfirmDialog
+      <SettingsUnsavedChangesDialog
         open={Boolean(pendingSettingsNav)}
-        variant="warning"
-        title="Discard unsaved changes?"
-        message="You have unsaved changes in Settings. Close without saving?"
-        confirmLabel="Discard"
-        cancelLabel="Keep editing"
-        onConfirm={() => {
+        onDiscard={() => {
           setOperatorSettingsDraft(buildOperatorSettingsDraft(selectedProfile));
           if (pendingSettingsNav) store.setDashboardTab(pendingSettingsNav);
           setPendingSettingsNav(null);
         }}
-        onCancel={() => setPendingSettingsNav(null)}
+        onKeepEditing={() => setPendingSettingsNav(null)}
       />
-      <ConfirmDialog
+      <ClearCredentialsDialog
         open={clearCredentialsOpen}
-        variant="danger"
-        title="Clear all credentials?"
-        message="This permanently removes every stored profile and credential from this device and cannot be undone. Export anything you need first."
-        confirmLabel="Clear this device"
-        cancelLabel="Cancel"
+        profileSummary={deriveExportSummary(selectedProfile)}
         onConfirm={() => {
           setClearCredentialsOpen(false);
           void run(() => store.clearDeviceCredentials());

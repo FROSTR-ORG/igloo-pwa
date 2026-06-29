@@ -257,13 +257,13 @@ describe('deriveSignerDashboardView', () => {
     const view = deriveSignerDashboardView(profile, runtimeSnapshot(), [policyPeer]);
 
     expect(view?.profileName).toBe('Treasury signer');
-    expect(view?.thresholdLabel).toBe('2/2');
+    expect(view?.thresholdLabel).toBe('2 of 2');
     expect(view?.memberLabel).toBe('Share #2');
     expect(view?.groupKey?.hex).toBe(profile.group_public_key);
     expect(view?.shareKey?.hex).toBe(profile.share_public_key);
     expect(view?.running).toBe(true);
     expect(view?.readinessLabel).toBe('Signer Running');
-    expect(view?.relaySummary).toBe('Browser runtime connected');
+    expect(view?.relaySummary).toBe('Connected to wss://relay.example');
     expect(view?.peerRows.map((row) => row.pubkey)).toEqual(['aa'.repeat(32), 'bb'.repeat(32)]);
     expect(view?.pendingApprovalRows?.[0]).toEqual(expect.objectContaining({
       id: 'approval-1',
@@ -294,6 +294,11 @@ describe('deriveSignerDashboardView', () => {
     expect(stopped?.thresholdLabel).toBe('threshold n/a');
     expect(stopped?.readinessLabel).toBe('Signer Stopped');
     expect(stopped?.relaySummary).toBe('Runtime stopped');
+
+    const offlineRelays = deriveSignerDashboardView(profile, runtimeSnapshot({
+      runtime_status: { ...runtimeSnapshot().runtime_status!, connected_relays: [] },
+    }), []);
+    expect(offlineRelays?.relaySummary).toBe('No relays connected');
 
     const degraded = deriveSignerDashboardView(profile, runtimeSnapshot({
       readiness: {
