@@ -67,7 +67,15 @@ export function createDashboardActions({
       const snapshot = getState();
       const profile = snapshot.profiles.find((entry) => entry.id === profileId);
       if (!profile) return;
-      const packageText = format === 'bfprofile' ? profile.profile_string : profile.share_string;
+      const transientPackageText = format === 'bfprofile' ? profile.profile_string : profile.share_string;
+      const packageText = transientPackageText?.trim()
+        ? transientPackageText
+        : await adapter.exportEncryptedPackage({
+            profile,
+            storedPassword: snapshot.unlockPassphrase,
+            exportPassword: snapshot.unlockPassphrase,
+            format,
+          });
       if (!packageText.trim()) {
         throw new Error(`No ${format} package is available for this profile.`);
       }
@@ -82,11 +90,11 @@ export function createDashboardActions({
       if (!profile) {
         throw new Error('Select a profile first.');
       }
-      if (!profile.profile_string.trim()) {
+      if (!profile.profile_string?.trim() && !profile.encrypted_bfshare_artifact?.trim()) {
         throw new Error('No package is available to export for this profile.');
       }
       return await adapter.exportEncryptedPackage({
-        profileString: profile.profile_string,
+        profile,
         storedPassword: snapshot.unlockPassphrase,
         exportPassword,
         format,

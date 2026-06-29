@@ -5,6 +5,7 @@ import {
   finalizeConnectedBrowserProfile,
   finalizeRotatedBrowserProfile,
   importBrowserProfilePackage,
+  reconstructBrowserProfilePackagePayload,
   Secret,
 } from 'igloo-shared';
 
@@ -175,17 +176,39 @@ export async function finalizeOnboardedDevice(input: OnboardFinalizeInput): Prom
   return toPwaProfile(finalized);
 }
 
-// Re-encrypt a stored profile's package with a fresh export password. The stored
-// bfprofile/bfshare strings are encrypted with the profile's local password; we
-// decode with that, then re-encode the payload under the export password so the
-// exported backup is portable and independent of the local password.
+async function reconstructExportPayload(profile: PwaProfile, storedPassword: string) {
+  const profileString = profile.profile_string?.trim();
+  if (profileString) {
+    return await decodeBfProfilePackage(profileString, Secret.of(storedPassword));
+  }
+  if (!storedPassword.trim()) {
+    throw new Error('Unlock this profile before exporting it.');
+  }
+  if (!profile.encrypted_bfshare_artifact?.trim()) {
+    throw new Error('No package is available to export for this profile.');
+  }
+  const sharePackageJson = await unlockShareFromArtifact(profile, storedPassword);
+  return reconstructBrowserProfilePackagePayload({
+    id: profile.id,
+    label: profile.label,
+    relays: profile.relays,
+    groupPackageJson: profile.group_package_json,
+    sharePackageJson,
+    manualPeerPolicyOverrides: profile.manual_peer_policy_overrides ?? [],
+  });
+}
+
+// Re-encrypt a stored profile's package with a fresh export password. Fresh
+// in-memory profiles may still carry `profile_string`, but hydrated profiles do
+// not. Rebuild the canonical payload from durable profile metadata + the sealed
+// share artifact so exports keep working after reload/onboard.
 export async function exportEncryptedPackage(input: {
-  profileString: string;
+  profile: PwaProfile;
   storedPassword: string;
   exportPassword: string;
   format: 'bfprofile' | 'bfshare';
 }): Promise<string> {
-  const payload = await decodeBfProfilePackage(input.profileString, Secret.of(input.storedPassword));
+  const payload = await reconstructExportPayload(input.profile, input.storedPassword);
   const pair = await createProfilePackagePair(payload, Secret.of(input.exportPassword));
   return input.format === 'bfprofile' ? pair.profileString : pair.shareString;
 }

@@ -106,8 +106,10 @@ export type PwaProfile = PwaProfilePreview & {
    * localStorage.
    */
   encrypted_bfshare_artifact: string;
-  profile_string: string;
-  share_string: string;
+  /** Transient bfprofile package. Present immediately after create/import; intentionally not persisted. */
+  profile_string?: string;
+  /** Transient bfshare package. Present immediately after create/import; intentionally not persisted. */
+  share_string?: string;
   signer_settings: PwaSignerSettings;
   manual_peer_policy_overrides?: BrowserManualPeerPolicyOverride[];
   peer_pubkey?: string | null;

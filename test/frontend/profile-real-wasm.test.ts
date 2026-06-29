@@ -163,4 +163,35 @@ describe('pwa profile packages with real WASM', () => {
       ),
     ).rejects.toThrow('Incorrect passphrase.');
   });
+
+  it('exports a durable profile after transient package strings are gone', async () => {
+    const pair = await createRealPackagePair();
+    const confirmation = await adapter.importBfProfile({
+      profileString: pair.profileString,
+      password: 'correct horse',
+    });
+    const profile = await adapter.finalizeLoadedProfile(confirmation, [], 'correct horse');
+    delete profile.profile_string;
+    delete profile.share_string;
+
+    const exported = await adapter.exportEncryptedPackage({
+      profile,
+      storedPassword: 'correct horse',
+      exportPassword: 'fresh export password',
+      format: 'bfprofile',
+    });
+
+    expect(exported.startsWith('bfprofile1')).toBe(true);
+    await expect(
+      adapter.importBfProfile({
+        profileString: exported,
+        password: 'fresh export password',
+      }),
+    ).resolves.toMatchObject({
+      kind: 'bfprofile',
+      preview: expect.objectContaining({
+        label: 'PWA Real WASM Test Device',
+      }),
+    });
+  });
 });
