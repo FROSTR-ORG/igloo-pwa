@@ -73,6 +73,7 @@ export function DashboardView({
   });
 
   const [onboardSponsorshipOpen, setOnboardSponsorshipOpen] = React.useState(false);
+  const [pingingPeerPubkey, setPingingPeerPubkey] = React.useState<string | null>(null);
   const settingsGroupProfile = React.useMemo(
     () => deriveSettingsGroupProfile(selectedProfile),
     [selectedProfile],
@@ -124,6 +125,12 @@ export function DashboardView({
           }
           onRefreshPeers={() => void run(() => store.refreshSigner())}
           refreshPeersDisabled={!store.runtimeSnapshot?.active}
+          onPingPeer={(pubkey) => {
+            setPingingPeerPubkey(pubkey);
+            void run(() => store.pingPeer(pubkey)).finally(() => setPingingPeerPubkey(null));
+          }}
+          pingPeerDisabled={!store.runtimeSnapshot?.active || pingingPeerPubkey != null}
+          pingingPeerPubkey={pingingPeerPubkey}
           // Clearing the host-side log buffer requires an active session, so
           // only expose the control while the signer is running.
           onClearLogs={

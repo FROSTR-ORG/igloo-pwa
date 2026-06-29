@@ -13,6 +13,7 @@ import {
   getRuntimeReadiness,
   getRuntimeSnapshot,
   getRuntimeStatus,
+  pingSinglePeer,
   refreshAllPeersOnNode,
   stopSignerNode,
   updateRuntimeConfigOnNode,
@@ -22,6 +23,7 @@ import {
   type RuntimeMetadata,
   type RuntimePeerPermissionState,
   type RuntimeReadiness,
+  type PingResult,
   type SignerSettings,
   type RuntimeStatusSummary,
   normalizeSignerSettings,
@@ -100,6 +102,7 @@ export type BrowserRuntimeSession = {
   clearLogs: () => void;
   read: () => BrowserRuntimeSessionSnapshot;
   refreshPeers: () => Promise<BrowserRuntimeSessionSnapshot>;
+  pingPeer: (pubkey: string) => Promise<PingResult>;
   updatePeerPolicyOverride: (
     pubkey: string,
     patch: {
@@ -386,6 +389,9 @@ function createSession(node: BrowserBridgeNode, logs: ReturnType<typeof attachLo
       refreshAllPeersOnNode(node);
       await new Promise((resolve) => setTimeout(resolve, 250));
       return buildSessionSnapshot(node, logs.collectEvents());
+    },
+    async pingPeer(pubkey) {
+      return await pingSinglePeer(node, pubkey);
     },
     async updatePeerPolicyOverride(pubkey, patch) {
       await updateRuntimePeerPolicyOverrideOnNode(node, pubkey, patch);

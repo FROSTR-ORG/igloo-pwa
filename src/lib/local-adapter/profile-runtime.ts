@@ -313,6 +313,26 @@ export async function refreshSession(
   };
 }
 
+export async function pingPeer(
+  current: PwaRuntimeSnapshot | null,
+  pubkey: string,
+  controller?: SessionController | null,
+): Promise<PwaRuntimeSnapshot | null> {
+  if (!current?.profile) return null;
+  const target = resolveController(controller);
+  const profileId = current.profile.id;
+  if (!current.active || target.getActiveProfileId() !== profileId) {
+    return null;
+  }
+  const sharePackageJson = target.getSharePackageJson(profileId);
+  const session = target.getActiveSession();
+  if (!sharePackageJson || !session) {
+    return null;
+  }
+  await target.pingPeer(profileId, target.currentEpoch(), pubkey);
+  return toRuntimeSnapshot(current.profile, session, true, sharePackageJson);
+}
+
 export async function readSession(
   current: PwaRuntimeSnapshot | null,
   controller?: SessionController | null,

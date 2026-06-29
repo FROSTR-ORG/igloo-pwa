@@ -40,6 +40,7 @@ export type StoreDashboardActions = {
   startSigner: () => Promise<void>;
   stopSigner: () => Promise<void>;
   refreshSigner: () => Promise<void>;
+  pingPeer: (pubkey: string) => Promise<void>;
   saveOperatorSettings: (input: {
     label: string;
     relays: string[];
@@ -243,6 +244,25 @@ export function createDashboardActions({
               ),
         peerPermissionStates:
           runtimeSnapshot?.peer_permission_states ?? current.peerPermissionStates,
+        runtimeWarning: null,
+        dashboardLoadError: null,
+        runtimeSnapshot,
+      }));
+    },
+    async pingPeer(pubkey) {
+      const snapshot = getState();
+      const runtimeSnapshot = await adapter.pingPeer(snapshot.runtimeSnapshot, pubkey, controller);
+      if (!runtimeSnapshot) return;
+      setState((current) => ({
+        ...current,
+        profiles:
+          runtimeSnapshot.profile == null
+            ? current.profiles
+            : current.profiles.map((profile) =>
+                profile.id === runtimeSnapshot.profile?.id ? runtimeSnapshot.profile ?? profile : profile,
+              ),
+        peerPermissionStates:
+          runtimeSnapshot.peer_permission_states ?? current.peerPermissionStates,
         runtimeWarning: null,
         dashboardLoadError: null,
         runtimeSnapshot,

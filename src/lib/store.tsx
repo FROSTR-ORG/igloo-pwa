@@ -143,6 +143,7 @@ type AppState = PwaPersistedState & {
   startSigner: () => Promise<void>;
   stopSigner: () => Promise<void>;
   refreshSigner: () => Promise<void>;
+  pingPeer: (pubkey: string) => Promise<void>;
   saveOperatorSettings: (input: {
     label: string;
     relays: string[];

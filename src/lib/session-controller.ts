@@ -296,6 +296,24 @@ export class SessionController {
   }
 
   /**
+   * Ping one peer on the current session. Returns `null` on drift. Never throws.
+   */
+  async pingPeer(
+    profileId: string,
+    epoch: SessionEpoch,
+    pubkey: string,
+  ): Promise<Awaited<ReturnType<BrowserRuntimeSession['pingPeer']>> | null> {
+    if (!this.isFresh(profileId, epoch)) {
+      return null;
+    }
+    try {
+      return await this.session!.pingPeer(pubkey);
+    } catch {
+      return null;
+    }
+  }
+
+  /**
    * Apply a peer-policy override. Returns `null` on drift. Never throws.
    */
   async applyPeerPolicy(
