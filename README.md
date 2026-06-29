@@ -68,19 +68,21 @@ Low-level maintenance/debug commands still exist:
 
 ## Deployment
 
-The PWA ships a strict `Content-Security-Policy` meta tag in `index.html` and
-relies on cross-origin isolation for future WebAssembly/threading features.
-Production hosting **must** serve the following response headers on every
-HTML response alongside the bundled app:
+The public-beta deployment is a static GitHub Pages origin fronted by
+Cloudflare. The PWA ships a strict `Content-Security-Policy` meta tag in
+`index.html`; Cloudflare injects the cross-origin isolation headers on HTML
+responses:
 
 - `Cross-Origin-Opener-Policy: same-origin`
 - `Cross-Origin-Embedder-Policy: require-corp`
 - `Cross-Origin-Resource-Policy: same-origin`
 
-The Vite dev server sets these automatically (see `vite.config.ts`). Static
-hosts (e.g. nginx, Cloudflare Pages, Netlify) need equivalent header rules.
-Without them, `crossOriginIsolated` will be `false` and cross-origin window
-references will not be blocked by the browser.
+The app does not currently depend on `SharedArrayBuffer` or threaded WASM, so
+these headers are hardening and future-runtime readiness rather than a
+functional dependency. The Vite dev server sets them automatically for local
+development (see `vite.config.ts`); GitHub Pages cannot set them directly, so
+the beta domain uses the Cloudflare front layer described in
+[DEPLOYMENT.md](./DEPLOYMENT.md).
 
 The shipped CSP rejects plaintext `ws://` / `http://` to non-loopback hosts;
 remote relays must use `wss://`. Loopback plaintext (`localhost`, `127.0.0.1`)
@@ -88,5 +90,7 @@ is permitted so the local dev-relay and demo harness work out of the box.
 
 ## Project Docs
 
+- [DEPLOYMENT.md](./DEPLOYMENT.md)
+- [docs/USER_GUIDE.md](./docs/USER_GUIDE.md)
 - [TESTING.md](./TESTING.md)
 - [CONTRIBUTING.md](./CONTRIBUTING.md)

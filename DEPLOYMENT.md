@@ -57,6 +57,18 @@ Expected: all three `Cross-Origin-*` headers present. In the browser console,
 `crossOriginIsolated` should be `true`. If it is `false`, the headers are not
 reaching HTML responses — re-check the Transform Rule scope.
 
+## 5. Publish public-beta support pages
+
+Serve the user-facing docs from the same HTTPS domain so beta users and later
+Chrome Web Store reviewers have stable links:
+
+- user guide: `docs/USER_GUIDE.md` rendered as the public "Getting Started" /
+  troubleshooting page;
+- privacy policy: explains that profiles and shares remain local to the browser
+  unless the user exports or shares them;
+- security contact: points to GitHub Private Vulnerability Reporting or the
+  maintainer security address.
+
 ## Content-Security-Policy notes
 
 `index.html` ships a strict CSP meta tag. It **rejects plaintext `ws://` /
