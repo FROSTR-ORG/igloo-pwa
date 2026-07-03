@@ -7,7 +7,7 @@
 // It is inert in production: nothing reads it unless the query param is present,
 // and it never writes to storage. Mirrors igloo-home's resolveVisualScenario.
 
-import type { PwaPersistedState, PwaProfile, PwaRuntimeSnapshot } from './types';
+import type { PwaPeerPermissionState, PwaPersistedState, PwaProfile, PwaRuntimeSnapshot } from './types';
 import {
   FIXTURE_PROFILE_ID, FIXTURE_PROFILE_LABEL, FIXTURE_GROUP_PK, FIXTURE_SHARE_PK,
   FIXTURE_RELAY, FIXTURE_MEMBER_IDX, FIXTURE_SIGNER_SETTINGS,
@@ -95,6 +95,27 @@ const runningSnapshot: PwaRuntimeSnapshot = {
     signer_pubkey: FIXTURE_SHARE_PK,
   },
 };
+
+function fixturePeerPolicyState(pubkey: string): PwaPeerPermissionState {
+  const unset = { ping: 'unset', onboard: 'unset', sign: 'unset', ecdh: 'unset' } as const;
+  const allowed = { ping: true, onboard: true, sign: true, ecdh: true };
+  return {
+    pubkey,
+    manual_override: {
+      request: { ...unset },
+      respond: { ...unset },
+    },
+    remote_observation: null,
+    effective_policy: {
+      request: { ...allowed },
+      respond: { ...allowed },
+    },
+  };
+}
+
+const fixturePeerPermissionStates = _fixtureRuntimeStatus.peers.map((peer) =>
+  fixturePeerPolicyState(peer.pubkey),
+);
 
 const longLogSnapshot: PwaRuntimeSnapshot = {
   ...runningSnapshot,
@@ -311,6 +332,15 @@ export function resolveDevScenario(): Partial<PwaPersistedState> | null {
         activeView: 'dashboard',
         activeDashboardTab: 'settings',
         runtimeSnapshot: runningSnapshot,
+      };
+    case 'dashboard-permissions':
+      return {
+        profiles: [fixtureProfile],
+        selectedProfileId: fixtureProfile.id,
+        activeView: 'dashboard',
+        activeDashboardTab: 'permissions',
+        runtimeSnapshot: runningSnapshot,
+        peerPermissionStates: fixturePeerPermissionStates,
       };
     case 'dashboard-stopped':
       return {

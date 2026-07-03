@@ -4,7 +4,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { __setInstanceIdForTests } from '@/lib/instance';
 import * as adapter from '@/lib/local-adapter';
+import { GLOBAL_STORE_KEY } from '@/lib/storage';
 import { StoreProvider, useStore } from '@/lib/store';
+import type { PwaProfile, PwaRuntimeSnapshot } from '@/lib/types';
 
 function StoreHarness({ onReady }: { onReady: (store: ReturnType<typeof useStore>) => void }) {
   const store = useStore();
@@ -12,6 +14,85 @@ function StoreHarness({ onReady }: { onReady: (store: ReturnType<typeof useStore
     onReady(store);
   }, [onReady, store]);
   return null;
+}
+
+function testProfile(): PwaProfile {
+  return {
+    id: 'aa'.repeat(32),
+    label: 'Dashboard Device',
+    share_public_key: '44'.repeat(32),
+    group_public_key: '55'.repeat(32),
+    relays: ['wss://relay.primal.net'],
+    group_package_json:
+      '{"group_name":"Dashboard Device","group_pk":"55","threshold":2,"members":[{"idx":1}]}',
+    member_idx: 1,
+    source: 'generated',
+    relay_profile: 'browser',
+    group_ref: 'group-ref',
+    encrypted_profile_ref: 'encrypted-profile-ref',
+    encrypted_bfshare_artifact: 'bfshare1demo',
+    state_path: '/tmp/igloo-pwa/dashboard-device',
+    created_at: 1700000000000,
+    profile_string: 'bfprofile1demo',
+    share_string: 'bfshare1demo',
+    signer_settings: {
+      sign_timeout_secs: 30,
+      ping_timeout_secs: 15,
+      request_ttl_secs: 300,
+      state_save_interval_secs: 30,
+      peer_selection_strategy: 'deterministic_sorted',
+    },
+    manual_peer_policy_overrides: [],
+    peer_pubkey: null,
+    onboarding_package: null,
+  };
+}
+
+function activeSnapshot(profile: PwaProfile): PwaRuntimeSnapshot {
+  return {
+    active: true,
+    profile,
+    runtime_status: null,
+    readiness: null,
+    peer_permission_states: [],
+    runtime_log_lines: [],
+    runtime_host: null,
+  };
+}
+
+function seedGlobalProfile(profile: PwaProfile) {
+  window.localStorage.setItem(
+    GLOBAL_STORE_KEY,
+    JSON.stringify({ schemaVersion: 1, profiles: [profile] }),
+  );
+}
+
+async function createRunningDashboardStore() {
+  const profile = testProfile();
+  seedGlobalProfile(profile);
+  const startSpy = vi.spyOn(adapter, 'startSession').mockResolvedValue(activeSnapshot(profile));
+  let latestStore: ReturnType<typeof useStore> | undefined;
+
+  render(
+    <StoreProvider>
+      <StoreHarness onReady={(store) => (latestStore = store)} />
+    </StoreProvider>,
+  );
+
+  await waitFor(() => expect(latestStore?.profiles).toHaveLength(1));
+  await act(async () => {
+    await latestStore!.loadStoredProfile(profile.id, 'device-passphrase');
+  });
+  await waitFor(() => expect(latestStore?.runtimeSnapshot?.active).toBe(true));
+
+  return {
+    profile,
+    startSpy,
+    get store() {
+      if (!latestStore) throw new Error('store not ready');
+      return latestStore;
+    },
+  };
 }
 
 beforeEach(() => {
@@ -124,5 +205,35 @@ describe('store actions', () => {
     await waitFor(() => expect(harness.store.runtimeSnapshot?.active).toBe(true));
     expect(harness.store.activeView).toBe('create-distribute');
     expect(harness.store.distributionSession).not.toBeNull();
+  });
+
+  it('routes home even when stopping the signer cannot capture a final snapshot', async () => {
+    const harness = await createRunningDashboardStore();
+    vi.spyOn(adapter, 'stopSession').mockRejectedValueOnce(new Error('snapshot capture failed'));
+
+    await act(async () => {
+      await harness.store.stopSigner();
+    });
+
+    expect(harness.store.activeView).toBe('landing');
+    expect(harness.store.runtimeSnapshot).toBeNull();
+    expect(harness.store.unlockPassphrase).toBe('');
+    expect(harness.store.activeDashboardTab).toBe('signer');
+    harness.startSpy.mockRestore();
+  });
+
+  it('routes home when a dashboard refresh finds no live signer session', async () => {
+    const harness = await createRunningDashboardStore();
+    vi.spyOn(adapter, 'refreshSession').mockResolvedValueOnce(null);
+
+    await act(async () => {
+      await harness.store.refreshSigner();
+    });
+
+    expect(harness.store.activeView).toBe('landing');
+    expect(harness.store.runtimeSnapshot).toBeNull();
+    expect(harness.store.unlockPassphrase).toBe('');
+    expect(harness.store.activeDashboardTab).toBe('signer');
+    harness.startSpy.mockRestore();
   });
 });

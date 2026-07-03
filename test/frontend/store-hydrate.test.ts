@@ -91,13 +91,14 @@ describe('normalizeLoadedStateFromStorage', () => {
     expect(state.activeView).toBe('landing');
   });
 
-  it('keeps a valid selection on the dashboard', () => {
+  it('bounces a valid dashboard selection to landing because runtime secrets do not survive reload', () => {
     saveGlobalState({ profiles: [prof('keep')] as unknown as PwaProfile[] });
-    seedSession({ selectedProfileId: 'keep', activeView: 'dashboard' });
+    seedSession({ selectedProfileId: 'keep', activeView: 'dashboard', activeDashboardTab: 'permissions' });
 
     const state = normalizeLoadedStateFromStorage();
     expect(state.selectedProfileId).toBe('keep');
-    expect(state.activeView).toBe('dashboard');
+    expect(state.activeView).toBe('landing');
+    expect(state.activeDashboardTab).toBe('signer');
   });
 
   it('bounces a mid-create view to landing (the in-flight keyset is never persisted)', () => {

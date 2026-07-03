@@ -20,6 +20,35 @@ import type {
   PwaSignerSettings,
 } from './types';
 
+function mergeRuntimeProfile(
+  current: PwaPersistedState,
+  runtimeSnapshot: PwaRuntimeSnapshot | null,
+): PwaProfile[] {
+  return runtimeSnapshot?.profile == null
+    ? current.profiles
+    : current.profiles.map((profile) =>
+        profile.id === runtimeSnapshot.profile?.id ? runtimeSnapshot.profile ?? profile : profile,
+      );
+}
+
+function routeToLandingAfterSignerExit(
+  current: PwaPersistedState,
+  runtimeSnapshot: PwaRuntimeSnapshot | null,
+): PwaPersistedState {
+  return {
+    ...current,
+    profiles: mergeRuntimeProfile(current, runtimeSnapshot),
+    peerPermissionStates: adapter.defaultPeerPermissionStates(),
+    runtimeWarning: null,
+    dashboardLoadError: null,
+    runtimeSnapshot: null,
+    activeView: 'landing',
+    activeDashboardTab: 'signer',
+    unlockPassphrase: '',
+    draftSecrets: createDefaultDraftSecrets(),
+  };
+}
+
 export type StoreDashboardActions = {
   copyProfilePackage: (profileId: string, format: 'bfprofile' | 'bfshare') => Promise<void>;
   exportEncryptedPackage: (
@@ -222,28 +251,34 @@ export function createDashboardActions({
     },
     async stopSigner() {
       const snapshot = getState();
-      const runtimeSnapshot = await adapter.stopSession(snapshot.runtimeSnapshot, controller);
-      setState((current) => ({
-        ...current,
-        profiles:
-          runtimeSnapshot?.profile == null
-            ? current.profiles
-            : current.profiles.map((profile) =>
-                profile.id === runtimeSnapshot.profile?.id ? runtimeSnapshot.profile ?? profile : profile,
-              ),
-        peerPermissionStates: adapter.defaultPeerPermissionStates(),
-        runtimeWarning: null,
-        dashboardLoadError: null,
-        runtimeSnapshot: null,
-        activeView: 'landing',
-        activeDashboardTab: 'signer',
-        unlockPassphrase: '',
-        draftSecrets: createDefaultDraftSecrets(),
-      }));
+      let runtimeSnapshot: PwaRuntimeSnapshot | null = null;
+      try {
+        runtimeSnapshot = await adapter.stopSession(snapshot.runtimeSnapshot, controller);
+      } catch {
+        await adapter.disposeRuntimeSessionForProfile(
+          snapshot.runtimeSnapshot?.profile?.id,
+          controller,
+        ).catch(() => undefined);
+        runtimeSnapshot = null;
+      }
+      setState((current) => routeToLandingAfterSignerExit(current, runtimeSnapshot));
     },
     async refreshSigner() {
       const snapshot = getState();
-      const runtimeSnapshot = await adapter.refreshSession(snapshot.runtimeSnapshot, controller);
+      let runtimeSnapshot: PwaRuntimeSnapshot | null = null;
+      try {
+        runtimeSnapshot = await adapter.refreshSession(snapshot.runtimeSnapshot, controller);
+      } catch {
+        await adapter.disposeRuntimeSessionForProfile(
+          snapshot.runtimeSnapshot?.profile?.id,
+          controller,
+        ).catch(() => undefined);
+        runtimeSnapshot = null;
+      }
+      if (!runtimeSnapshot) {
+        setState((current) => routeToLandingAfterSignerExit(current, null));
+        return;
+      }
       setState((current) => ({
         ...current,
         profiles:

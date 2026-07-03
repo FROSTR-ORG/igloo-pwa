@@ -238,18 +238,21 @@ export function normalizeLoadedStateFromStorage(): PwaPersistedState {
 
   // The selected profile is per-tab session state but the profile list is
   // global: another tab may have deleted the device this tab had selected.
-  // Drop a dangling selection and bounce off the dashboard.
+  // Drop a dangling selection.
   if (
     normalized.selectedProfileId &&
     !normalized.profiles.some((profile) => profile.id === normalized.selectedProfileId)
   ) {
     normalized.selectedProfileId = '';
   }
-  if (
-    normalized.activeView === 'dashboard' &&
-    (!normalized.profiles.length || !normalized.selectedProfileId)
-  ) {
+
+  if (normalized.activeView === 'dashboard') {
+    // The browser signer runtime, reconstructed share, and unlock passphrase
+    // are intentionally in-memory only. A persisted dashboard route cannot
+    // resume after reload, so return to the welcome surface and let the user
+    // unlock the profile again instead of stranding them on a stopped signer.
     normalized.activeView = 'landing';
+    normalized.activeDashboardTab = 'signer';
   }
 
   if (loadedActiveView === 'onboard-confirm') {

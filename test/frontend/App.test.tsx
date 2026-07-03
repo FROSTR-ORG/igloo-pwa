@@ -14,7 +14,7 @@ import {
 import { __setInstanceIdForTests } from '@/lib/instance';
 import { CRITICAL_E2E_TEST_IDS } from 'igloo-ui';
 import { toPersistableGlobal, toPersistableSession } from '@/lib/persist-allowlist';
-import type { PwaPersistedState, PwaProfile } from '@/lib/types';
+import type { PwaPersistedState, PwaProfile, PwaRuntimeSnapshot } from '@/lib/types';
 import { StoreProvider, useStore } from '@/lib/store';
 
 /**
@@ -51,6 +51,35 @@ function renderApp() {
   cleanup();
   window.localStorage.clear();
   return render(<App />);
+}
+
+function activeSnapshot(profile: PwaProfile): PwaRuntimeSnapshot {
+  return {
+    active: true,
+    profile,
+    runtime_status: null,
+    readiness: null,
+    peer_permission_states: [],
+    runtime_log_lines: [],
+    runtime_host: null,
+  };
+}
+
+function mockSuccessfulSignerStart() {
+  return vi.spyOn(adapter, 'startSession').mockImplementation(async (profile) => activeSnapshot(profile));
+}
+
+async function unlockReturningProfileToSettings(password = 'device-passphrase') {
+  fireEvent.click(screen.getByTestId(CRITICAL_E2E_TEST_IDS.welcomeProfileUnlock));
+  fireEvent.change(screen.getByTestId(CRITICAL_E2E_TEST_IDS.welcomeUnlockPassword), {
+    target: { value: password },
+  });
+  fireEvent.click(screen.getByTestId(CRITICAL_E2E_TEST_IDS.welcomeUnlockSubmit));
+
+  await waitFor(() => {
+    expect(screen.getByTestId(CRITICAL_E2E_TEST_IDS.dashboardRoot)).toBeInTheDocument();
+  });
+  fireEvent.click(screen.getByTestId(CRITICAL_E2E_TEST_IDS.dashboardTabSettings));
 }
 
 function StoreHarness({ onReady }: { onReady: (store: ReturnType<typeof useStore>) => void }) {
@@ -1003,7 +1032,10 @@ describe('igloo-pwa app shell', () => {
           rotateConnectForm: { packageText: '' },
         },
     });
+    const startSpy = mockSuccessfulSignerStart();
     render(<App />);
+    await unlockReturningProfileToSettings();
+
     const toggle = screen.getByLabelText(/Open signer after import/i) as HTMLInputElement;
     expect(toggle.checked).toBe(true);
     fireEvent.click(toggle);
@@ -1015,9 +1047,10 @@ describe('igloo-pwa app shell', () => {
       },
       { timeout: 2000 },
     );
+    startSpy.mockRestore();
   });
 
-  it('shows the unified settings actions and no reset control', () => {
+  it('shows the unified settings actions and no reset control', async () => {
     cleanup();
     seedPartition({
         profiles: [
@@ -1070,7 +1103,9 @@ describe('igloo-pwa app shell', () => {
         },
     });
 
+    const startSpy = mockSuccessfulSignerStart();
     render(<App />);
+    await unlockReturningProfileToSettings();
 
     expect(screen.getByRole('heading', { name: 'Export Profile' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Export Share' })).toBeInTheDocument();
@@ -1082,6 +1117,7 @@ describe('igloo-pwa app shell', () => {
     expect(screen.getByTestId(CRITICAL_E2E_TEST_IDS.settingsLogout)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /reset browser workspace/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /wipe/i })).not.toBeInTheDocument();
+    startSpy.mockRestore();
   });
 });
 
