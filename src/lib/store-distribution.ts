@@ -228,8 +228,28 @@ export function createDistributionActions({
       const share = snapshot.pendingKeyset?.shares.find((entry) => entry.member_idx === memberIdx);
       if (share && runtimeSnapshot) {
         const distributionValue: PolicyOverrideValue = enabled ? 'allow' : 'deny';
-        runtimeSnapshot = await adapter.applyPeerPolicy(runtimeSnapshot, share.share_public_key, 'request', permission, distributionValue);
-        runtimeSnapshot = await adapter.applyPeerPolicy(runtimeSnapshot, share.share_public_key, 'respond', permission, distributionValue);
+        const requestSnapshot = await adapter.applyPeerPolicy(
+          runtimeSnapshot,
+          share.share_public_key,
+          'request',
+          permission,
+          distributionValue,
+          controller,
+        );
+        if (requestSnapshot) {
+          runtimeSnapshot = requestSnapshot;
+          const respondSnapshot = await adapter.applyPeerPolicy(
+            runtimeSnapshot,
+            share.share_public_key,
+            'respond',
+            permission,
+            distributionValue,
+            controller,
+          );
+          if (respondSnapshot) {
+            runtimeSnapshot = respondSnapshot;
+          }
+        }
       }
 
       setState((current) => ({
@@ -278,7 +298,7 @@ export function createDistributionActions({
     async stopDistributionClient() {
       const snapshot = getState();
       if (!snapshot.runtimeSnapshot?.active) return;
-      const runtimeSnapshot = await adapter.stopSession(snapshot.runtimeSnapshot);
+      const runtimeSnapshot = await adapter.stopSession(snapshot.runtimeSnapshot, controller);
       setState((current) => ({
         ...current,
         profiles:
@@ -301,7 +321,7 @@ export function createDistributionActions({
       let latestSnapshot = snapshot.runtimeSnapshot;
       if (latestSnapshot?.active) {
         try {
-          latestSnapshot = (await adapter.readSession(latestSnapshot)) ?? latestSnapshot;
+          latestSnapshot = (await adapter.readSession(latestSnapshot, controller)) ?? latestSnapshot;
         } catch {
           // Fall back to the last known snapshot if the live read fails.
         }
@@ -311,7 +331,7 @@ export function createDistributionActions({
       // Stop the live runtime session before returning to the lock screen.
       if (snapshot.runtimeSnapshot?.active) {
         try {
-          await adapter.stopSession(snapshot.runtimeSnapshot);
+          await adapter.stopSession(snapshot.runtimeSnapshot, controller);
         } catch {
           // Ignore stop failures while tearing down the setup session.
         }

@@ -193,6 +193,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const [state, setState] = React.useState<PwaPersistedState>(() => normalizeLoadedState());
   const stateRef = React.useRef(state);
   const runtimeSnapshotRef = React.useRef<PwaRuntimeSnapshot | null>(state.runtimeSnapshot);
+  const distributionRestartInFlightRef = React.useRef(false);
   stateRef.current = state;
 
   React.useEffect(() => {
@@ -346,6 +347,98 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       window.clearInterval(interval);
     };
   }, [controller, state.runtimeSnapshot?.active, state.runtimeSnapshot?.profile?.id]);
+
+  const hasPendingKeyset = state.pendingKeyset != null;
+  const hasDistributionSession = state.distributionSession != null;
+
+  React.useEffect(() => {
+    const shouldKeepDistributionClientRunning =
+      state.activeView === 'create-distribute' &&
+      hasPendingKeyset &&
+      hasDistributionSession &&
+      state.selectedProfileId.length > 0 &&
+      state.unlockPassphrase.length > 0 &&
+      !state.runtimeSnapshot?.active;
+
+    if (!shouldKeepDistributionClientRunning || distributionRestartInFlightRef.current) {
+      return;
+    }
+
+    const selectedProfile = stateRef.current.profiles.find(
+      (profile) => profile.id === state.selectedProfileId,
+    );
+    if (!selectedProfile) return;
+
+    let cancelled = false;
+    distributionRestartInFlightRef.current = true;
+
+    void adapter
+      .startSession(selectedProfile, state.unlockPassphrase, controller)
+      .then((runtimeSnapshot) => {
+        if (cancelled) return;
+        setState((current) => {
+          if (
+            current.activeView !== 'create-distribute' ||
+            !current.pendingKeyset ||
+            !current.distributionSession ||
+            current.selectedProfileId !== selectedProfile.id ||
+            current.runtimeSnapshot?.active
+          ) {
+            return current;
+          }
+          return {
+            ...current,
+            profiles:
+              runtimeSnapshot.profile == null
+                ? current.profiles
+                : current.profiles.map((profile) =>
+                    profile.id === selectedProfile.id ? runtimeSnapshot.profile ?? profile : profile,
+                  ),
+            peerPermissionStates:
+              runtimeSnapshot.peer_permission_states ?? current.peerPermissionStates,
+            runtimeWarning: null,
+            runtimeSnapshot,
+          };
+        });
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        setState((current) => {
+          if (
+            current.activeView !== 'create-distribute' ||
+            !current.pendingKeyset ||
+            !current.distributionSession ||
+            current.selectedProfileId !== selectedProfile.id ||
+            current.runtimeSnapshot?.active
+          ) {
+            return current;
+          }
+          return {
+            ...current,
+            runtimeWarning:
+              error instanceof Error ? error.message : 'Failed to restart onboarding client.',
+          };
+        });
+      })
+      .finally(() => {
+        if (!cancelled) {
+          distributionRestartInFlightRef.current = false;
+        }
+      });
+
+    return () => {
+      cancelled = true;
+      distributionRestartInFlightRef.current = false;
+    };
+  }, [
+    controller,
+    state.activeView,
+    hasDistributionSession,
+    hasPendingKeyset,
+    state.runtimeSnapshot?.active,
+    state.selectedProfileId,
+    state.unlockPassphrase,
+  ]);
 
   // Mark a share onboarded when the live runtime serves an onboard response to
   // the matching peer (the real onboard-complete signal from bifrost-rs).
