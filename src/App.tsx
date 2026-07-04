@@ -356,7 +356,7 @@ function AppShell() {
           <LandingView
             profiles={landingProfiles}
             layout={deriveWelcomeReturningLayout(store.profiles.length)}
-            onGenerate={() => store.setActiveView('create-generate')}
+            onGenerate={() => store.startCreateKeyset()}
             onImport={() => store.startLoadImport()}
             onOnboard={() => store.setActiveView('onboard-connect')}
             onUnlock={openWelcomeUnlock}

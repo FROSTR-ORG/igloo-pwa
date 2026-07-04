@@ -4,6 +4,7 @@ import { saveBrowserProfileAndMaybeActivate } from 'igloo-shared';
 import * as adapter from './local-adapter';
 import type { SessionController } from './session-controller';
 import { setDraftFormField, setDraftSecretField } from './store-drafts';
+import { defaultDrafts } from './store-hydrate';
 import type { PwaDraftState, PwaPersistedState, PwaProfile } from './types';
 
 function readProfileGroupName(profile: PwaProfile | null) {
@@ -39,6 +40,7 @@ function isKnownLocalSourcePackage(profile: PwaProfile | null, packageText: stri
 }
 
 export type StoreCreateActions = {
+  startCreateKeyset: () => void;
   updateCreateForm: (field: keyof PwaDraftState['createForm'] | 'privateKey', value: string) => void;
   updateRotationForm: (field: 'sourceProfileId', value: string) => void;
   updateRotationSource: (
@@ -68,6 +70,30 @@ export function createCreateActions({
   setState: Dispatch<SetStateAction<PwaPersistedState>>;
 }): StoreCreateActions {
   return {
+    startCreateKeyset() {
+      controller.discardStagedSession();
+      setState((current) => ({
+        ...current,
+        activeView: 'create-generate',
+        drafts: {
+          ...current.drafts,
+          createForm: {
+            ...current.drafts.createForm,
+            mode: 'new',
+          },
+          rotationForm: {
+            ...defaultDrafts.rotationForm,
+            sources: defaultDrafts.rotationForm.sources.map((source) => ({ ...source })),
+          },
+        },
+        draftSecrets: {
+          ...current.draftSecrets,
+          rotationSources: {},
+          rotateDevicePassphrase: '',
+          rotateDeviceUnlockVerified: false,
+        },
+      }));
+    },
     updateCreateForm(field, value) {
       setState((current) => {
         if (field === 'privateKey') {

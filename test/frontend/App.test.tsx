@@ -65,6 +65,38 @@ function activeSnapshot(profile: PwaProfile): PwaRuntimeSnapshot {
   };
 }
 
+function storedProfile(overrides: Partial<PwaProfile> = {}): PwaProfile {
+  const id = overrides.id ?? '88'.repeat(32);
+  return {
+    id,
+    label: 'Laptop Signer',
+    share_public_key: '44'.repeat(32),
+    group_public_key: '55'.repeat(32),
+    relays: ['wss://relay.primal.net'],
+    group_package_json:
+      '{"group_name":"Laptop Signer","group_pk":"55","threshold":2,"members":[{"idx":0},{"idx":1},{"idx":2}]}',
+    member_idx: 0,
+    source: 'generated',
+    relay_profile: 'browser',
+    group_ref: `browser-profile:${id}:group`,
+    encrypted_profile_ref: `browser-profile:${id}:encrypted-profile`,
+    encrypted_bfshare_artifact: 'bfshare1demo',
+    state_path: `/tmp/igloo-pwa/${id}`,
+    created_at: 1700000000000,
+    profile_string: 'bfprofile1demo',
+    share_string: 'bfshare1demo',
+    signer_settings: {
+      sign_timeout_secs: 30,
+      ping_timeout_secs: 15,
+      request_ttl_secs: 300,
+      state_save_interval_secs: 30,
+      peer_selection_strategy: 'deterministic_sorted',
+    },
+    onboarding_package: null,
+    ...overrides,
+  };
+}
+
 function mockSuccessfulSignerStart() {
   return vi.spyOn(adapter, 'startSession').mockImplementation(async (profile) => activeSnapshot(profile));
 }
@@ -155,6 +187,62 @@ describe('igloo-pwa app shell', () => {
     expect(screen.getByRole('button', { name: 'More actions' })).toBeInTheDocument();
     // NOT the base entry hero.
     expect(screen.queryByRole('heading', { name: 'Generate New Keyset' })).not.toBeInTheDocument();
+  });
+
+  it('routes first-launch Generate Keyset to the new keyset form even after a stale rotate draft', () => {
+    cleanup();
+    seedPartition({
+      activeView: 'landing',
+      drafts: {
+        createForm: { mode: 'rotate', groupName: 'Stale Rotate', threshold: '2', count: '3' },
+        rotationForm: { sourceProfileId: 'stale-profile', sources: [{ packageText: 'bfshare1stale' }] },
+      },
+    });
+
+    render(<App />);
+    fireEvent.click(screen.getByRole('button', { name: 'Generate Keyset' }));
+
+    expect(screen.getByRole('heading', { name: 'Create Keyset' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Collect Shares' })).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Group Name')).toBeInTheDocument();
+  });
+
+  it('routes returning-home Generate Keyset to the new keyset form even after a stale rotate draft', () => {
+    const profile = storedProfile({ id: '77'.repeat(32), label: 'Returning Key' });
+    cleanup();
+    seedPartition({
+      profiles: [profile],
+      selectedProfileId: profile.id,
+      activeView: 'landing',
+      drafts: {
+        createForm: { mode: 'rotate', groupName: 'Stale Rotate', threshold: '2', count: '3' },
+        rotationForm: { sourceProfileId: profile.id, sources: [{ packageText: 'bfshare1stale' }] },
+      },
+    });
+
+    render(<App />);
+    fireEvent.click(screen.getByRole('button', { name: 'Generate Keyset' }));
+
+    expect(screen.getByRole('heading', { name: 'Create Keyset' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Collect Shares' })).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Group Name')).toBeInTheDocument();
+  });
+
+  it('keeps the returning profile Rotate action on the Collect Shares route', () => {
+    const profile = storedProfile({ id: '66'.repeat(32), label: 'Rotatable Key' });
+    cleanup();
+    seedPartition({
+      profiles: [profile],
+      selectedProfileId: profile.id,
+      activeView: 'landing',
+    });
+
+    render(<App />);
+    fireEvent.click(screen.getByRole('button', { name: 'More actions' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Rotate' }));
+
+    expect(screen.getByRole('heading', { name: 'Collect Shares' })).toBeInTheDocument();
+    expect(screen.getByText('Validate & Continue')).toBeInTheDocument();
   });
 
   it('unlock surfaces the real error instead of always blaming the password', async () => {

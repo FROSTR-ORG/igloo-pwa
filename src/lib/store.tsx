@@ -51,6 +51,7 @@ type AppState = PwaPersistedState & {
   setUnlockPassphrase: (value: string) => void;
   selectProfile: (profileId: string) => void;
   loadStoredProfile: (profileId: string, passphrase: string) => Promise<void>;
+  startCreateKeyset: () => void;
   updateCreateForm: (field: keyof PwaDraftState['createForm'] | 'privateKey', value: string) => void;
   updateRotationForm: (field: 'sourceProfileId', value: string) => void;
   updateRotationSource: (
